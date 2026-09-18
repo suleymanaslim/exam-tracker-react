@@ -10,6 +10,7 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import { useAdminStore } from '../lib/adminStore'
 import { defaultVocabularyText } from '../lib/defaultVocabulary'
+import { useSettingsStore } from '../lib/settingsStore'
 
 interface Exam { id: string; name: string; color: string; exam_date: string | null; wrong_penalty: number | null; point_per_net: number }
 interface Subject { id: string; exam_id: string; name: string }
@@ -63,6 +64,7 @@ export default function Settings() {
   const [generating, setGenerating] = useState(false)
   const [exportWeekOffset, setExportWeekOffset] = useState(0) // 0 = bu hafta, -1 = geçen hafta, ...
   const [seedDone, setSeedDone] = useState(false)
+  const { offDay, setOffDay } = useSettingsStore()
   
   // YKS Vocabulary Edit State
   const [vocabText, setVocabText] = useState('')
@@ -322,11 +324,24 @@ export default function Settings() {
     let planItems: any[] = []
     if (plan) { const { data } = await supabase.from('plan_items').select('*, subjects(name), resources(name)').eq('weekly_plan_id', plan.id); planItems = data ?? [] }
     const { data: sessions } = await supabase.from('study_sessions').select('*, subjects(name), resources(name)').eq('user_id', userId).gte('started_at', monday.toISOString()).lte('started_at', sunday.toISOString())
+    
+    // Fetch practice exams for the week
+    const { data: examsData } = await supabase.from('exam_results').select('*, exams(name)').eq('user_id', userId).gte('created_at', monday.toISOString()).lte('created_at', sunday.toISOString())
+    
     const totalPlanned = planItems.reduce((s: number, i: any) => s + i.planned_minutes, 0)
     const totalCompleted = (sessions ?? []).reduce((s: number, i: any) => s + i.duration_minutes, 0)
+    
+    let denemeDurumu = "Bu hafta deneme çözülmedi"
+    if (examsData && examsData.length > 0) {
+      denemeDurumu = examsData.map(e => `${e.exams?.name || 'Sınav'}: ${e.total_correct}D ${e.total_incorrect}Y ${e.total_net}Net (${e.total_score ? e.total_score + ' Puan' : ''})`).join(' | ')
+    }
+
     const report = {
-      hafta: weekStart, toplam_planlanan_dk: totalPlanned, toplam_calisan_dk: totalCompleted,
+      hafta: weekStart, 
+      toplam_planlanan_dk: totalPlanned, 
+      toplam_calisan_dk: totalCompleted,
       gerceklesme_orani: totalPlanned > 0 ? Math.round((totalCompleted / totalPlanned) * 100) : 0,
+      deneme_sinavi_durumu: denemeDurumu,
       plan_maddeleri: planItems.map(i => ({ gun: i.day_of_week, ders: i.subjects?.name ?? '-', kaynak: i.resources?.name ?? '-', planlanan_dk: i.planned_minutes })),
       calisma_kayitlari: (sessions ?? []).map(s => ({ ders: s.subjects?.name ?? '-', kaynak: s.resources?.name ?? '-', tur: s.session_type, sure_dk: s.duration_minutes, tarih: s.started_at })),
     }
@@ -642,6 +657,25 @@ export default function Settings() {
                     </div>
                   </>
                 )}
+              </div>
+              <div className="mt-4 p-4 rounded-xl border border-[#e2e8f0] bg-white space-y-4">
+                <h3 className="text-sm font-bold text-[#0f172a] mb-2">Genel Ayarlar</h3>
+                <div>
+                  <label className="text-xs font-semibold text-[#64748b] uppercase">Off Day (Dinlenme Günü)</label>
+                  <select
+                    value={offDay}
+                    onChange={(e) => setOffDay(Number(e.target.value))}
+                    className="mt-1 w-full rounded-lg border border-[#e2e8f0] px-3 py-2 text-sm focus:border-[#2563eb] focus:ring-1 focus:ring-[#2563eb] outline-none"
+                  >
+                    <option value={1}>Pazartesi</option>
+                    <option value={2}>Salı</option>
+                    <option value={3}>Çarşamba</option>
+                    <option value={4}>Perşembe</option>
+                    <option value={5}>Cuma</option>
+                    <option value={6}>Cumartesi</option>
+                    <option value={7}>Pazar</option>
+                  </select>
+                </div>
               </div>
             </div>
           </div>

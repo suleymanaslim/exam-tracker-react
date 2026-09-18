@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import {
   Calendar, Plus, Trash2, Copy, ChevronLeft, ChevronRight, Clock,
@@ -7,6 +7,7 @@ import {
 import Swal from 'sweetalert2'
 import type { LucideIcon } from 'lucide-react'
 import { useAdminStore } from '../lib/adminStore'
+import { useSettingsStore } from '../lib/settingsStore'
 
 /* ── Tipler ── */
 interface Exam { id: string; name: string; color: string }
@@ -52,6 +53,7 @@ export default function Plan() {
   const [resources, setResources] = useState<Resource[]>([])
   const [planId, setPlanId] = useState<string | null>(null)
   const [items, setItems] = useState<PlanItem[]>([])
+  const { offDay } = useSettingsStore()
   const [selectedDay, setSelectedDay] = useState(() => {
     const today = new Date().getDay()
     return today === 0 ? 7 : today // 1=Pzt ... 7=Paz
@@ -136,7 +138,7 @@ export default function Plan() {
 
   // Add item
   const handleAdd = async () => {
-    if (!planId || !userId || selectedDay === 7) return
+    if (!planId || !userId || selectedDay === offDay) return
     setSaving(true)
     const { data } = await supabase.from('plan_items').insert({
       user_id: userId,
@@ -310,15 +312,15 @@ export default function Plan() {
         {dayShort.map((d, i) => {
           const dayNum = i + 1
           const count = items.filter(it => it.day_of_week === dayNum).length
-          const isSunday = dayNum === 7
+          const isOffDay = dayNum === offDay
           const isActive = selectedDay === dayNum
           return (
             <button
               key={d}
               onClick={() => setSelectedDay(dayNum)}
-              disabled={isSunday}
+              disabled={isOffDay}
               className={`min-w-[64px] flex-1 rounded-lg py-2 text-center transition-all font-medium flex flex-col items-center justify-center ${
-                isSunday
+                isOffDay
                   ? 'bg-red-50 text-red-300 cursor-not-allowed border border-red-100'
                   : isActive
                     ? 'bg-[#0a1628] text-white shadow-md'
@@ -326,7 +328,7 @@ export default function Plan() {
               }`}
             >
               <div className="text-[12px]">{d}</div>
-              {isSunday ? (
+              {isOffDay ? (
                 <div className="text-[9px] mt-0.5">OFF</div>
               ) : (
                 <div className="text-[9px] mt-0.5 opacity-70">{count} görev</div>
@@ -341,7 +343,7 @@ export default function Plan() {
         <div className="rounded-lg border border-[#e2e8f0] bg-white overflow-hidden">
           <div className="flex items-center justify-between border-b border-[#e2e8f0] px-4 py-3">
             <h3 className="text-[13px] font-bold text-[#0f172a]">
-              {dayNames[selectedDay - 1]} {selectedDay === 7 && '(OFF)'}
+              {dayNames[selectedDay - 1]} {selectedDay === offDay && '(OFF)'}
             </h3>
             <span className="text-[11px] font-medium text-[#64748b] flex items-center gap-1">
               <Clock className="h-3 w-3" />
@@ -349,10 +351,10 @@ export default function Plan() {
             </span>
           </div>
           <div className="p-3 space-y-2">
-            {selectedDay === 7 ? (
+            {selectedDay === offDay ? (
               <div className="flex flex-col items-center justify-center py-10 text-[#94a3b8] text-[13px]">
                 <Calendar className="h-8 w-8 mb-2 opacity-40" />
-                Pazar günü dinlenme günü 😴
+                {dayNames[offDay - 1]} günü dinlenme günü 😴
               </div>
             ) : dayItems.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-10 text-[#94a3b8] text-[13px]">
@@ -396,7 +398,7 @@ export default function Plan() {
         <div className="lg:col-span-3 rounded-lg border border-[#e2e8f0] bg-white flex flex-col overflow-hidden min-h-[300px] lg:min-h-0">
           <div className="flex items-center justify-between border-b border-[#e2e8f0] px-4 py-2 shrink-0">
             <h3 className="text-[12px] font-bold text-[#0f172a]">
-              {dayNames[selectedDay - 1]} {selectedDay === 7 && '(OFF)'}
+              {dayNames[selectedDay - 1]} {selectedDay === offDay && '(OFF)'}
             </h3>
             <span className="text-[10px] font-medium text-[#64748b] flex items-center gap-1">
               <Clock className="h-3 w-3" />
@@ -404,10 +406,10 @@ export default function Plan() {
             </span>
           </div>
           <div className="flex-1 overflow-y-auto p-3 space-y-2">
-            {selectedDay === 7 ? (
+            {selectedDay === offDay ? (
               <div className="flex flex-col items-center justify-center h-full text-[#94a3b8] text-[13px]">
                 <Calendar className="h-8 w-8 mb-2 opacity-40" />
-                Pazar günü dinlenme günü 😴
+                {dayNames[offDay - 1]} günü dinlenme günü 😴
               </div>
             ) : dayItems.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-[#94a3b8] text-[13px]">
@@ -455,8 +457,8 @@ export default function Plan() {
             </h3>
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
-            {selectedDay === 7 ? (
-              <div className="flex items-center justify-center h-full text-[13px] text-[#94a3b8]">Pazar günü OFF</div>
+            {selectedDay === offDay ? (
+              <div className="flex items-center justify-center h-full text-[13px] text-[#94a3b8]">{dayNames[offDay - 1]} günü OFF</div>
             ) : (
               <>
                 {/* Sınav */}

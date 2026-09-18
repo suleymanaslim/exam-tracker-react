@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
@@ -414,13 +414,22 @@ export default function Dashboard() {
     const sunday = new Date(monday); sunday.setDate(sunday.getDate() + 6); sunday.setHours(23, 59, 59)
     const { data: sessions } = await supabase.from('study_sessions').select('*, subjects(name), resources(name)').eq('user_id', user.id).gte('started_at', monday.toISOString()).lte('started_at', sunday.toISOString())
 
+    const { data: examsData } = await supabase.from('exam_results').select('*, exams(name)').eq('user_id', user.id).gte('created_at', monday.toISOString()).lte('created_at', sunday.toISOString())
+
     const totalPlanned = planItems.reduce((s: number, i: any) => s + i.planned_minutes, 0)
     const totalCompleted = (sessions ?? []).reduce((s: number, i: any) => s + i.duration_minutes, 0)
+    
+    let denemeDurumu = "Bu hafta deneme çözülmedi"
+    if (examsData && examsData.length > 0) {
+      denemeDurumu = examsData.map(e => `${e.exams?.name || 'Sınav'}: ${e.total_correct}D ${e.total_incorrect}Y ${e.total_net}Net (${e.total_score ? e.total_score + ' Puan' : ''})`).join(' | ')
+    }
+
     const report = {
       hafta: weekStart,
       toplam_planlanan_dk: totalPlanned,
       toplam_calisan_dk: totalCompleted,
       gerceklesme_orani: totalPlanned > 0 ? Math.round((totalCompleted / totalPlanned) * 100) : 0,
+      deneme_sinavi_durumu: denemeDurumu,
       plan_maddeleri: planItems.map(i => ({ gun: i.day_of_week, ders: i.subjects?.name ?? '-', kaynak: i.resources?.name ?? '-', planlanan_dk: i.planned_minutes })),
       calisma_kayitlari: (sessions ?? []).map(s => ({ ders: s.subjects?.name ?? '-', kaynak: s.resources?.name ?? '-', tur: s.session_type, sure_dk: s.duration_minutes, tarih: s.started_at })),
     }
@@ -436,6 +445,7 @@ export default function Dashboard() {
         w.document.write(`<html><head><title>Haftalık Rapor - ${weekStart}</title><style>body{font-family:Inter,sans-serif;padding:40px;color:#0f172a}h1{font-size:20px}table{width:100%;border-collapse:collapse;margin-top:16px}th,td{border:1px solid #e2e8f0;padding:8px;text-align:left;font-size:13px}th{background:#f8fafc;font-weight:bold}.stat{display:inline-block;margin-right:32px}</style></head><body>`)
         w.document.write(`<h1>📊 Haftalık Rapor — ${weekStart}</h1>`)
         w.document.write(`<div style="margin:16px 0"><span class="stat"><b>Toplam Planlanan:</b> ${Math.floor(totalPlanned / 60)}sa ${totalPlanned % 60}dk</span><span class="stat"><b>Toplam Çalışılan:</b> ${Math.floor(totalCompleted / 60)}sa ${totalCompleted % 60}dk</span><span class="stat"><b>Gerçekleşme:</b> %${report.gerceklesme_orani}</span></div>`)
+        w.document.write(`<div style="margin:16px 0; padding:12px; background:#f0f9ff; border-radius:8px;"><b>🎯 Deneme Sınavları:</b> ${denemeDurumu}</div>`)
         w.document.write(`<h2>Çalışma Kayıtları</h2><table><tr><th>Ders</th><th>Kaynak</th><th>Tür</th><th>Süre</th><th>Tarih</th></tr>`)
         report.calisma_kayitlari.forEach(s => {
           const date = new Date(s.tarih).toLocaleDateString('tr-TR')
