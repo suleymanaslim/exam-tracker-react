@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { supabase } from '../lib/supabase'
-import { Trash2, Calendar as CalendarIcon, Download, Clock, Image as ImageIcon, Settings } from 'lucide-react'
+import { Plus, Trash2, Calendar as CalendarIcon, Download, Clock, Image as ImageIcon, Settings } from 'lucide-react'
 import Swal from 'sweetalert2'
 import html2canvas from 'html2canvas'
 import { useAdminStore } from '../lib/adminStore'
@@ -10,6 +10,7 @@ interface VideoPlanItem { id: string; resource_id: string; date: string; video_c
 
 export default function VideoPlan() {
   const [userId, setUserId] = useState<string | null>(null)
+  const [allResources, setAllResources] = useState<Resource[]>([])
   const [resources, setResources] = useState<Resource[]>([])
   const [planItems, setPlanItems] = useState<VideoPlanItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -54,7 +55,7 @@ export default function VideoPlan() {
   const loadData = async (uid: string) => {
     setLoading(true)
     const [resData, planData, subjectsData] = await Promise.all([
-      supabase.from('resources').select('*').eq('user_id', uid).eq('resource_type', 'video_ders'),
+      supabase.from('resources').select('*').eq('user_id', uid),
       supabase.from('video_plan_items').select('*').eq('user_id', uid),
       supabase.from('subjects').select('id, name').eq('user_id', uid)
     ])
@@ -64,7 +65,8 @@ export default function VideoPlan() {
         ...r,
         subject_name: subjectsData.data.find(s => s.id === r.subject_id)?.name || 'Bilinmeyen Ders'
       }))
-      setResources(merged)
+      setAllResources(merged)
+      setResources(merged.filter(r => r.resource_type === 'video_ders'))
     }
     if (planData.data) setPlanItems(planData.data)
     setLoading(false)
@@ -124,7 +126,71 @@ export default function VideoPlan() {
     const a = parseInt(editAvg) || 0
     await supabase.from('resources').update({ total_videos: t, avg_video_duration: a }).eq('id', editingRes.id)
     setResources(prev => prev.map(r => r.id === editingRes.id ? { ...r, total_videos: t, avg_video_duration: a } : r))
+    setAllResources(prev => prev.map(r => r.id === editingRes.id ? { ...r, total_videos: t, avg_video_duration: a } : r))
     setEditingRes(null)
+  }
+
+  const handleAddResourceToPlan = async () => {
+    const otherResources = allResources.filter(r => r.resource_type !== 'video_ders')
+    
+    if (otherResources.length === 0) {
+      Swal.fire('Bilgi', 'Listeye eklenebilecek başka bir kaynağınız bulunmuyor.', 'info')
+      return
+    }
+
+    const optionsHtml = otherResources.map(r => `<option value="${r.id}">${r.subject_name} - ${r.name}</option>`).join('')
+    
+    const { value: resId } = await Swal.fire({
+      title: 'Video Planına Kaynak Ekle',
+      html: `<select id="resource-select" class="swal2-select" style="width:100%; font-size:14px; padding: 8px;">
+              <option value="" disabled selected>Bir kaynak seçin...</option>
+              ${optionsHtml}
+             </select>`,
+      focusConfirm: false,
+      showCancelButton: true,
+      confirmButtonText: 'Ekle',
+      cancelButtonText: 'İptal',
+      preConfirm: () => {
+        const val = (document.getElementById('resource-select') as HTMLSelectElement).value
+        if (!val) Swal.showValidationMessage('Lütfen bir kaynak seçin.')
+        return val
+      }
+    })
+
+    if (resId) {
+      // Prompt for total videos and avg duration immediately
+      const { value: details } = await Swal.fire({
+        title: 'Video Bilgileri',
+        html: `
+          <input id="swal-tot" class="swal2-input" placeholder="Toplam Video Sayısı (Örn: 50)" type="number" min="1">
+          <input id="swal-avg" class="swal2-input" placeholder="Ortalama Süre (Dk) (Örn: 30)" type="number" min="1">
+        `,
+        focusConfirm: false,
+        showCancelButton: true,
+        confirmButtonText: 'Kaydet',
+        cancelButtonText: 'Geç',
+        preConfirm: () => {
+          return {
+            tot: parseInt((document.getElementById('swal-tot') as HTMLInputElement).value) || 0,
+            avg: parseInt((document.getElementById('swal-avg') as HTMLInputElement).value) || 0
+          }
+        }
+      })
+
+      const tot = details?.tot || 0
+      const avg = details?.avg || 0
+
+      await supabase.from('resources').update({ resource_type: 'video_ders', total_videos: tot, avg_video_duration: avg }).eq('id', resId)
+      
+      const updatedRes = allResources.find(r => r.id === resId)
+      if (updatedRes) {
+        const newRes = { ...updatedRes, resource_type: 'video_ders', total_videos: tot, avg_video_duration: avg }
+        setResources(prev => [...prev, newRes])
+        setAllResources(prev => prev.map(r => r.id === resId ? newRes : r))
+      }
+      
+      Swal.fire('Eklendi', 'Kaynak başarıyla video plan listesine eklendi.', 'success')
+    }
   }
 
   // Exports
@@ -185,9 +251,14 @@ export default function VideoPlan() {
       <div className="flex flex-col lg:flex-row gap-4 h-full min-h-0 overflow-hidden">
         {/* Sol Menü: Kaynaklar */}
         <div className="w-full lg:w-80 bg-white border border-[#e2e8f0] rounded-xl flex flex-col shrink-0 min-h-[300px] lg:min-h-0 overflow-hidden">
-          <div className="p-4 border-b border-[#e2e8f0] bg-[#f8fafc]">
-            <h2 className="text-[13px] font-bold text-[#0f172a] uppercase tracking-wider">Video Ders Kaynakları</h2>
-            <p className="text-[11px] text-[#64748b] mt-1">Takvime eklemek için önce bir kaynağa tıklayın.</p>
+          <div className="p-4 border-b border-[#e2e8f0] bg-[#f8fafc] flex justify-between items-start">
+            <div>
+              <h2 className="text-[13px] font-bold text-[#0f172a] uppercase tracking-wider">Video Dersler</h2>
+              <p className="text-[10px] text-[#64748b] mt-1">Takvime eklemek için tıklayın.</p>
+            </div>
+            <button onClick={handleAddResourceToPlan} title="Mevcut kaynaklardan ekle" className="h-7 w-7 flex items-center justify-center bg-blue-100 text-blue-600 rounded hover:bg-blue-200 transition-all">
+              <Plus className="h-4 w-4" />
+            </button>
           </div>
           <div className="flex-1 overflow-y-auto p-3 space-y-2">
             {resources.length === 0 ? (
