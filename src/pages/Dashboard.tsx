@@ -414,14 +414,37 @@ export default function Dashboard() {
     const sunday = new Date(monday); sunday.setDate(sunday.getDate() + 6); sunday.setHours(23, 59, 59)
     const { data: sessions } = await supabase.from('study_sessions').select('*, subjects(name), resources(name)').eq('user_id', user.id).gte('started_at', monday.toISOString()).lte('started_at', sunday.toISOString())
 
-    const { data: examsData } = await supabase.from('exam_results').select('*, exams(name)').eq('user_id', user.id).gte('created_at', monday.toISOString()).lte('created_at', sunday.toISOString())
+    const { data: examsData } = await supabase.from('exam_results').select('*, exams(name, wrong_penalty, point_per_net)').eq('user_id', user.id).gte('created_at', monday.toISOString()).lte('created_at', sunday.toISOString())
+    
+    let detailsData: any[] = []
+    if (examsData && examsData.length > 0) {
+      const resultIds = examsData.map(e => e.id)
+      const { data: dData } = await supabase.from('exam_result_details').select('*').in('result_id', resultIds)
+      detailsData = dData || []
+    }
 
     const totalPlanned = planItems.reduce((s: number, i: any) => s + i.planned_minutes, 0)
     const totalCompleted = (sessions ?? []).reduce((s: number, i: any) => s + i.duration_minutes, 0)
     
     let denemeDurumu = "Bu hafta deneme çözülmedi"
     if (examsData && examsData.length > 0) {
-      denemeDurumu = examsData.map(e => `${e.exams?.name || 'Sınav'}: ${e.total_correct}D ${e.total_incorrect}Y ${e.total_net}Net (${e.total_score ? e.total_score + ' Puan' : ''})`).join(' | ')
+      denemeDurumu = examsData.map(e => {
+        const details = detailsData.filter(d => d.result_id === e.id)
+        let correct = 0
+        let incorrect = 0
+        details.forEach(d => { correct += d.correct_count; incorrect += d.incorrect_count })
+        
+        let net = correct
+        const penalty = e.exams?.wrong_penalty
+        if (penalty && penalty > 0) {
+          net = correct - (incorrect / penalty)
+        }
+        net = Math.max(0, parseFloat(net.toFixed(2)))
+        let points = net * (e.exams?.point_per_net || 1)
+        points = Math.max(0, parseFloat(points.toFixed(2)))
+        
+        return `${e.exams?.name || 'Sınav'}: ${correct}D ${incorrect}Y ${net}Net (${points} Puan)`
+      }).join(' | ')
     }
 
     const report = {
