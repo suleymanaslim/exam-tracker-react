@@ -35,6 +35,13 @@ export default function VideoPlan() {
     return new Date(d.setDate(diff))
   })
 
+  // Format date to local YYYY-MM-DD
+  const localDateStr = (d: Date) => {
+    const offset = d.getTimezoneOffset()
+    const adjusted = new Date(d.getTime() - (offset*60*1000))
+    return adjusted.toISOString().split('T')[0]
+  }
+
   // Generating 35 days (5 weeks)
   const days = Array.from({ length: 35 }).map((_, i) => {
     const d = new Date(startDate)
@@ -79,7 +86,7 @@ export default function VideoPlan() {
       return
     }
 
-    const dateStr = dateObj.toISOString().split('T')[0]
+    const dateStr = localDateStr(dateObj)
     const res = resources.find(r => r.id === selectedResId)
     if (!res) return
 
@@ -229,7 +236,7 @@ export default function VideoPlan() {
 
   const exportJSON = () => {
     const report = {
-      olusturulma_tarihi: new Date().toISOString(),
+      olusturulma_tarihi: new Date().toLocaleString('tr-TR'),
       planlar: planItems.map(p => {
         const res = resources.find(r => r.id === p.resource_id)
         return {
@@ -370,17 +377,17 @@ export default function VideoPlan() {
               {/* 35 Günlük Grid */}
               <div className="grid grid-cols-7 gap-2 flex-1 auto-rows-fr">
                 {days.map((d) => {
-                  const dateStr = d.toISOString().split('T')[0]
+                  const dateStr = localDateStr(d)
                   const dayItems = planItems.filter(p => p.date === dateStr)
                   
                   // Calculate total time for the day
                   let totalMinutes = 0
                   dayItems.forEach(item => {
-                    const res = resources.find(r => r.id === item.resource_id)
+                    const res = allResources.find(r => r.id === item.resource_id)
                     if (res) totalMinutes += (item.video_count * (res.avg_video_duration || 0))
                   })
 
-                  const isToday = dateStr === new Date().toISOString().split('T')[0]
+                  const isToday = dateStr === localDateStr(new Date())
 
                   return (
                     <div 
