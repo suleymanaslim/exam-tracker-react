@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { supabase } from '../lib/supabase'
-import { Plus, Trash2, Calendar as CalendarIcon, Download, Clock, Image as ImageIcon, Settings } from 'lucide-react'
+import { Plus, Trash2, Calendar as CalendarIcon, Download, Clock, Image as ImageIcon, Settings, EyeOff } from 'lucide-react'
 import Swal from 'sweetalert2'
 import html2canvas from 'html2canvas'
 import { useAdminStore } from '../lib/adminStore'
@@ -193,6 +193,25 @@ export default function VideoPlan() {
     }
   }
 
+  const handleHideResource = async (res: Resource) => {
+    const confirm = await Swal.fire({
+      title: 'Listeden Çıkar',
+      text: `"${res.name}" adlı kaynağı bu listeden gizlemek istiyor musunuz? Takvime önceden eklediğiniz veriler silinmez.`,
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonText: 'Evet, Gizle',
+      cancelButtonText: 'İptal'
+    })
+
+    if (confirm.isConfirmed) {
+      // Revert type to 'diger' so it disappears from 'video_ders' list
+      await supabase.from('resources').update({ resource_type: 'diger' }).eq('id', res.id)
+      setResources(prev => prev.filter(r => r.id !== res.id))
+      setAllResources(prev => prev.map(r => r.id === res.id ? { ...r, resource_type: 'diger' } : r))
+      if (selectedResId === res.id) setSelectedResId(null)
+    }
+  }
+
   // Exports
   const exportImage = async () => {
     if (!calendarRef.current) return
@@ -283,9 +302,14 @@ export default function VideoPlan() {
                         <span className="text-[10px] font-bold bg-[#e2e8f0] text-[#475569] px-2 py-0.5 rounded-full">{res.subject_name}</span>
                         <h3 className="text-[13px] font-bold text-[#0f172a] mt-1.5">{res.name}</h3>
                       </div>
-                      <button onClick={(e) => { e.stopPropagation(); handleEditResource(res); }} className="p-1 hover:bg-[#e2e8f0] rounded text-[#64748b]">
-                        <Settings className="h-3.5 w-3.5" />
-                      </button>
+                      <div className="flex items-center gap-0.5">
+                        <button onClick={(e) => { e.stopPropagation(); handleHideResource(res); }} title="Listeden Çıkar" className="p-1 hover:bg-red-100 rounded text-[#64748b] hover:text-red-500 transition-all">
+                          <EyeOff className="h-3.5 w-3.5" />
+                        </button>
+                        <button onClick={(e) => { e.stopPropagation(); handleEditResource(res); }} title="Düzenle" className="p-1 hover:bg-[#e2e8f0] rounded text-[#64748b] transition-all">
+                          <Settings className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </div>
 
                     {editingRes?.id === res.id ? (
