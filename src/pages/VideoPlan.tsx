@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { supabase } from '../lib/supabase'
-import { Plus, Trash2, Calendar as CalendarIcon, Download, Clock, Image as ImageIcon, Settings, EyeOff } from 'lucide-react'
+import { Plus, Trash2, Calendar as CalendarIcon, Download, Clock, Image as ImageIcon, Settings, EyeOff, SkipForward } from 'lucide-react'
 import Swal from 'sweetalert2'
 import html2canvas from 'html2canvas'
 import { useAdminStore } from '../lib/adminStore'
@@ -118,6 +118,52 @@ export default function VideoPlan() {
     if (confirm.isConfirmed) {
       await supabase.from('video_plan_items').delete().eq('id', id)
       setPlanItems(prev => prev.filter(i => i.id !== id))
+    }
+  }
+
+  const handleShiftPlan = async (e: React.MouseEvent, dateStr: string) => {
+    e.stopPropagation()
+    const confirm = await Swal.fire({
+      title: 'Planı Kaydır',
+      text: 'Bu tarihten (dahil) sonraki tüm video planlarınızı 1 gün ileri kaydırmak istiyor musunuz? (Acil durumlarda programı atlatmak için)',
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'Evet, Kaydır',
+      cancelButtonText: 'İptal'
+    })
+
+    if (confirm.isConfirmed && userId) {
+      const itemsToShift = planItems.filter(p => p.date >= dateStr)
+      if (itemsToShift.length === 0) {
+        Swal.fire('Bilgi', 'Kaydırılacak plan bulunamadı.', 'info')
+        return
+      }
+
+      setLoading(true)
+      const updatedItems = itemsToShift.map(item => {
+        const d = new Date(item.date)
+        d.setDate(d.getDate() + 1)
+        return {
+          id: item.id,
+          user_id: userId,
+          resource_id: item.resource_id,
+          video_count: item.video_count,
+          date: localDateStr(d)
+        }
+      })
+      
+      const { error } = await supabase.from('video_plan_items').upsert(updatedItems)
+
+      if (!error) {
+        setPlanItems(prev => prev.map(p => {
+          const updated = updatedItems.find(u => u.id === p.id)
+          return updated ? { ...p, date: updated.date } : p
+        }))
+        Swal.fire('Başarılı', 'Program 1 gün ileri kaydırıldı.', 'success')
+      } else {
+        Swal.fire('Hata', 'İşlem başarısız.', 'error')
+      }
+      setLoading(false)
     }
   }
 
@@ -395,15 +441,20 @@ export default function VideoPlan() {
                       onClick={() => handleDayClick(d)}
                       className={`border rounded-lg p-2 flex flex-col transition-all cursor-pointer hover:border-[#2563eb] ${isToday ? 'border-[#2563eb] bg-blue-50/30' : 'border-[#e2e8f0] bg-white'}`}
                     >
-                      <div className="flex justify-between items-start mb-2">
+                      <div className="flex justify-between items-start mb-2 group/header">
                         <span className={`text-[12px] font-bold ${isToday ? 'text-[#2563eb] bg-blue-100 rounded-full px-2' : 'text-[#0f172a]'}`}>
                           {d.getDate()} {d.toLocaleDateString('tr-TR', { month: 'short' })}
                         </span>
-                        {totalMinutes > 0 && (
-                          <span className="text-[10px] font-semibold text-[#64748b] bg-[#f1f5f9] px-1.5 py-0.5 rounded">
-                            {Math.floor(totalMinutes / 60) > 0 ? `${Math.floor(totalMinutes / 60)}s ` : ''}{totalMinutes % 60}dk
-                          </span>
-                        )}
+                        <div className="flex items-center gap-1">
+                          <button onClick={(e) => handleShiftPlan(e, dateStr)} title="Bu gün ve sonrasını 1 gün ertele" className="opacity-0 group-hover/header:opacity-100 text-[#94a3b8] hover:text-[#2563eb] p-0.5 transition-all">
+                            <SkipForward className="h-3.5 w-3.5" />
+                          </button>
+                          {totalMinutes > 0 && (
+                            <span className="text-[10px] font-semibold text-[#64748b] bg-[#f1f5f9] px-1.5 py-0.5 rounded">
+                              {Math.floor(totalMinutes / 60) > 0 ? `${Math.floor(totalMinutes / 60)}s ` : ''}{totalMinutes % 60}dk
+                            </span>
+                          )}
+                        </div>
                       </div>
                       
                       <div className="flex-1 overflow-y-auto space-y-1.5 pr-1">
