@@ -14,7 +14,7 @@ import { useSettingsStore } from '../lib/settingsStore'
 
 interface Exam { id: string; name: string; color: string; exam_date: string | null; wrong_penalty: number | null; point_per_net: number }
 interface Subject { id: string; exam_id: string; name: string }
-interface Resource { id: string; subject_id: string; name: string; author: string | null; publisher: string | null; resource_type: string; url: string | null }
+interface Resource { id: string; subject_id: string; name: string; author: string | null; publisher: string | null; resource_type: string; url: string | null; total_videos: number; avg_video_duration: number }
 interface PomodoroSettings { id: string; long_focus_minutes: number; long_break_minutes: number; short_focus_minutes: number; short_break_minutes: number }
 interface QuestionType { id: string; exam_id: string; name: string; sort_order: number; question_count: number }
 
@@ -51,6 +51,8 @@ export default function Settings() {
   const [addResSubject, setAddResSubject] = useState('')
   const [addResAuthor, setAddResAuthor] = useState('')
   const [addResPublisher, setAddResPublisher] = useState('')
+  const [addResTotalVideos, setAddResTotalVideos] = useState('')
+  const [addResAvgDuration, setAddResAvgDuration] = useState('')
 
   // Edit
   const [editId, setEditId] = useState<string | null>(null)
@@ -191,9 +193,11 @@ export default function Settings() {
     const { data } = await supabase.from('resources').insert({
       user_id: userId, subject_id: addResSubject, name: addResName.trim(),
       resource_type: addResType, author: addResAuthor || null, publisher: addResPublisher || null,
+      total_videos: addResType === 'video_ders' ? (parseInt(addResTotalVideos) || 0) : 0,
+      avg_video_duration: addResType === 'video_ders' ? (parseInt(addResAvgDuration) || 0) : 0
     }).select().single()
     if (data) setResources(prev => [...prev, data])
-    setAddResName(''); setAddResAuthor(''); setAddResPublisher('')
+    setAddResName(''); setAddResAuthor(''); setAddResPublisher(''); setAddResTotalVideos(''); setAddResAvgDuration('')
   }
 
   const deleteResource = async (id: string) => {
@@ -575,6 +579,20 @@ export default function Settings() {
                           <Plus className="h-3 w-3" /> Ekle
                         </button>
                       </div>
+                      {addResType === 'video_ders' && (
+                        <div className="grid grid-cols-2 gap-2 mt-2 p-2 bg-[#f8fafc] border border-[#e2e8f0] rounded-lg">
+                          <div>
+                            <label className="text-[10px] font-semibold text-[#64748b] block mb-1">Toplam Video Sayısı</label>
+                            <input type="number" min="0" value={addResTotalVideos} onChange={e => setAddResTotalVideos(e.target.value)} placeholder="Örn: 50"
+                              className="w-full h-8 rounded border border-[#e2e8f0] px-2 text-[11px] focus:outline-none focus:ring-1 focus:ring-[#2563eb]/30" />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-semibold text-[#64748b] block mb-1">Ortalama Süre (Dk)</label>
+                            <input type="number" min="0" value={addResAvgDuration} onChange={e => setAddResAvgDuration(e.target.value)} placeholder="Örn: 35"
+                              className="w-full h-8 rounded border border-[#e2e8f0] px-2 text-[11px] focus:outline-none focus:ring-1 focus:ring-[#2563eb]/30" />
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </>
                 )

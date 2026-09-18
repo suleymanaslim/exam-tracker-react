@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import {
   LayoutDashboard, Calendar, Timer, History,
   BarChart3, Settings, LogOut, GraduationCap,
-  BookMarked, ChevronRight, Award
+  BookMarked, ChevronRight, Award, PlayCircle
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useTimerStore } from '../lib/timerStore'
@@ -17,6 +17,7 @@ const navItems = [
   { href: '/topics',    label: 'Konular',        icon: BookMarked },
   { href: '/history',   label: 'Geçmiş',        icon: History },
   { href: '/results',   label: 'Denemeler',      icon: Award },
+  { href: '/videos',    label: 'Video Planı',    icon: PlayCircle },
   { href: '/stats',     label: 'İstatistikler',  icon: BarChart3 },
   { href: '/settings',  label: 'Ayarlar',        icon: Settings },
 ]
@@ -26,6 +27,7 @@ const mobileNavItems = [
   { href: '/',          label: 'Ana Sayfa',     icon: LayoutDashboard },
   { href: '/study',     label: 'Çalış',         icon: Timer },
   { href: '/results',   label: 'Denemeler',     icon: Award },
+  { href: '/videos',    label: 'Videolar',      icon: PlayCircle },
   { href: '/stats',     label: 'İstatistik',    icon: BarChart3 },
   { href: '/settings',  label: 'Ayarlar',       icon: Settings },
 ]
