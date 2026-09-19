@@ -194,12 +194,41 @@ export default function Dashboard() {
 
       // Haftalık plan
       const mondayStr = localDateStr(monday)
-      supabase.from('weekly_plans').select('id').eq('user_id', targetUid).eq('week_start_date', mondayStr).single().then(wp => {
-        if (wp.data) {
-          supabase.from('plan_items').select('*').eq('weekly_plan_id', wp.data.id).then(pi => {
-            if (pi.data) setWeekPlanItems(pi.data)
-          })
+      const weekDates = Array.from({ length: 7 }).map((_, i) => {
+        const d = new Date(monday)
+        d.setDate(d.getDate() + i)
+        return localDateStr(d)
+      })
+
+      Promise.all([
+        supabase.from('weekly_plans').select('id').eq('user_id', targetUid).eq('week_start_date', mondayStr).single(),
+        supabase.from('video_plan_items').select('*, resources(subject_id, avg_video_duration)').eq('user_id', targetUid).in('date', weekDates)
+      ]).then(async ([wpRes, vpiRes]) => {
+        let items: any[] = []
+        if (wpRes.data) {
+          const { data: pi } = await supabase.from('plan_items').select('*').eq('weekly_plan_id', wpRes.data.id)
+          if (pi) items = [...items, ...pi]
         }
+        if (vpiRes.data) {
+          const vpis = vpiRes.data.map((v: any) => {
+            const dateObj = new Date(v.date)
+            const dayOfWeek = dateObj.getDay() === 0 ? 7 : dateObj.getDay()
+            const res = v.resources || {}
+            return {
+              id: 'vpi_' + v.id,
+              weekly_plan_id: 'video',
+              day_of_week: dayOfWeek,
+              subject_id: res.subject_id || null,
+              resource_id: v.resource_id,
+              title: `${v.video_count} Video`,
+              planned_minutes: v.video_count * (res.avg_video_duration || 0),
+              sort_order: -1,
+              isVideo: true
+            }
+          })
+          items = [...items, ...vpis]
+        }
+        setWeekPlanItems(items)
       })
 
       // ── Streak hesaplama ─────────────────────────────────────────

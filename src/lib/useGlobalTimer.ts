@@ -45,7 +45,7 @@ export function useGlobalTimer() {
     setPhase,
   } = useTimerStore()
 
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
   // Focus süresi referansı — mola sonrası geri dönmek için
   const focusTotalRef = useRef(totalSeconds)
   useEffect(() => { if (phase === 'focus' && totalSeconds > 0) focusTotalRef.current = totalSeconds }, [phase, totalSeconds])
@@ -125,10 +125,36 @@ export function useGlobalTimer() {
     }
   }, [phase, mode, breakSeconds, setIsRunning, setSecondsLeft, setTotalSeconds, setDeadlineEpoch, setStartedAt, setPhase, saveSession])
 
-  // ── Tick: deadline-based so bg throttle doesn't matter ─────────────
+  // ── Tick: deadline-based with Web Worker for background reliability ─
+  const workerRef = useRef<Worker | null>(null)
+
+  useEffect(() => {
+    // Worker oluştur (sadece bir kez)
+    if (!workerRef.current) {
+      const workerCode = `
+        let timer = null;
+        self.onmessage = (e) => {
+          if (e.data === 'start') {
+            if (timer) clearInterval(timer);
+            timer = setInterval(() => self.postMessage('tick'), 500);
+          } else if (e.data === 'stop') {
+            if (timer) clearInterval(timer);
+          }
+        };
+      `;
+      const blob = new Blob([workerCode], { type: 'application/javascript' });
+      workerRef.current = new Worker(URL.createObjectURL(blob));
+    }
+
+    return () => {
+      workerRef.current?.terminate();
+      workerRef.current = null;
+    }
+  }, []);
+
   useEffect(() => {
     if (!isRunning || deadlineEpoch === null) {
-      if (intervalRef.current) clearInterval(intervalRef.current)
+      workerRef.current?.postMessage('stop');
       return
     }
 
@@ -146,14 +172,28 @@ export function useGlobalTimer() {
       }
 
       if (remaining <= 0) {
-        clearInterval(intervalRef.current!)
+        workerRef.current?.postMessage('stop');
         handleEnd(totalSeconds, startedAt)
       }
     }
 
+    // İlk tick manuel
     tick()
-    intervalRef.current = setInterval(tick, 500)
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
+
+    // Worker ile tick tetikle
+    if (workerRef.current) {
+      workerRef.current.onmessage = () => {
+        tick();
+      };
+      workerRef.current.postMessage('start');
+    }
+
+    return () => {
+      workerRef.current?.postMessage('stop');
+      if (workerRef.current) {
+        workerRef.current.onmessage = null;
+      }
+    }
   }, [isRunning, deadlineEpoch]) // intentionally minimal deps
 
   // ── Restore title when not running ─────────────────────────────────

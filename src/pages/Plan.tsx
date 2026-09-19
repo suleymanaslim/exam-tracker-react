@@ -53,6 +53,7 @@ export default function Plan() {
   const [resources, setResources] = useState<Resource[]>([])
   const [planId, setPlanId] = useState<string | null>(null)
   const [items, setItems] = useState<PlanItem[]>([])
+  const [videoItems, setVideoItems] = useState<any[]>([])
   const { offDay } = useSettingsStore()
   const [selectedDay, setSelectedDay] = useState(() => {
     const today = new Date().getDay()
@@ -95,29 +96,71 @@ export default function Plan() {
   useEffect(() => {
     if (!userId) return
     const ws = formatDate(weekStart)
-    supabase
-      .from('weekly_plans')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('week_start_date', ws)
-      .single()
-      .then(async ({ data }) => {
-        if (data) {
-          setPlanId(data.id)
-          const { data: pi } = await supabase.from('plan_items').select('*').eq('weekly_plan_id', data.id).order('sort_order')
-          setItems(pi ?? [])
-        } else {
-          // Plan yok, oluştur
-          const { data: np } = await supabase.from('weekly_plans').insert({ user_id: userId, week_start_date: ws }).select().single()
-          if (np) { setPlanId(np.id); setItems([]) }
-        }
-      })
+    
+    // Calculate week dates
+    const weekDates = Array.from({ length: 7 }).map((_, i) => {
+      const d = new Date(weekStart)
+      d.setDate(d.getDate() + i)
+      return formatDate(d)
+    })
+
+    const loadPlan = async () => {
+      // 1. Haftalık plan ve normal plan maddeleri
+      const { data } = await supabase
+        .from('weekly_plans')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('week_start_date', ws)
+        .single()
+        
+      if (data) {
+        setPlanId(data.id)
+        const { data: pi } = await supabase.from('plan_items').select('*').eq('weekly_plan_id', data.id).order('sort_order')
+        setItems(pi ?? [])
+      } else {
+        const { data: np } = await supabase.from('weekly_plans').insert({ user_id: userId, week_start_date: ws }).select().single()
+        if (np) { setPlanId(np.id); setItems([]) }
+      }
+
+      // 2. Video plan maddeleri
+      const { data: vpi } = await supabase
+        .from('video_plan_items')
+        .select('*')
+        .eq('user_id', userId)
+        .in('date', weekDates)
+      setVideoItems(vpi ?? [])
+    }
+    loadPlan()
   }, [userId, weekStart])
 
   // Filtered selects
   const filteredSubjects = subjects.filter(s => s.exam_id === selExam)
   const filteredResources = resources.filter(r => r.subject_id === selSubject)
-  const dayItems = items.filter(i => i.day_of_week === selectedDay)
+
+  const selectedDateStr = useMemo(() => {
+    const d = new Date(weekStart)
+    d.setDate(d.getDate() + (selectedDay - 1))
+    return formatDate(d)
+  }, [weekStart, selectedDay])
+
+  const dayVideoItems = videoItems.filter(v => v.date === selectedDateStr).map(v => {
+    const res = resources.find((r: any) => r.id === v.resource_id) as any
+    return {
+      id: 'vpi_' + v.id,
+      weekly_plan_id: 'video',
+      day_of_week: selectedDay,
+      subject_id: res?.subject_id || null,
+      resource_id: v.resource_id,
+      title: `${v.video_count} Video (Video Planı)`,
+      planned_minutes: v.video_count * (res?.avg_video_duration || 0),
+      sort_order: -1,
+      isVideo: true,
+      originalId: v.id
+    }
+  })
+
+  const regularDayItems = items.filter(i => i.day_of_week === selectedDay)
+  const dayItems = [...dayVideoItems, ...regularDayItems]
   const dayTotalMin = dayItems.reduce((s, i) => s + i.planned_minutes, 0)
 
   // Subject -> Exam lookup
@@ -156,7 +199,7 @@ export default function Plan() {
   }
 
   // Delete item
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (id: string, isVideo?: boolean) => {
     const res = await Swal.fire({
       title: 'Planı Sil',
       text: 'Bu plan maddesini silmek istediğinize emin misiniz?',
@@ -169,8 +212,14 @@ export default function Plan() {
     })
     if (!res.isConfirmed) return
     
-    await supabase.from('plan_items').delete().eq('id', id)
-    setItems(prev => prev.filter(i => i.id !== id))
+    if (isVideo || id.startsWith('vpi_')) {
+      const originalId = id.replace('vpi_', '')
+      await supabase.from('video_plan_items').delete().eq('id', originalId)
+      setVideoItems(prev => prev.filter(i => i.id !== originalId))
+    } else {
+      await supabase.from('plan_items').delete().eq('id', id)
+      setItems(prev => prev.filter(i => i.id !== id))
+    }
   }
 
   // Copy last week
