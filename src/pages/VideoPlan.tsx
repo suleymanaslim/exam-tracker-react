@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import {
   Plus, Trash2, Calendar as CalendarIcon, Download, Clock,
   Image as ImageIcon, Settings, EyeOff, SkipForward, X,
-  ChevronLeft, ChevronRight, PlayCircle, GripVertical
+  ChevronLeft, ChevronRight, PlayCircle, GripVertical, CheckSquare
 } from 'lucide-react'
 import Swal from 'sweetalert2'
 import html2canvas from 'html2canvas'
@@ -80,6 +80,10 @@ export default function VideoPlan() {
   const [editTotal, setEditTotal] = useState('')
   const [editAvg, setEditAvg] = useState('')
 
+  /* progress */
+  const [showProgressModal, setShowProgressModal] = useState(false)
+  const [watchedProgress, setWatchedProgress] = useState<Record<string, number>>({})
+
   /* selection */
   const [selectedResId, setSelectedResId] = useState<string | null>(null)
 
@@ -109,6 +113,13 @@ export default function VideoPlan() {
 
   const loadData = async (uid: string) => {
     setLoading(true)
+    
+    // Load local progress
+    try {
+      const saved = localStorage.getItem(`vid_prog_${uid}`)
+      if (saved) setWatchedProgress(JSON.parse(saved))
+    } catch (e) {}
+
     const [resR, planR, subR] = await Promise.all([
       supabase.from('resources').select('*').eq('user_id', uid),
       supabase.from('video_plan_items').select('*').eq('user_id', uid),
@@ -291,13 +302,35 @@ export default function VideoPlan() {
     if (!calendarRef.current) return
     try {
       const el = calendarRef.current
-      const ov = el.style.overflow; const ht = el.style.height
-      el.style.overflow = 'visible'; el.style.height = 'auto'
-      await new Promise(r => setTimeout(r, 150))
-      const canvas = await html2canvas(el, { scale: 2, backgroundColor: '#ffffff', useCORS: true })
-      el.style.overflow = ov; el.style.height = ht
-      const link = document.createElement('a'); link.download = 'video_plani.png'; link.href = canvas.toDataURL('image/png'); link.click()
-    } catch { Swal.fire('Hata', 'Görsel oluşturulamadı.', 'error') }
+      const origOv = el.style.overflow
+      const origH = el.style.height
+      const origMaxH = el.style.maxHeight
+      
+      el.style.overflow = 'visible'
+      el.style.height = 'max-content'
+      el.style.maxHeight = 'none'
+
+      await new Promise(r => setTimeout(r, 200))
+      const canvas = await html2canvas(el, { 
+        scale: 2, 
+        backgroundColor: '#ffffff', 
+        useCORS: true,
+        windowWidth: el.scrollWidth + 100,
+        windowHeight: el.scrollHeight + 100
+      })
+      
+      el.style.overflow = origOv
+      el.style.height = origH
+      el.style.maxHeight = origMaxH
+
+      const link = document.createElement('a')
+      link.download = 'video_plani.png'
+      link.href = canvas.toDataURL('image/png')
+      link.click()
+    } catch (e) {
+      console.error(e)
+      Swal.fire('Hata', 'Görsel oluşturulamadı.', 'error')
+    }
   }
 
   const exportJSON = () => {
@@ -310,6 +343,13 @@ export default function VideoPlan() {
     }
     const b = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
     const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = 'video_plani.json'; a.click(); URL.revokeObjectURL(u)
+  }
+
+  const updateWatchedProgress = (resId: string, count: number) => {
+    if (!userId) return
+    const newProg = { ...watchedProgress, [resId]: count }
+    setWatchedProgress(newProg)
+    localStorage.setItem(`vid_prog_${userId}`, JSON.stringify(newProg))
   }
 
   /* navigate */
@@ -370,6 +410,10 @@ export default function VideoPlan() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={() => setShowProgressModal(true)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-indigo-50 text-indigo-700 text-xs font-bold hover:bg-indigo-100 transition-all active:scale-[.97] shadow-sm">
+            <CheckSquare className="h-4 w-4" /> İlerleme Gir
+          </button>
+          <div className="w-px h-6 bg-slate-200 mx-1"></div>
           <button onClick={exportImage} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-600 text-xs font-medium hover:bg-slate-50 hover:border-slate-300 transition-all active:scale-[.97]">
             <ImageIcon className="h-3.5 w-3.5" /> PNG
           </button>
@@ -540,7 +584,7 @@ export default function VideoPlan() {
 
               {/* 5 rows × 7 cols */}
               {[0, 1, 2, 3, 4].map(week => (
-                <div key={week} className="grid grid-cols-7 gap-1.5 flex-1">
+                <div key={week} className="grid grid-cols-7 gap-1.5 mb-1.5">
                   {days.slice(week * 7, week * 7 + 7).map(d => {
                     const ds = localDateStr(d)
                     const dItems = planItems.filter(p => p.date === ds)
@@ -565,7 +609,7 @@ export default function VideoPlan() {
                         onDragLeave={() => { if (dragOverDate === ds) setDragOverDate(null) }}
                         onDrop={e => { e.preventDefault(); const src = e.dataTransfer.getData('text/plain'); if (src) handleSwapDays(src, ds) }}
                         className={`
-                          rounded-xl p-2 flex flex-col transition-all duration-200 cursor-pointer min-h-[100px] relative group
+                          rounded-xl p-2 flex flex-col transition-all duration-200 cursor-pointer relative group
                           ${isToday ? 'ring-2 ring-blue-500 bg-blue-50/30' : ''}
                           ${isDragSrc ? 'opacity-40 scale-[.97] ring-2 ring-blue-300' : ''}
                           ${isDragOver ? 'ring-2 ring-blue-500 bg-blue-50 scale-[1.02] shadow-lg' : ''}
@@ -574,7 +618,7 @@ export default function VideoPlan() {
                         `}
                       >
                         {/* Day header */}
-                        <div className="flex items-center justify-between mb-1.5">
+                        <div className="flex items-center justify-between mb-2 border-b border-slate-100 pb-1.5">
                           <div className="flex items-center gap-1">
                             {dItems.length > 0 && (
                               <GripVertical className="h-3 w-3 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab" />
@@ -582,9 +626,13 @@ export default function VideoPlan() {
                             <span className={`text-[11px] font-bold leading-none ${isToday ? 'bg-blue-600 text-white rounded-md px-1.5 py-0.5' : 'text-slate-600'}`}>
                               {d.getDate()}
                             </span>
-                            {isToday && <span className="text-[8px] font-bold text-blue-600 uppercase">Bugün</span>}
                           </div>
-                          <div className="flex items-center gap-0.5">
+                          <div className="flex items-center gap-1">
+                            {totalMin > 0 && (
+                              <span className="text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-md">
+                                {fmtMinutes(totalMin)}
+                              </span>
+                            )}
                             {dItems.length > 0 && (
                               <button onClick={e => handleClearDay(e, ds)} title="Günü temizle"
                                 className="p-0.5 rounded text-slate-300 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-all">
@@ -598,8 +646,8 @@ export default function VideoPlan() {
                           </div>
                         </div>
 
-                        {/* Items */}
-                        <div className="flex-1 space-y-1 overflow-y-auto">
+                        {/* Items - NOT scrollable anymore, they just list down */}
+                        <div className="flex flex-col gap-1.5 flex-1">
                           {dItems.map(item => {
                             const r = resources.find(x => x.id === item.resource_id)
                             const col = r ? hashColor(r.subject_id) : PALETTE[0]
@@ -607,13 +655,13 @@ export default function VideoPlan() {
                               <div
                                 key={item.id}
                                 className="rounded-lg px-2 py-1.5 group/item relative transition-all hover:shadow-sm"
-                                style={{ backgroundColor: col.card, borderLeft: `3px solid ${col.accent}` }}
+                                style={{ backgroundColor: col.card }}
                               >
                                 <p className="text-[9px] font-bold truncate leading-tight" style={{ color: col.text }}>
                                   {cleanName(r?.subject_name || '')}
                                 </p>
                                 <p className="text-[10px] font-extrabold truncate leading-tight mt-0.5" style={{ color: col.dot }}>
-                                  {cleanName(r?.name || '?')} · {item.video_count}
+                                  {cleanName(r?.name || '?')} · {item.video_count} Vid
                                 </p>
                                 <button
                                   onClick={e => handleDeleteItem(e, item.id)}
@@ -625,13 +673,6 @@ export default function VideoPlan() {
                             )
                           })}
                         </div>
-
-                        {/* Day footer — total time */}
-                        {totalMin > 0 && (
-                          <div className="mt-1.5 pt-1 border-t border-slate-100">
-                            <span className="text-[9px] font-bold text-slate-400">{fmtMinutes(totalMin)}</span>
-                          </div>
-                        )}
                       </div>
                     )
                   })}
@@ -641,6 +682,102 @@ export default function VideoPlan() {
           </div>
         </div>
       </div>
+
+      {/* ═══ PROGRESS MODAL ═══ */}
+      <AnimatePresence>
+        {showProgressModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[85vh]"
+            >
+              <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-xl bg-indigo-100 flex items-center justify-center text-indigo-600">
+                    <CheckSquare className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-[15px] font-bold text-slate-800">Haftalık Video Takibi</h2>
+                    <p className="text-[11px] text-slate-500">Defterinizdeki izleme sayılarını buraya girin.</p>
+                  </div>
+                </div>
+                <button onClick={() => setShowProgressModal(false)} className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-slate-200 text-slate-500 transition-colors">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                {resources.length === 0 ? (
+                  <div className="text-center py-8 text-sm text-slate-500">Kayıtlı video kaynağınız bulunmuyor.</div>
+                ) : (
+                  resources.map(res => {
+                    const col = hashColor(res.subject_id)
+                    const total = res.total_videos || 0
+                    const watched = watchedProgress[res.id] || 0
+                    const remaining = Math.max(0, total - watched)
+                    
+                    return (
+                      <div key={res.id} className="border border-slate-200 rounded-xl p-3 bg-white hover:border-slate-300 transition-colors">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div className="flex items-start gap-2.5 flex-1 min-w-0">
+                            <div className="h-8 w-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5" style={{ backgroundColor: col.bg }}>
+                              <PlayCircle className="h-4 w-4" style={{ color: col.dot }} />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <span className="text-[10px] font-bold uppercase tracking-wide" style={{ color: col.text }}>
+                                {cleanName(res.subject_name || '')}
+                              </span>
+                              <h3 className="text-[13px] font-bold text-slate-800 truncate leading-tight mt-0.5">
+                                {cleanName(res.name)}
+                              </h3>
+                              <div className="flex items-center gap-2 mt-1">
+                                <span className="text-[10px] text-slate-500 font-medium">Toplam: {total}</span>
+                                <span className="text-[10px] text-slate-300">•</span>
+                                <span className="text-[10px] font-bold" style={{ color: remaining === 0 ? '#059669' : col.dot }}>
+                                  Kalan: {remaining}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                          
+                          <div className="flex items-center gap-2 shrink-0 bg-slate-50 p-1.5 rounded-lg border border-slate-100">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase">İzlenen</span>
+                            <div className="flex items-center">
+                              <input 
+                                type="number" 
+                                min="0" 
+                                max={total}
+                                value={watched || ''} 
+                                onChange={e => {
+                                  const val = parseInt(e.target.value)
+                                  updateWatchedProgress(res.id, isNaN(val) ? 0 : val)
+                                }}
+                                className="w-14 h-8 text-center text-sm font-bold bg-white border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                        
+                        <div className="mt-3 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                          <div className="h-full rounded-full transition-all duration-300" style={{ width: `${total > 0 ? Math.min(100, (watched / total) * 100) : 0}%`, backgroundColor: remaining === 0 ? '#059669' : col.accent }} />
+                        </div>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+              
+              <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end">
+                <button onClick={() => setShowProgressModal(false)} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg shadow-sm active:scale-95 transition-all">
+                  Kapat
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
