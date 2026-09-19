@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import {
   Plus, Trash2, Calendar as CalendarIcon, Download, Clock,
   Image as ImageIcon, Settings, EyeOff, SkipForward, X,
-  ChevronLeft, ChevronRight, PlayCircle, GripVertical, CheckSquare
+  ChevronLeft, ChevronRight, PlayCircle, GripVertical, CheckSquare, Check
 } from 'lucide-react'
 import Swal from 'sweetalert2'
 import html2canvas from 'html2canvas'
@@ -16,7 +16,8 @@ interface Resource {
   total_videos: number; avg_video_duration: number; subject_name?: string
 }
 interface VideoPlanItem {
-  id: string; resource_id: string; date: string; video_count: number
+  id: string; resource_id: string; date: string; video_count: number;
+  watched_count?: number; is_completed?: boolean;
 }
 
 /* ─────────────── Color Palette ─────────────── */
@@ -81,9 +82,7 @@ export default function VideoPlan() {
   const [editAvg, setEditAvg] = useState('')
 
   /* progress */
-  const [showProgressModal, setShowProgressModal] = useState(false)
-  const [watchedProgress, setWatchedProgress] = useState<Record<string, number>>({})
-
+    
   /* selection */
   const [selectedResId, setSelectedResId] = useState<string | null>(null)
 
@@ -114,12 +113,7 @@ export default function VideoPlan() {
   const loadData = async (uid: string) => {
     setLoading(true)
     
-    // Load local progress
-    try {
-      const saved = localStorage.getItem(`vid_prog_${uid}`)
-      if (saved) setWatchedProgress(JSON.parse(saved))
-    } catch (e) {}
-
+    
     const [resR, planR, subR] = await Promise.all([
       supabase.from('resources').select('*').eq('user_id', uid),
       supabase.from('video_plan_items').select('*').eq('user_id', uid),
@@ -243,6 +237,71 @@ export default function VideoPlan() {
     setLoading(false)
   }
 
+
+  const handleProgressClick = async (item: VideoPlanItem, res: Resource | undefined) => {
+    if (!userId || !res) return
+    const current = item.watched_count || 0
+    
+    const html = `
+      <div class="flex flex-col gap-2 text-left mt-2">
+        <label class="text-xs font-bold text-slate-500 uppercase">İzlenen Video Sayısı</label>
+        <div class="flex items-center gap-2">
+          <input type="number" id="watch-input" class="swal2-input !m-0 !w-full" value="${current}" min="0" max="${item.video_count}">
+          <span class="text-sm font-bold text-slate-400 whitespace-nowrap">/ ${item.video_count}</span>
+        </div>
+      </div>
+    `
+
+    const c = await Swal.fire({
+      title: 'İlerleme Kaydet',
+      html,
+      showCancelButton: true,
+      showDenyButton: true,
+      confirmButtonText: 'Kaydet',
+      denyButtonText: 'Tümünü İzledim',
+      cancelButtonText: 'İptal',
+      confirmButtonColor: '#2563eb',
+      denyButtonColor: '#10b981',
+      preConfirm: () => {
+        const val = parseInt((document.getElementById('watch-input') as HTMLInputElement).value)
+        return isNaN(val) ? 0 : val
+      }
+    })
+
+    let newVal = current
+    if (c.isConfirmed) newVal = c.value as number
+    else if (c.isDenied) newVal = item.video_count
+    else return
+
+    newVal = Math.min(item.video_count, Math.max(0, newVal))
+
+    setLoading(true)
+    const { error } = await supabase.from('video_plan_items').update({
+      watched_count: newVal,
+      is_completed: newVal >= item.video_count
+    }).eq('id', item.id)
+
+    if (error) {
+      if (error.code === 'PGRST204' || error.message.includes('column')) {
+        Swal.fire({
+          title: 'Veritabanı Güncellemesi Gerekli',
+          html: `İzleme takibini kullanabilmek için veritabanına kolon eklenmeli.<br><br>
+                 Supabase SQL Editor'e girip şunu çalıştırın:<br>
+                 <pre style="text-align:left; background:#f1f5f9; padding:8px; border-radius:4px; font-size:11px; margin-top:10px; overflow-x:auto;">
+ALTER TABLE video_plan_items 
+ADD COLUMN watched_count INT DEFAULT 0,
+ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
+          icon: 'warning'
+        })
+      } else {
+        Swal.fire('Hata', error.message, 'error')
+      }
+    } else {
+      setPlanItems(prev => prev.map(p => p.id === item.id ? { ...p, watched_count: newVal, is_completed: newVal >= item.video_count } : p))
+    }
+    setLoading(false)
+  }
+
   /* resource actions */
   const handleEditResource = (r: Resource) => {
     setEditingRes(r)
@@ -345,10 +404,7 @@ export default function VideoPlan() {
     const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = 'video_plani.json'; a.click(); URL.revokeObjectURL(u)
   }
 
-  const updateWatchedProgress = (resId: string, count: number) => {
-    if (!userId) return
-    const newProg = { ...watchedProgress, [resId]: count }
-    setWatchedProgress(newProg)
+      setWatchedProgress(newProg)
     localStorage.setItem(`vid_prog_${userId}`, JSON.stringify(newProg))
   }
 
@@ -410,10 +466,7 @@ export default function VideoPlan() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => setShowProgressModal(true)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-indigo-50 text-indigo-700 text-xs font-bold hover:bg-indigo-100 transition-all active:scale-[.97] shadow-sm">
-            <CheckSquare className="h-4 w-4" /> İlerleme Gir
-          </button>
-          <div className="w-px h-6 bg-slate-200 mx-1"></div>
+          
           <button onClick={exportImage} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-600 text-xs font-medium hover:bg-slate-50 hover:border-slate-300 transition-all active:scale-[.97]">
             <ImageIcon className="h-3.5 w-3.5" /> PNG
           </button>
@@ -454,10 +507,11 @@ export default function VideoPlan() {
               resources.map(res => {
                 const col = hashColor(res.subject_id)
                 const isSelected = selectedResId === res.id
-                const used = planItems.filter(p => p.resource_id === res.id).reduce((s, p) => s + p.video_count, 0)
+                const watched = planItems.filter(p => p.resource_id === res.id).reduce((s, p) => s + (p.watched_count || 0), 0)
                 const total = res.total_videos || 0
-                const remaining = Math.max(0, total - used)
-                const pct = total > 0 ? Math.min(100, Math.round((used / total) * 100)) : 0
+                const remaining = Math.max(0, total - watched)
+                const remainingMin = remaining * (res.avg_video_duration || 0)
+                const pct = total > 0 ? Math.min(100, Math.round((watched / total) * 100)) : 0
 
                 return (
                   <motion.div
@@ -526,12 +580,14 @@ export default function VideoPlan() {
                             <span className="text-slate-400 flex items-center gap-1">
                               <Clock className="h-3 w-3" /> {res.avg_video_duration || 0} dk/vid
                             </span>
-                            <span className="font-bold" style={{ color: remaining === 0 ? '#059669' : col.text }}>
-                              {remaining === 0 ? '✓ Tamamlandı' : `${remaining} kaldı`}
+                            <span className="font-bold text-right leading-tight" style={{ color: remaining === 0 ? '#059669' : col.text }}>
+                              {remaining === 0 ? '✓ Tamamlandı' : (
+                                <>Kalan: {remaining} Vid<br/><span className="opacity-70 text-[9px]">({fmtMinutes(remainingMin)})</span></>
+                              )}
                             </span>
                           </div>
                           {/* Progress bar */}
-                          <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                          <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden" title={`${watched} / ${total} izlendi`}>
                             <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: pct >= 100 ? '#059669' : col.accent }} />
                           </div>
                         </div>
@@ -593,7 +649,9 @@ export default function VideoPlan() {
                     const isDragOver = dragOverDate === ds && dragSourceDate !== ds
 
                     let totalMin = 0
+                    let totalVid = 0
                     dItems.forEach(p => {
+                      totalVid += p.video_count
                       const r = allResources.find(x => x.id === p.resource_id)
                       totalMin += p.video_count * (r?.avg_video_duration || 0)
                     })
@@ -657,12 +715,36 @@ export default function VideoPlan() {
                                 className="rounded-lg px-2 py-1.5 group/item relative transition-all hover:shadow-sm"
                                 style={{ backgroundColor: col.card }}
                               >
-                                <p className="text-[9px] font-bold truncate leading-tight" style={{ color: col.text }}>
-                                  {cleanName(r?.subject_name || '')}
-                                </p>
-                                <p className="text-[10px] font-extrabold truncate leading-tight mt-0.5" style={{ color: col.dot }}>
-                                  {cleanName(r?.name || '?')} · {item.video_count} Vid
-                                </p>
+                                
+                                <div className="flex items-start justify-between gap-1">
+                                  <div className="min-w-0">
+                                    <p className="text-[9px] font-bold truncate leading-tight" style={{ color: col.text }}>
+                                      {cleanName(r?.subject_name || '')}
+                                    </p>
+                                    <p className="text-[10px] font-extrabold truncate leading-tight mt-0.5" style={{ color: col.dot }}>
+                                      {cleanName(r?.name || '?')} · {item.video_count} Vid
+                                    </p>
+                                  </div>
+                                  <button
+                                    onClick={e => { e.stopPropagation(); handleProgressClick(item, r) }}
+                                    className={`h-5 w-5 rounded flex items-center justify-center shrink-0 transition-all ${
+                                      (item.watched_count || 0) >= item.video_count 
+                                        ? 'bg-emerald-500 text-white' 
+                                        : 'bg-white/60 text-slate-400 hover:bg-emerald-100 hover:text-emerald-600'
+                                    }`}
+                                    title={`İzlenen: ${item.watched_count || 0} / ${item.video_count}`}
+                                  >
+                                    <Check className="h-3 w-3" />
+                                  </button>
+                                </div>
+                                {(item.watched_count || 0) > 0 && (
+                                  <div className="w-full bg-black/5 rounded-full h-1 mt-1.5 overflow-hidden">
+                                    <div 
+                                      className="h-full bg-emerald-500 transition-all" 
+                                      style={{ width: `${Math.min(100, ((item.watched_count || 0) / item.video_count) * 100)}%` }} 
+                                    />
+                                  </div>
+                                )}
                                 <button
                                   onClick={e => handleDeleteItem(e, item.id)}
                                   className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover/item:opacity-100 transition-all shadow-sm hover:bg-red-600 active:scale-90"
@@ -683,101 +765,7 @@ export default function VideoPlan() {
         </div>
       </div>
 
-      {/* ═══ PROGRESS MODAL ═══ */}
-      <AnimatePresence>
-        {showProgressModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 10 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[85vh]"
-            >
-              <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
-                <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-xl bg-indigo-100 flex items-center justify-center text-indigo-600">
-                    <CheckSquare className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <h2 className="text-[15px] font-bold text-slate-800">Haftalık Video Takibi</h2>
-                    <p className="text-[11px] text-slate-500">Defterinizdeki izleme sayılarını buraya girin.</p>
-                  </div>
-                </div>
-                <button onClick={() => setShowProgressModal(false)} className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-slate-200 text-slate-500 transition-colors">
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-
-              <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                {resources.length === 0 ? (
-                  <div className="text-center py-8 text-sm text-slate-500">Kayıtlı video kaynağınız bulunmuyor.</div>
-                ) : (
-                  resources.map(res => {
-                    const col = hashColor(res.subject_id)
-                    const total = res.total_videos || 0
-                    const watched = watchedProgress[res.id] || 0
-                    const remaining = Math.max(0, total - watched)
-                    
-                    return (
-                      <div key={res.id} className="border border-slate-200 rounded-xl p-3 bg-white hover:border-slate-300 transition-colors">
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                          <div className="flex items-start gap-2.5 flex-1 min-w-0">
-                            <div className="h-8 w-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5" style={{ backgroundColor: col.bg }}>
-                              <PlayCircle className="h-4 w-4" style={{ color: col.dot }} />
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <span className="text-[10px] font-bold uppercase tracking-wide" style={{ color: col.text }}>
-                                {cleanName(res.subject_name || '')}
-                              </span>
-                              <h3 className="text-[13px] font-bold text-slate-800 truncate leading-tight mt-0.5">
-                                {cleanName(res.name)}
-                              </h3>
-                              <div className="flex items-center gap-2 mt-1">
-                                <span className="text-[10px] text-slate-500 font-medium">Toplam: {total}</span>
-                                <span className="text-[10px] text-slate-300">•</span>
-                                <span className="text-[10px] font-bold" style={{ color: remaining === 0 ? '#059669' : col.dot }}>
-                                  Kalan: {remaining}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                          
-                          <div className="flex items-center gap-2 shrink-0 bg-slate-50 p-1.5 rounded-lg border border-slate-100">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase">İzlenen</span>
-                            <div className="flex items-center">
-                              <input 
-                                type="number" 
-                                min="0" 
-                                max={total}
-                                value={watched || ''} 
-                                onChange={e => {
-                                  const val = parseInt(e.target.value)
-                                  updateWatchedProgress(res.id, isNaN(val) ? 0 : val)
-                                }}
-                                className="w-14 h-8 text-center text-sm font-bold bg-white border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                              />
-                            </div>
-                          </div>
-                        </div>
-                        
-                        <div className="mt-3 h-1.5 rounded-full bg-slate-100 overflow-hidden">
-                          <div className="h-full rounded-full transition-all duration-300" style={{ width: `${total > 0 ? Math.min(100, (watched / total) * 100) : 0}%`, backgroundColor: remaining === 0 ? '#059669' : col.accent }} />
-                        </div>
-                      </div>
-                    )
-                  })
-                )}
-              </div>
-              
-              <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end">
-                <button onClick={() => setShowProgressModal(false)} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg shadow-sm active:scale-95 transition-all">
-                  Kapat
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      
     </div>
   )
 }
