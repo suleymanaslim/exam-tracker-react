@@ -300,6 +300,53 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
     setLoading(false)
   }
 
+
+  const handleMarkDayWatched = async (e: React.MouseEvent, dateStr: string, dayItems: VideoPlanItem[]) => {
+    e.stopPropagation()
+    if (!userId || !dayItems.length) return
+    const uncompleted = dayItems.filter(i => (i.watched_count || 0) < i.video_count)
+    if (uncompleted.length === 0) {
+      Swal.fire({ title: 'Zaten Tamamlanmış', text: 'Bu gündeki tüm videolar zaten izlendi.', icon: 'info', toast: true, position: 'top-end', showConfirmButton: false, timer: 2000 })
+      return
+    }
+
+    setLoading(true)
+    const batch = dayItems.map(i => ({
+      id: i.id,
+      user_id: userId,
+      resource_id: i.resource_id,
+      date: i.date,
+      video_count: i.video_count,
+      watched_count: i.video_count,
+      is_completed: true
+    }))
+
+    const { error } = await supabase.from('video_plan_items').upsert(batch)
+    if (error) {
+      if (error.code === 'PGRST204' || error.message.includes('column')) {
+        Swal.fire({
+          title: 'Veritabanı Güncellemesi Gerekli',
+          html: `İzleme takibini kullanabilmek için veritabanına kolon eklenmeli.<br><br>
+                 Supabase SQL Editor'e girip şunu çalıştırın:<br>
+                 <pre style="text-align:left; background:#f1f5f9; padding:8px; border-radius:4px; font-size:11px; margin-top:10px; overflow-x:auto;">
+ALTER TABLE video_plan_items 
+ADD COLUMN watched_count INT DEFAULT 0,
+ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
+          icon: 'warning'
+        })
+      } else {
+        Swal.fire('Hata', error.message, 'error')
+      }
+    } else {
+      setPlanItems(prev => prev.map(p => {
+        const u = batch.find(b => b.id === p.id)
+        return u ? { ...p, watched_count: u.watched_count, is_completed: true } : p
+      }))
+      Swal.fire({ icon: 'success', title: 'Tümü işaretlendi', toast: true, position: 'top-end', showConfirmButton: false, timer: 1500 })
+    }
+    setLoading(false)
+  }
+
   /* resource actions */
   const handleEditResource = (r: Resource) => {
     setEditingRes(r)
@@ -670,32 +717,35 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
                         `}
                       >
                         {/* Day header */}
-                        <div className="flex items-center justify-between mb-2 border-b border-slate-100 pb-1.5">
-                          <div className="flex items-center gap-1">
-                            {dItems.length > 0 && (
-                              <GripVertical className="h-3 w-3 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab" />
-                            )}
-                            <span className={`text-[11px] font-bold leading-none ${isToday ? 'bg-blue-600 text-white rounded-md px-1.5 py-0.5' : 'text-slate-600'}`}>
-                              {d.getDate()}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            {totalMin > 0 && (
-                              <span className="text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-md">
-                                {fmtMinutes(totalMin)}
+                        <div className="flex flex-col mb-1.5 border-b border-slate-100 pb-1.5">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-1">
+                              {dItems.length > 0 && (
+                                <GripVertical className="h-3 w-3 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab" />
+                              )}
+                              <span className={`text-[11px] font-bold leading-none ${isToday ? 'bg-blue-600 text-white rounded-md px-1.5 py-0.5' : 'text-slate-600'}`}>
+                                {d.getDate()}
                               </span>
-                            )}
-                            {dItems.length > 0 && (
-                              <button onClick={e => handleClearDay(e, ds)} title="Günü temizle"
-                                className="p-0.5 rounded text-slate-300 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-all">
-                                <Trash2 className="h-3 w-3" />
+                            </div>
+                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                              {dItems.length > 0 && (
+                                <button onClick={e => handleClearDay(e, ds)} title="Günü temizle"
+                                  className="p-0.5 rounded text-slate-300 hover:text-red-500 hover:bg-red-50 transition-all">
+                                  <Trash2 className="h-3 w-3" />
+                                </button>
+                              )}
+                              <button onClick={e => handleShiftPlan(e, ds)} title="Sonrasını 1 gün ertele"
+                                className="p-0.5 rounded text-slate-300 hover:text-blue-600 hover:bg-blue-50 transition-all">
+                                <SkipForward className="h-3 w-3" />
                               </button>
-                            )}
-                            <button onClick={e => handleShiftPlan(e, ds)} title="Sonrasını 1 gün ertele"
-                              className="p-0.5 rounded text-slate-300 hover:text-blue-600 hover:bg-blue-50 opacity-0 group-hover:opacity-100 transition-all">
-                              <SkipForward className="h-3 w-3" />
-                            </button>
+                            </div>
                           </div>
+                          {totalVid > 0 && (
+                            <div className="mt-1 flex items-center justify-between text-[9px]">
+                              <span className="font-bold text-slate-400">Toplam: {totalVid} Vid</span>
+                              <span className="font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded-md">{fmtMinutes(totalMin)}</span>
+                            </div>
+                          )}
                         </div>
 
                         {/* Items - NOT scrollable anymore, they just list down */}
@@ -748,6 +798,15 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
                               </div>
                             )
                           })}
+                          
+                          {dItems.length > 0 && dItems.some(i => (i.watched_count || 0) < i.video_count) && (
+                            <button
+                              onClick={(e) => handleMarkDayWatched(e, ds, dItems)}
+                              className="mt-1 w-full py-1.5 rounded-lg border border-emerald-100 bg-emerald-50/50 hover:bg-emerald-100/50 text-emerald-600 text-[9px] font-bold flex items-center justify-center gap-1 transition-all opacity-0 group-hover:opacity-100"
+                            >
+                              <Check className="h-3 w-3" /> Tümünü İzledim
+                            </button>
+                          )}
                         </div>
                       </div>
                     )

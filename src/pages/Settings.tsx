@@ -708,6 +708,7 @@ export default function Settings() {
                     onChange={(e) => setOffDay(Number(e.target.value))}
                     className="mt-1 w-full rounded-lg border border-[#e2e8f0] px-3 py-2 text-sm focus:border-[#2563eb] focus:ring-1 focus:ring-[#2563eb] outline-none"
                   >
+                    <option value={0}>Yok (Boş gün istemiyorum)</option>
                     <option value={1}>Pazartesi</option>
                     <option value={2}>Salı</option>
                     <option value={3}>Çarşamba</option>
