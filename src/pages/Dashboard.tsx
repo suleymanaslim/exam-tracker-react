@@ -202,7 +202,7 @@ export default function Dashboard() {
 
       Promise.all([
         supabase.from('weekly_plans').select('id').eq('user_id', targetUid).eq('week_start_date', mondayStr).single(),
-        supabase.from('video_plan_items').select('*, resources(subject_id, avg_video_duration)').eq('user_id', targetUid).in('date', weekDates)
+        supabase.from('video_plan_items').select('*, resources(name, subject_id, avg_video_duration, subjects(name))').eq('user_id', targetUid).in('date', weekDates)
       ]).then(async ([wpRes, vpiRes]) => {
         let items: any[] = []
         if (wpRes.data) {
@@ -214,13 +214,16 @@ export default function Dashboard() {
             const dateObj = new Date(v.date)
             const dayOfWeek = dateObj.getDay() === 0 ? 7 : dateObj.getDay()
             const res = v.resources || {}
+            
+            let cleanName = (res?.name || res?.subjects?.name || 'Video').replace(/MEB-AGS|MEB AGS/g, '').trim()
+            
             return {
               id: 'vpi_' + v.id,
               weekly_plan_id: 'video',
               day_of_week: dayOfWeek,
               subject_id: res.subject_id || null,
               resource_id: v.resource_id,
-              title: `${v.video_count} Video`,
+              title: `${cleanName} ${v.video_count}`,
               planned_minutes: v.video_count * (res.avg_video_duration || 0),
               sort_order: -1,
               isVideo: true

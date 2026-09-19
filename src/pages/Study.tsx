@@ -112,12 +112,37 @@ export default function Study() {
         const today = new Date()
         const dayOfWeek = today.getDay() === 0 ? 7 : today.getDay()
         const mondayStr = getMonday(today).toISOString().split('T')[0]
-        supabase.from('weekly_plans').select('id').eq('user_id', targetUid).eq('week_start_date', mondayStr).single().then(wp => {
+        const todayStr = today.toISOString().split('T')[0]
+        
+        Promise.all([
+          supabase.from('weekly_plans').select('id').eq('user_id', targetUid).eq('week_start_date', mondayStr).single(),
+          supabase.from('video_plan_items').select('*, resources(name, subject_id, avg_video_duration, subjects(name))').eq('user_id', targetUid).eq('date', todayStr)
+        ]).then(async ([wp, vpiRes]) => {
+          let items: any[] = []
           if (wp.data) {
-            supabase.from('plan_items').select('*').eq('weekly_plan_id', wp.data.id).eq('day_of_week', dayOfWeek).order('sort_order').then(pi => {
-              if (pi.data) setTodayPlan(pi.data)
-            })
+            const { data: pi } = await supabase.from('plan_items').select('*').eq('weekly_plan_id', wp.data.id).eq('day_of_week', dayOfWeek).order('sort_order')
+            if (pi) items = [...items, ...pi]
           }
+          if (vpiRes.data) {
+            const vpis = vpiRes.data.map(v => {
+              const res = (v as any).resources || {}
+              let cleanName = (res?.name || res?.subjects?.name || 'Video').replace(/MEB-AGS|MEB AGS/g, '').trim()
+              
+              return {
+                id: 'vpi_' + v.id,
+                weekly_plan_id: 'video',
+                day_of_week: dayOfWeek,
+                subject_id: res.subject_id || null,
+                resource_id: v.resource_id,
+                title: `${cleanName} ${v.video_count}`,
+                planned_minutes: v.video_count * (res.avg_video_duration || 0),
+                sort_order: -1,
+                isVideo: true
+              }
+            })
+            items = [...vpis, ...items]
+          }
+          setTodayPlan(items)
         })
 
         loadTodaySessions(user.id)

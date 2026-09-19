@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import {
   Calendar, Plus, Trash2, Copy, ChevronLeft, ChevronRight, Clock,
-  Shield, Globe, BookOpen, Calculator, Target, Database,
+  Shield, Globe, BookOpen, Calculator, Target, Database, PlayCircle
 } from 'lucide-react'
 import Swal from 'sweetalert2'
 import type { LucideIcon } from 'lucide-react'
@@ -145,13 +145,17 @@ export default function Plan() {
 
   const dayVideoItems = videoItems.filter(v => v.date === selectedDateStr).map(v => {
     const res = resources.find((r: any) => r.id === v.resource_id) as any
+    const sub = subjects.find((s: any) => s.id === res?.subject_id) as any
+    
+    let cleanName = (res?.name || sub?.name || 'Video').replace(/MEB-AGS|MEB AGS/g, '').trim()
+    
     return {
       id: 'vpi_' + v.id,
       weekly_plan_id: 'video',
       day_of_week: selectedDay,
       subject_id: res?.subject_id || null,
       resource_id: v.resource_id,
-      title: `${v.video_count} Video (Video Planı)`,
+      title: `${cleanName} ${v.video_count}`,
       planned_minutes: v.video_count * (res?.avg_video_duration || 0),
       sort_order: -1,
       isVideo: true,
@@ -413,12 +417,12 @@ export default function Plan() {
             ) : (
               dayItems.map((item) => {
                 const exam = getExamForSubject(item.subject_id)
-                const ExamIcon = exam ? (examIcons[exam.name] ?? Target) : Target
+                const ExamIcon = (item as any).isVideo ? PlayCircle : (exam ? (examIcons[exam.name] ?? Target) : Target)
                 return (
                   <div key={item.id} className="flex items-center gap-3 rounded-xl border border-[#e2e8f0] p-3">
                     <div
                       className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white"
-                      style={{ backgroundColor: exam?.color ?? '#64748b' }}
+                      style={{ backgroundColor: (item as any).isVideo ? '#ef4444' : (exam?.color ?? '#64748b') }}
                     >
                       <ExamIcon className="h-4 w-4" />
                     </div>
@@ -468,12 +472,12 @@ export default function Plan() {
             ) : (
               dayItems.map((item) => {
                 const exam = getExamForSubject(item.subject_id)
-                const ExamIcon = exam ? (examIcons[exam.name] ?? Target) : Target
+                const ExamIcon = (item as any).isVideo ? PlayCircle : (exam ? (examIcons[exam.name] ?? Target) : Target)
                 return (
                   <div key={item.id} className="flex items-center gap-3 rounded-lg border border-[#e2e8f0] p-3 hover:shadow-sm transition-all group">
                     <div
                       className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white"
-                      style={{ backgroundColor: exam?.color ?? '#64748b' }}
+                      style={{ backgroundColor: (item as any).isVideo ? '#ef4444' : (exam?.color ?? '#64748b') }}
                     >
                       <ExamIcon className="h-4 w-4" />
                     </div>
