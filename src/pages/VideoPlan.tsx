@@ -1,50 +1,94 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
-import { Plus, Trash2, Calendar as CalendarIcon, Download, Clock, Image as ImageIcon, Settings, EyeOff, SkipForward, GripHorizontal } from 'lucide-react'
+import {
+  Plus, Trash2, Calendar as CalendarIcon, Download, Clock,
+  Image as ImageIcon, Settings, EyeOff, SkipForward, X,
+  ChevronLeft, ChevronRight, PlayCircle, GripVertical
+} from 'lucide-react'
 import Swal from 'sweetalert2'
 import html2canvas from 'html2canvas'
 import { useAdminStore } from '../lib/adminStore'
+import { AnimatePresence, motion } from 'framer-motion'
 
-interface Resource { id: string; subject_id: string; name: string; resource_type: string; total_videos: number; avg_video_duration: number; subject_name?: string }
-interface VideoPlanItem { id: string; resource_id: string; date: string; video_count: number }
+/* ─────────────── Types ─────────────── */
+interface Resource {
+  id: string; subject_id: string; name: string; resource_type: string
+  total_videos: number; avg_video_duration: number; subject_name?: string
+}
+interface VideoPlanItem {
+  id: string; resource_id: string; date: string; video_count: number
+}
 
-const COLORS = [
-  { bg: '#eff6ff', text: '#1d4ed8', border: '#bfdbfe' }, // blue
-  { bg: '#ecfdf5', text: '#047857', border: '#a7f3d0' }, // emerald
-  { bg: '#fef3c7', text: '#b45309', border: '#fde68a' }, // amber
-  { bg: '#f5f3ff', text: '#6d28d9', border: '#ddd6fe' }, // violet
-  { bg: '#fff1f2', text: '#be123c', border: '#fecdd3' }, // rose
-  { bg: '#eef2ff', text: '#4338ca', border: '#c7d2fe' }, // indigo
-  { bg: '#f0fdfa', text: '#0f766e', border: '#ccfbf1' }, // teal
+/* ─────────────── Color Palette ─────────────── */
+const PALETTE = [
+  { bg: '#dbeafe', card: '#eff6ff', text: '#1e40af', accent: '#3b82f6', dot: '#2563eb' },
+  { bg: '#d1fae5', card: '#ecfdf5', text: '#065f46', accent: '#10b981', dot: '#059669' },
+  { bg: '#fde68a', card: '#fefce8', text: '#92400e', accent: '#f59e0b', dot: '#d97706' },
+  { bg: '#ddd6fe', card: '#f5f3ff', text: '#5b21b6', accent: '#8b5cf6', dot: '#7c3aed' },
+  { bg: '#fecdd3', card: '#fff1f2', text: '#9f1239', accent: '#f43f5e', dot: '#e11d48' },
+  { bg: '#c7d2fe', card: '#eef2ff', text: '#3730a3', accent: '#6366f1', dot: '#4f46e5' },
+  { bg: '#99f6e4', card: '#f0fdfa', text: '#115e59', accent: '#14b8a6', dot: '#0d9488' },
+  { bg: '#fbcfe8', card: '#fdf2f8', text: '#9d174d', accent: '#ec4899', dot: '#db2777' },
 ]
 
+function hashColor(id: string) {
+  let h = 0
+  for (let i = 0; i < id.length; i++) h = id.charCodeAt(i) + ((h << 5) - h)
+  return PALETTE[Math.abs(h) % PALETTE.length]
+}
+
+function cleanName(n: string) {
+  return (n || '').replace(/MEB[-\s]?AGS/gi, '').trim()
+}
+
+function localDateStr(d: Date) {
+  const offset = d.getTimezoneOffset()
+  const adjusted = new Date(d.getTime() - offset * 60_000)
+  return adjusted.toISOString().split('T')[0]
+}
+
+function getMonday(d: Date) {
+  const date = new Date(d)
+  date.setHours(0, 0, 0, 0)
+  const day = date.getDay()
+  const diff = date.getDate() - day + (day === 0 ? -6 : 1)
+  return new Date(date.setDate(diff))
+}
+
+function fmtMinutes(m: number) {
+  if (m <= 0) return '0dk'
+  const h = Math.floor(m / 60)
+  const r = Math.round(m % 60)
+  if (h > 0 && r > 0) return `${h}sa ${r}dk`
+  if (h > 0) return `${h}sa`
+  return `${r}dk`
+}
+
+/* ─────────────── Component ─────────────── */
 export default function VideoPlan() {
+  const { impersonatedUserId } = useAdminStore()
   const [userId, setUserId] = useState<string | null>(null)
   const [allResources, setAllResources] = useState<Resource[]>([])
   const [resources, setResources] = useState<Resource[]>([])
   const [planItems, setPlanItems] = useState<VideoPlanItem[]>([])
   const [loading, setLoading] = useState(true)
-  const { impersonatedUserId } = useAdminStore()
+
   const calendarRef = useRef<HTMLDivElement>(null)
 
+  /* editing */
   const [editingRes, setEditingRes] = useState<Resource | null>(null)
   const [editTotal, setEditTotal] = useState('')
   const [editAvg, setEditAvg] = useState('')
+
+  /* selection */
   const [selectedResId, setSelectedResId] = useState<string | null>(null)
 
-  const [startDate, setStartDate] = useState(() => {
-    const d = new Date()
-    d.setHours(0,0,0,0)
-    const day = d.getDay()
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1)
-    return new Date(d.setDate(diff))
-  })
+  /* drag */
+  const [dragSourceDate, setDragSourceDate] = useState<string | null>(null)
+  const [dragOverDate, setDragOverDate] = useState<string | null>(null)
 
-  const localDateStr = (d: Date) => {
-    const offset = d.getTimezoneOffset()
-    const adjusted = new Date(d.getTime() - (offset*60*1000))
-    return adjusted.toISOString().split('T')[0]
-  }
+  /* calendar start */
+  const [startDate, setStartDate] = useState(getMonday(new Date()))
 
   const days = Array.from({ length: 35 }).map((_, i) => {
     const d = new Date(startDate)
@@ -52,157 +96,143 @@ export default function VideoPlan() {
     return d
   })
 
+  /* ─── Data ─── */
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (user) {
-        const targetUid = impersonatedUserId || user.id
-        setUserId(targetUid)
-        loadData(targetUid)
+        const uid = impersonatedUserId || user.id
+        setUserId(uid)
+        loadData(uid)
       }
     })
   }, [impersonatedUserId])
 
   const loadData = async (uid: string) => {
     setLoading(true)
-    const [resData, planData, subjectsData] = await Promise.all([
+    const [resR, planR, subR] = await Promise.all([
       supabase.from('resources').select('*').eq('user_id', uid),
       supabase.from('video_plan_items').select('*').eq('user_id', uid),
-      supabase.from('subjects').select('id, name').eq('user_id', uid)
+      supabase.from('subjects').select('id, name').eq('user_id', uid),
     ])
-    
-    if (resData.data && subjectsData.data) {
-      const merged = resData.data.map(r => ({
+    if (resR.data && subR.data) {
+      const merged = resR.data.map(r => ({
         ...r,
-        subject_name: subjectsData.data.find(s => s.id === r.subject_id)?.name || 'Bilinmeyen Ders'
+        subject_name: subR.data.find(s => s.id === r.subject_id)?.name || 'Bilinmeyen Ders',
       }))
       setAllResources(merged)
       setResources(merged.filter(r => r.resource_type === 'video_ders'))
     }
-    if (planData.data) setPlanItems(planData.data)
+    if (planR.data) setPlanItems(planR.data)
     setLoading(false)
   }
 
-  const cleanName = (name: string) => {
-    return (name || '').replace(/MEB-AGS|MEB AGS/g, '').trim()
-  }
-
-  const getSubjectColor = (subjectId: string) => {
-    let hash = 0
-    for (let i = 0; i < subjectId.length; i++) hash = subjectId.charCodeAt(i) + ((hash << 5) - hash)
-    return COLORS[Math.abs(hash) % COLORS.length]
-  }
+  /* ─── Handlers ─── */
 
   const handleDayClick = async (dateObj: Date) => {
     if (!userId || !selectedResId) {
-      Swal.fire({ title: 'Kaynak Seçin', text: 'Takvime eklemek için önce sol taraftan bir video ders kaynağı seçmelisiniz.', icon: 'info', toast: true, position: 'top-end', showConfirmButton: false, timer: 2000 })
+      Swal.fire({ title: 'Kaynak Seçin', text: 'Takvime eklemek için sol panelden bir kaynak seçin.', icon: 'info', toast: true, position: 'top-end', showConfirmButton: false, timer: 2000 })
       return
     }
-
     const dateStr = localDateStr(dateObj)
     const res = resources.find(r => r.id === selectedResId)
     if (!res) return
 
     const { value: countStr } = await Swal.fire({
       title: 'Kaç Video?',
-      text: `${cleanName(res.name)} kaynağından bu güne kaç video eklemek istiyorsunuz?`,
+      text: `${cleanName(res.name)} → ${dateObj.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' })}`,
       input: 'number',
       inputAttributes: { min: '1', step: '1' },
+      inputValue: '3',
       showCancelButton: true,
       confirmButtonText: 'Ekle',
-      cancelButtonText: 'İptal'
+      cancelButtonText: 'Vazgeç',
+      confirmButtonColor: '#2563eb',
     })
-
     if (countStr && parseInt(countStr) > 0) {
       const { data } = await supabase.from('video_plan_items').insert({
-        user_id: userId,
-        resource_id: selectedResId,
-        date: dateStr,
-        video_count: parseInt(countStr)
+        user_id: userId, resource_id: selectedResId,
+        date: dateStr, video_count: parseInt(countStr),
       }).select().single()
-
-      if (data) setPlanItems(prev => [...prev, data])
+      if (data) setPlanItems(p => [...p, data])
     }
   }
 
   const handleDeleteItem = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation()
-    const confirm = await Swal.fire({ title: 'Sil', text: 'Bu planı silmek istiyor musunuz?', icon: 'warning', showCancelButton: true, confirmButtonText: 'Evet', cancelButtonText: 'İptal' })
-    if (confirm.isConfirmed) {
-      await supabase.from('video_plan_items').delete().eq('id', id)
-      setPlanItems(prev => prev.filter(i => i.id !== id))
-    }
+    await supabase.from('video_plan_items').delete().eq('id', id)
+    setPlanItems(p => p.filter(i => i.id !== id))
   }
 
   const handleClearDay = async (e: React.MouseEvent, dateStr: string) => {
     e.stopPropagation()
     const dayItems = planItems.filter(p => p.date === dateStr)
     if (dayItems.length === 0) return
-    const confirm = await Swal.fire({ title: 'Tüm Günü Sil', text: 'Bu gündeki tüm video planlarını silmek istediğinize emin misiniz?', icon: 'warning', showCancelButton: true, confirmButtonText: 'Evet, Sil', cancelButtonText: 'İptal' })
-    if (confirm.isConfirmed && userId) {
-      const ids = dayItems.map(d => d.id)
-      await supabase.from('video_plan_items').delete().in('id', ids)
-      setPlanItems(prev => prev.filter(i => i.date !== dateStr))
+    const c = await Swal.fire({
+      title: 'Günü Temizle',
+      text: `${dayItems.length} video planı silinecek.`,
+      icon: 'warning', showCancelButton: true,
+      confirmButtonText: 'Sil', cancelButtonText: 'Vazgeç',
+      confirmButtonColor: '#ef4444',
+    })
+    if (c.isConfirmed && userId) {
+      await supabase.from('video_plan_items').delete().in('id', dayItems.map(d => d.id))
+      setPlanItems(p => p.filter(i => i.date !== dateStr))
     }
   }
 
-  const handleSwapDays = async (sourceDate: string, targetDate: string) => {
-    if (sourceDate === targetDate || !userId) return
-    const sourceItems = planItems.filter(p => p.date === sourceDate)
-    const targetItems = planItems.filter(p => p.date === targetDate)
-    
-    if (sourceItems.length === 0 && targetItems.length === 0) return
-    
+  const handleSwapDays = useCallback(async (src: string, tgt: string) => {
+    if (src === tgt || !userId) return
+    const srcItems = planItems.filter(p => p.date === src)
+    const tgtItems = planItems.filter(p => p.date === tgt)
+    if (!srcItems.length && !tgtItems.length) return
+
     setLoading(true)
-    const updatedItems: any[] = []
-    sourceItems.forEach(item => updatedItems.push({ id: item.id, user_id: userId, resource_id: item.resource_id, video_count: item.video_count, date: targetDate }))
-    targetItems.forEach(item => updatedItems.push({ id: item.id, user_id: userId, resource_id: item.resource_id, video_count: item.video_count, date: sourceDate }))
-    
-    const { error } = await supabase.from('video_plan_items').upsert(updatedItems)
+    const batch: any[] = []
+    srcItems.forEach(i => batch.push({ id: i.id, user_id: userId, resource_id: i.resource_id, video_count: i.video_count, date: tgt }))
+    tgtItems.forEach(i => batch.push({ id: i.id, user_id: userId, resource_id: i.resource_id, video_count: i.video_count, date: src }))
+
+    const { error } = await supabase.from('video_plan_items').upsert(batch)
     if (!error) {
       setPlanItems(prev => {
-        const filtered = prev.filter(p => p.date !== sourceDate && p.date !== targetDate)
-        return [...filtered, ...updatedItems]
+        const rest = prev.filter(p => p.date !== src && p.date !== tgt)
+        return [...rest, ...batch]
       })
-      Swal.fire({ icon: 'success', title: 'Başarılı', text: 'Günler yer değiştirdi.', toast: true, position: 'top-end', showConfirmButton: false, timer: 1500 })
+      Swal.fire({ icon: 'success', title: 'Taşındı!', toast: true, position: 'top-end', showConfirmButton: false, timer: 1200 })
+    }
+    setLoading(false)
+    setDragSourceDate(null)
+    setDragOverDate(null)
+  }, [planItems, userId])
+
+  const handleShiftPlan = async (e: React.MouseEvent, dateStr: string) => {
+    e.stopPropagation()
+    const c = await Swal.fire({
+      title: 'Planı Kaydır', text: 'Bu tarihten sonrasını 1 gün ileri kaydır.',
+      icon: 'warning', showCancelButton: true,
+      confirmButtonText: 'Kaydır', cancelButtonText: 'Vazgeç',
+      confirmButtonColor: '#2563eb',
+    })
+    if (!c.isConfirmed || !userId) return
+    const items = planItems.filter(p => p.date >= dateStr)
+    if (!items.length) { Swal.fire('Bilgi', 'Kaydırılacak plan yok.', 'info'); return }
+
+    setLoading(true)
+    const batch = items.map(i => {
+      const d = new Date(i.date); d.setDate(d.getDate() + 1)
+      return { id: i.id, user_id: userId, resource_id: i.resource_id, video_count: i.video_count, date: localDateStr(d) }
+    })
+    const { error } = await supabase.from('video_plan_items').upsert(batch)
+    if (!error) {
+      setPlanItems(prev => prev.map(p => {
+        const u = batch.find(b => b.id === p.id)
+        return u ? { ...p, date: u.date } : p
+      }))
+      Swal.fire({ icon: 'success', title: 'Kaydırıldı', toast: true, position: 'top-end', showConfirmButton: false, timer: 1200 })
     }
     setLoading(false)
   }
 
-  const handleShiftPlan = async (e: React.MouseEvent, dateStr: string) => {
-    e.stopPropagation()
-    const confirm = await Swal.fire({
-      title: 'Planı Kaydır',
-      text: 'Bu tarihten (dahil) sonraki tüm video planlarınızı 1 gün ileri kaydırmak istiyor musunuz?',
-      icon: 'warning',
-      showCancelButton: true,
-      confirmButtonText: 'Evet, Kaydır',
-      cancelButtonText: 'İptal'
-    })
-
-    if (confirm.isConfirmed && userId) {
-      const itemsToShift = planItems.filter(p => p.date >= dateStr)
-      if (itemsToShift.length === 0) { Swal.fire('Bilgi', 'Kaydırılacak plan bulunamadı.', 'info'); return }
-
-      setLoading(true)
-      const updatedItems = itemsToShift.map(item => {
-        const d = new Date(item.date)
-        d.setDate(d.getDate() + 1)
-        return { id: item.id, user_id: userId, resource_id: item.resource_id, video_count: item.video_count, date: localDateStr(d) }
-      })
-      
-      const { error } = await supabase.from('video_plan_items').upsert(updatedItems)
-
-      if (!error) {
-        setPlanItems(prev => prev.map(p => {
-          const updated = updatedItems.find(u => u.id === p.id)
-          return updated ? { ...p, date: updated.date } : p
-        }))
-        Swal.fire('Başarılı', 'Program 1 gün ileri kaydırıldı.', 'success')
-      }
-      setLoading(false)
-    }
-  }
-
+  /* resource actions */
   const handleEditResource = (r: Resource) => {
     setEditingRes(r)
     setEditTotal(r.total_videos?.toString() || '0')
@@ -214,314 +244,399 @@ export default function VideoPlan() {
     const t = parseInt(editTotal) || 0
     const a = parseInt(editAvg) || 0
     await supabase.from('resources').update({ total_videos: t, avg_video_duration: a }).eq('id', editingRes.id)
-    setResources(prev => prev.map(r => r.id === editingRes.id ? { ...r, total_videos: t, avg_video_duration: a } : r))
-    setAllResources(prev => prev.map(r => r.id === editingRes.id ? { ...r, total_videos: t, avg_video_duration: a } : r))
+    setResources(p => p.map(r => r.id === editingRes.id ? { ...r, total_videos: t, avg_video_duration: a } : r))
+    setAllResources(p => p.map(r => r.id === editingRes.id ? { ...r, total_videos: t, avg_video_duration: a } : r))
     setEditingRes(null)
   }
 
   const handleAddResourceToPlan = async () => {
-    const otherResources = allResources.filter(r => r.resource_type !== 'video_ders')
-    if (otherResources.length === 0) { Swal.fire('Bilgi', 'Listeye eklenebilecek başka bir kaynağınız bulunmuyor.', 'info'); return }
-
-    const optionsHtml = otherResources.map(r => `<option value="${r.id}">${cleanName(r.subject_name || '')} - ${cleanName(r.name)}</option>`).join('')
-    
+    const other = allResources.filter(r => r.resource_type !== 'video_ders')
+    if (!other.length) { Swal.fire('Bilgi', 'Eklenecek kaynak yok.', 'info'); return }
+    const html = other.map(r => `<option value="${r.id}">${cleanName(r.subject_name || '')} — ${cleanName(r.name)}</option>`).join('')
     const { value: resId } = await Swal.fire({
-      title: 'Video Planına Kaynak Ekle',
-      html: `<select id="resource-select" class="swal2-select" style="width:100%; font-size:14px; padding: 8px;">
-              <option value="" disabled selected>Bir kaynak seçin...</option>
-              ${optionsHtml}
-             </select>`,
-      focusConfirm: false,
-      showCancelButton: true,
-      confirmButtonText: 'Ekle',
-      preConfirm: () => {
-        const val = (document.getElementById('resource-select') as HTMLSelectElement).value
-        if (!val) Swal.showValidationMessage('Lütfen bir kaynak seçin.')
-        return val
-      }
+      title: 'Kaynak Ekle',
+      html: `<select id="rs" class="swal2-select" style="width:100%;font-size:14px;padding:8px"><option value="" disabled selected>Seçin…</option>${html}</select>`,
+      focusConfirm: false, showCancelButton: true, confirmButtonText: 'Ekle', confirmButtonColor: '#2563eb',
+      preConfirm: () => { const v = (document.getElementById('rs') as HTMLSelectElement).value; if (!v) Swal.showValidationMessage('Seçin.'); return v },
     })
+    if (!resId) return
 
-    if (resId) {
-      const { value: details } = await Swal.fire({
-        title: 'Video Bilgileri',
-        html: `
-          <input id="swal-tot" class="swal2-input" placeholder="Toplam Video Sayısı (Örn: 50)" type="number" min="1">
-          <input id="swal-avg" class="swal2-input" placeholder="Ortalama Süre (Dk) (Örn: 30)" type="number" min="1">
-        `,
-        focusConfirm: false,
-        showCancelButton: true,
-        confirmButtonText: 'Kaydet',
-        cancelButtonText: 'Geç',
-        preConfirm: () => ({
-          tot: parseInt((document.getElementById('swal-tot') as HTMLInputElement).value) || 0,
-          avg: parseInt((document.getElementById('swal-avg') as HTMLInputElement).value) || 0
-        })
-      })
-
-      const tot = details?.tot || 0
-      const avg = details?.avg || 0
-      await supabase.from('resources').update({ resource_type: 'video_ders', total_videos: tot, avg_video_duration: avg }).eq('id', resId)
-      
-      const updatedRes = allResources.find(r => r.id === resId)
-      if (updatedRes) {
-        const newRes = { ...updatedRes, resource_type: 'video_ders', total_videos: tot, avg_video_duration: avg }
-        setResources(prev => [...prev, newRes])
-        setAllResources(prev => prev.map(r => r.id === resId ? newRes : r))
-      }
-      Swal.fire('Eklendi', 'Kaynak başarıyla eklendi.', 'success')
+    const { value: det } = await Swal.fire({
+      title: 'Video Bilgileri',
+      html: `<input id="sw-t" class="swal2-input" placeholder="Toplam Video" type="number" min="1"><input id="sw-a" class="swal2-input" placeholder="Ort. Süre (dk)" type="number" min="1">`,
+      focusConfirm: false, showCancelButton: true, confirmButtonText: 'Kaydet', confirmButtonColor: '#2563eb',
+      preConfirm: () => ({ tot: parseInt((document.getElementById('sw-t') as HTMLInputElement).value) || 0, avg: parseInt((document.getElementById('sw-a') as HTMLInputElement).value) || 0 }),
+    })
+    const tot = det?.tot || 0, avg = det?.avg || 0
+    await supabase.from('resources').update({ resource_type: 'video_ders', total_videos: tot, avg_video_duration: avg }).eq('id', resId)
+    const found = allResources.find(r => r.id === resId)
+    if (found) {
+      const nr = { ...found, resource_type: 'video_ders', total_videos: tot, avg_video_duration: avg }
+      setResources(p => [...p, nr])
+      setAllResources(p => p.map(r => r.id === resId ? nr : r))
     }
   }
 
   const handleHideResource = async (res: Resource) => {
-    const confirm = await Swal.fire({ title: 'Listeden Çıkar', text: `Gizlemek istiyor musunuz?`, icon: 'question', showCancelButton: true, confirmButtonText: 'Evet', cancelButtonText: 'İptal' })
-    if (confirm.isConfirmed) {
-      await supabase.from('resources').update({ resource_type: 'diger' }).eq('id', res.id)
-      setResources(prev => prev.filter(r => r.id !== res.id))
-      setAllResources(prev => prev.map(r => r.id === res.id ? { ...r, resource_type: 'diger' } : r))
-      if (selectedResId === res.id) setSelectedResId(null)
-    }
+    const c = await Swal.fire({ title: 'Gizle', text: 'Kaynak listeden çıkacak.', icon: 'question', showCancelButton: true, confirmButtonText: 'Evet', cancelButtonText: 'İptal', confirmButtonColor: '#ef4444' })
+    if (!c.isConfirmed) return
+    await supabase.from('resources').update({ resource_type: 'diger' }).eq('id', res.id)
+    setResources(p => p.filter(r => r.id !== res.id))
+    setAllResources(p => p.map(r => r.id === res.id ? { ...r, resource_type: 'diger' } : r))
+    if (selectedResId === res.id) setSelectedResId(null)
   }
 
+  /* export */
   const exportImage = async () => {
     if (!calendarRef.current) return
     try {
-      const origOverflow = calendarRef.current.style.overflow
-      const origHeight = calendarRef.current.style.height
-      calendarRef.current.style.overflow = 'visible'
-      calendarRef.current.style.height = 'auto'
-      
-      // Allow DOM to update
-      await new Promise(r => setTimeout(r, 100))
-      
-      const canvas = await html2canvas(calendarRef.current, { scale: 2, backgroundColor: '#ffffff', useCORS: true })
-      
-      calendarRef.current.style.overflow = origOverflow
-      calendarRef.current.style.height = origHeight
-
-      const link = document.createElement('a')
-      link.download = 'video_plani.png'
-      link.href = canvas.toDataURL('image/png')
-      link.click()
-    } catch (err) {
-      console.error(err)
-      Swal.fire('Hata', 'Görsel oluşturulurken bir hata oluştu.', 'error')
-    }
+      const el = calendarRef.current
+      const ov = el.style.overflow; const ht = el.style.height
+      el.style.overflow = 'visible'; el.style.height = 'auto'
+      await new Promise(r => setTimeout(r, 150))
+      const canvas = await html2canvas(el, { scale: 2, backgroundColor: '#ffffff', useCORS: true })
+      el.style.overflow = ov; el.style.height = ht
+      const link = document.createElement('a'); link.download = 'video_plani.png'; link.href = canvas.toDataURL('image/png'); link.click()
+    } catch { Swal.fire('Hata', 'Görsel oluşturulamadı.', 'error') }
   }
 
   const exportJSON = () => {
-    const report = {
-      olusturulma_tarihi: new Date().toLocaleString('tr-TR'),
+    const data = {
+      tarih: new Date().toLocaleString('tr-TR'),
       planlar: planItems.map(p => {
-        const res = resources.find(r => r.id === p.resource_id)
-        return { tarih: p.date, ders: cleanName(res?.subject_name || ''), kaynak: cleanName(res?.name || ''), video_sayisi: p.video_count, tahmini_sure_dk: (p.video_count * (res?.avg_video_duration || 0)) }
-      })
+        const r = resources.find(x => x.id === p.resource_id)
+        return { tarih: p.date, ders: cleanName(r?.subject_name || ''), kaynak: cleanName(r?.name || ''), video: p.video_count, sure_dk: p.video_count * (r?.avg_video_duration || 0) }
+      }),
     }
-    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = url; a.download = 'video_plani.json'; a.click(); URL.revokeObjectURL(url)
+    const b = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = 'video_plani.json'; a.click(); URL.revokeObjectURL(u)
   }
 
-  if (loading) return <div className="h-full flex items-center justify-center text-[#94a3b8]">Yükleniyor...</div>
+  /* navigate */
+  const goWeek = (dir: -1 | 1) => {
+    setStartDate(prev => {
+      const d = new Date(prev)
+      d.setDate(d.getDate() + dir * 7)
+      return d
+    })
+  }
 
+  /* ─── Derived ─── */
+  const weeklyStats = (() => {
+    const weeks: { start: Date; totalMin: number; totalVid: number }[] = []
+    for (let w = 0; w < 5; w++) {
+      const wStart = new Date(startDate); wStart.setDate(wStart.getDate() + w * 7)
+      let tMin = 0; let tVid = 0
+      for (let d = 0; d < 7; d++) {
+        const dd = new Date(wStart); dd.setDate(dd.getDate() + d)
+        const ds = localDateStr(dd)
+        planItems.filter(p => p.date === ds).forEach(p => {
+          const r = allResources.find(x => x.id === p.resource_id)
+          tVid += p.video_count
+          tMin += p.video_count * (r?.avg_video_duration || 0)
+        })
+      }
+      weeks.push({ start: wStart, totalMin: tMin, totalVid: tVid })
+    }
+    return weeks
+  })()
+
+  /* ─── Loading ─── */
+  if (loading) return (
+    <div className="h-full flex items-center justify-center">
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+        <span className="text-sm text-slate-400">Yükleniyor…</span>
+      </div>
+    </div>
+  )
+
+  /* ─── Render ─── */
   return (
-    <div className="flex flex-col h-full gap-4 pb-4">
-      <div className="flex flex-col md:flex-row md:items-center justify-between shrink-0 gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-[#0f172a] flex items-center gap-2">
-            <CalendarIcon className="h-6 w-6 text-[#2563eb]" /> Video Planı
-          </h1>
-          <p className="text-[13px] text-[#64748b] mt-1">Video dersleri takvime sürükle veya "Taşı" ikonuyla günleri yer değiştir.</p>
+    <div className="flex flex-col h-full gap-4 pb-2">
+      {/* ═══ HEADER ═══ */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between shrink-0 gap-3">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
+            <PlayCircle className="h-5 w-5 text-white" />
+          </div>
+          <div>
+            <h1 className="text-xl font-extrabold text-slate-900 tracking-tight">Video Planı</h1>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              {selectedResId
+                ? <span className="text-blue-600 font-semibold">Kaynak seçili — takvimde bir güne tıklayarak ekleyin</span>
+                : 'Sol panelden kaynak seçin, ardından takvime ekleyin'}
+            </p>
+          </div>
         </div>
-        <div className="flex items-center gap-2 self-start md:self-auto">
-          <button onClick={exportImage} className="bg-white border border-[#e2e8f0] text-[#0f172a] hover:bg-slate-50 font-medium text-sm px-3 py-2 rounded-lg transition-all flex items-center gap-2">
-            <ImageIcon className="h-4 w-4" /> PNG İndir
+        <div className="flex items-center gap-2">
+          <button onClick={exportImage} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-600 text-xs font-medium hover:bg-slate-50 hover:border-slate-300 transition-all active:scale-[.97]">
+            <ImageIcon className="h-3.5 w-3.5" /> PNG
           </button>
-          <button onClick={exportJSON} className="bg-[#2563eb] hover:bg-blue-600 text-white font-medium text-sm px-3 py-2 rounded-lg transition-all flex items-center gap-2">
-            <Download className="h-4 w-4" /> JSON İndir
+          <button onClick={exportJSON} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 text-white text-xs font-medium hover:bg-slate-700 transition-all active:scale-[.97]">
+            <Download className="h-3.5 w-3.5" /> JSON
           </button>
         </div>
       </div>
 
-      <div className="flex flex-col lg:flex-row gap-4 h-full min-h-0 overflow-hidden">
-        {/* Sol Menü: Kaynaklar */}
-        <div className="w-full lg:w-80 bg-white border border-[#e2e8f0] rounded-xl flex flex-col shrink-0 min-h-[300px] lg:min-h-0 overflow-hidden">
-          <div className="p-4 border-b border-[#e2e8f0] bg-[#f8fafc] flex justify-between items-start">
-            <div>
-              <h2 className="text-[13px] font-bold text-[#0f172a] uppercase tracking-wider">Video Dersler</h2>
-              <p className="text-[10px] text-[#64748b] mt-1">Takvime eklemek için tıklayın.</p>
+      {/* ═══ MAIN LAYOUT ═══ */}
+      <div className="flex flex-col lg:flex-row gap-4 flex-1 min-h-0 overflow-hidden">
+
+        {/* ── LEFT PANEL: Resources ── */}
+        <div className="w-full lg:w-72 xl:w-80 flex flex-col shrink-0 min-h-[260px] lg:min-h-0 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+          <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-slate-50 to-white">
+            <div className="flex items-center gap-2">
+              <div className="h-6 w-6 rounded-lg bg-blue-100 flex items-center justify-center">
+                <CalendarIcon className="h-3.5 w-3.5 text-blue-600" />
+              </div>
+              <span className="text-[13px] font-bold text-slate-700">Kaynaklar</span>
+              <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full font-semibold">{resources.length}</span>
             </div>
-            <button onClick={handleAddResourceToPlan} title="Mevcut kaynaklardan ekle" className="h-7 w-7 flex items-center justify-center bg-blue-100 text-blue-600 rounded hover:bg-blue-200 transition-all">
-              <Plus className="h-4 w-4" />
+            <button onClick={handleAddResourceToPlan} className="h-7 w-7 rounded-lg bg-blue-600 text-white flex items-center justify-center hover:bg-blue-700 transition-all active:scale-90 shadow-sm">
+              <Plus className="h-3.5 w-3.5" />
             </button>
           </div>
-          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+
+          <div className="flex-1 overflow-y-auto p-2.5 space-y-2">
             {resources.length === 0 ? (
-              <div className="text-center text-xs text-[#94a3b8] py-8">Kaynak yok. Ayarlar menüsünden kaynak ekleyebilirsiniz.</div>
+              <div className="flex flex-col items-center justify-center h-full text-center py-10">
+                <div className="h-12 w-12 rounded-xl bg-slate-100 flex items-center justify-center mb-3">
+                  <PlayCircle className="h-6 w-6 text-slate-300" />
+                </div>
+                <p className="text-xs text-slate-400 font-medium">Henüz kaynak eklenmemiş</p>
+                <p className="text-[10px] text-slate-300 mt-1">Sağ üst "+" ile ekleyin</p>
+              </div>
             ) : (
               resources.map(res => {
+                const col = hashColor(res.subject_id)
                 const isSelected = selectedResId === res.id
-                const used = planItems.filter(p => p.resource_id === res.id).reduce((sum, p) => sum + p.video_count, 0)
-                const remaining = Math.max(0, (res.total_videos || 0) - used)
-                const col = getSubjectColor(res.subject_id)
+                const used = planItems.filter(p => p.resource_id === res.id).reduce((s, p) => s + p.video_count, 0)
+                const total = res.total_videos || 0
+                const remaining = Math.max(0, total - used)
+                const pct = total > 0 ? Math.min(100, Math.round((used / total) * 100)) : 0
 
                 return (
-                  <div 
-                    key={res.id} 
-                    onClick={() => setSelectedResId(res.id)}
-                    className={`border rounded-xl p-3 cursor-pointer transition-all ${isSelected ? 'ring-2 ring-blue-500 shadow-sm' : 'hover:border-blue-300'}`}
-                    style={{ backgroundColor: isSelected ? '#ffffff' : col.bg, borderColor: isSelected ? '#3b82f6' : col.border }}
+                  <motion.div
+                    key={res.id}
+                    layout
+                    onClick={() => setSelectedResId(isSelected ? null : res.id)}
+                    className={`rounded-xl p-3 cursor-pointer transition-all duration-200 border-2 ${
+                      isSelected
+                        ? 'border-blue-500 bg-blue-50/50 shadow-md shadow-blue-500/10'
+                        : 'border-transparent hover:border-slate-200 bg-slate-50/50 hover:bg-white hover:shadow-sm'
+                    }`}
                   >
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: 'rgba(255,255,255,0.6)', color: col.text }}>
-                          {cleanName(res.subject_name || '')}
-                        </span>
-                        <h3 className="text-[13px] font-bold mt-1.5" style={{ color: '#0f172a' }}>{cleanName(res.name)}</h3>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                        <div className="h-8 w-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5" style={{ backgroundColor: col.bg }}>
+                          <PlayCircle className="h-4 w-4" style={{ color: col.dot }} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <span className="text-[10px] font-bold uppercase tracking-wide" style={{ color: col.text }}>
+                            {cleanName(res.subject_name || '')}
+                          </span>
+                          <h3 className="text-[13px] font-bold text-slate-800 truncate leading-tight mt-0.5">
+                            {cleanName(res.name)}
+                          </h3>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-0.5">
-                        <button onClick={(e) => { e.stopPropagation(); handleHideResource(res); }} title="Listeden Çıkar" className="p-1 hover:bg-white/50 rounded text-slate-500 hover:text-red-500 transition-all">
-                          <EyeOff className="h-3.5 w-3.5" />
-                        </button>
-                        <button onClick={(e) => { e.stopPropagation(); handleEditResource(res); }} title="Düzenle" className="p-1 hover:bg-white/50 rounded text-slate-500 transition-all">
+
+                      <div className="flex items-center gap-0.5 shrink-0">
+                        <button onClick={e => { e.stopPropagation(); handleEditResource(res) }} className="p-1 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all">
                           <Settings className="h-3.5 w-3.5" />
+                        </button>
+                        <button onClick={e => { e.stopPropagation(); handleHideResource(res) }} className="p-1 rounded-md text-slate-400 hover:text-red-500 hover:bg-red-50 transition-all">
+                          <EyeOff className="h-3.5 w-3.5" />
                         </button>
                       </div>
                     </div>
 
-                    {editingRes?.id === res.id ? (
-                      <div className="mt-3 p-2 bg-white/80 rounded border border-slate-200 space-y-2" onClick={e => e.stopPropagation()}>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <label className="text-[9px] font-bold text-[#64748b] uppercase">Top. Video</label>
-                            <input type="number" min="0" value={editTotal} onChange={e => setEditTotal(e.target.value)} className="w-full h-7 text-[11px] px-2 border border-[#e2e8f0] rounded focus:outline-none" />
+                    <AnimatePresence>
+                      {editingRes?.id === res.id ? (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="mt-3 p-2.5 bg-white rounded-lg border border-slate-200 space-y-2" onClick={e => e.stopPropagation()}>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className="text-[9px] font-bold text-slate-500 uppercase">Toplam Video</label>
+                                <input type="number" min="0" value={editTotal} onChange={e => setEditTotal(e.target.value)}
+                                  className="w-full h-7 text-[11px] px-2 border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400" />
+                              </div>
+                              <div>
+                                <label className="text-[9px] font-bold text-slate-500 uppercase">Ort. Dk/Vid</label>
+                                <input type="number" min="0" value={editAvg} onChange={e => setEditAvg(e.target.value)}
+                                  className="w-full h-7 text-[11px] px-2 border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400" />
+                              </div>
+                            </div>
+                            <div className="flex gap-1.5 justify-end pt-1">
+                              <button onClick={() => setEditingRes(null)} className="h-6 px-2.5 text-[10px] bg-slate-100 text-slate-600 rounded-md font-medium hover:bg-slate-200 transition-all">İptal</button>
+                              <button onClick={saveEditResource} className="h-6 px-2.5 text-[10px] bg-blue-600 text-white rounded-md font-medium hover:bg-blue-700 transition-all">Kaydet</button>
+                            </div>
                           </div>
-                          <div>
-                            <label className="text-[9px] font-bold text-[#64748b] uppercase">Ort. Dk</label>
-                            <input type="number" min="0" value={editAvg} onChange={e => setEditAvg(e.target.value)} className="w-full h-7 text-[11px] px-2 border border-[#e2e8f0] rounded focus:outline-none" />
+                        </motion.div>
+                      ) : (
+                        <div className="mt-2.5">
+                          <div className="flex items-center justify-between text-[10px] mb-1.5">
+                            <span className="text-slate-400 flex items-center gap-1">
+                              <Clock className="h-3 w-3" /> {res.avg_video_duration || 0} dk/vid
+                            </span>
+                            <span className="font-bold" style={{ color: remaining === 0 ? '#059669' : col.text }}>
+                              {remaining === 0 ? '✓ Tamamlandı' : `${remaining} kaldı`}
+                            </span>
+                          </div>
+                          {/* Progress bar */}
+                          <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                            <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: pct >= 100 ? '#059669' : col.accent }} />
                           </div>
                         </div>
-                        <div className="flex gap-1 justify-end">
-                          <button onClick={() => setEditingRes(null)} className="h-6 px-2 text-[10px] bg-slate-200 text-slate-600 rounded font-medium">İptal</button>
-                          <button onClick={saveEditResource} className="h-6 px-2 text-[10px] bg-blue-600 text-white rounded font-medium">Kaydet</button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="mt-3 flex items-center justify-between text-[11px]">
-                        <div className="flex items-center gap-1.5" style={{ color: col.text }}>
-                          <Clock className="h-3 w-3" /> {res.avg_video_duration || 0} dk/vid
-                        </div>
-                        <div className="font-semibold text-slate-700">
-                          Kalan: <span className={remaining === 0 ? 'text-emerald-600' : ''} style={{ color: remaining > 0 ? col.text : undefined }}>{remaining}</span> / {res.total_videos || 0}
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                      )}
+                    </AnimatePresence>
+                  </motion.div>
                 )
               })
             )}
           </div>
         </div>
 
-        {/* Sağ Menü: Takvim */}
-        <div className="flex-1 bg-white border border-[#e2e8f0] rounded-xl flex flex-col min-h-0 overflow-hidden relative">
-          <div className="p-4 border-b border-[#e2e8f0] flex justify-between items-center bg-[#f8fafc]">
-            <h2 className="text-[13px] font-bold text-[#0f172a] uppercase tracking-wider">Aylık Görünüm</h2>
-            <div className="flex gap-2">
-              <button onClick={() => setStartDate(new Date(startDate.setDate(startDate.getDate() - 7)))} className="px-3 py-1 text-xs border border-[#e2e8f0] bg-white rounded-md hover:bg-slate-50 font-medium">Önceki Hafta</button>
-              <button onClick={() => setStartDate(new Date(startDate.setDate(startDate.getDate() + 7)))} className="px-3 py-1 text-xs border border-[#e2e8f0] bg-white rounded-md hover:bg-slate-50 font-medium">Sonraki Hafta</button>
+        {/* ── RIGHT: Calendar ── */}
+        <div className="flex-1 flex flex-col min-h-0 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+          {/* Nav */}
+          <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-slate-50 to-white shrink-0">
+            <div className="flex items-center gap-2">
+              <button onClick={() => goWeek(-1)} className="h-8 w-8 rounded-lg border border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition-all active:scale-90">
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <div className="text-center min-w-[160px]">
+                <p className="text-[13px] font-bold text-slate-800">
+                  {startDate.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' })} — {days[34].toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })}
+                </p>
+              </div>
+              <button onClick={() => goWeek(1)} className="h-8 w-8 rounded-lg border border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition-all active:scale-90">
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Weekly summary pills */}
+            <div className="hidden xl:flex items-center gap-1.5">
+              {weeklyStats.map((w, i) => (
+                <div key={i} className={`text-[10px] px-2 py-1 rounded-md font-medium ${w.totalVid > 0 ? 'bg-blue-50 text-blue-700' : 'bg-slate-50 text-slate-400'}`}>
+                  H{i + 1}: {w.totalVid > 0 ? `${w.totalVid} vid · ${fmtMinutes(w.totalMin)}` : '—'}
+                </div>
+              ))}
             </div>
           </div>
-          
-          <div className="flex-1 overflow-auto p-4" ref={calendarRef}>
-            <div className="min-w-[700px] h-full flex flex-col">
-              {/* Hafta Günleri */}
-              <div className="grid grid-cols-7 gap-2 mb-2 shrink-0">
-                {['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar'].map(day => (
-                  <div key={day} className="text-center text-[11px] font-bold text-[#64748b] uppercase tracking-wider py-1">
-                    {day}
-                  </div>
+
+          {/* Calendar grid */}
+          <div className="flex-1 overflow-auto p-3" ref={calendarRef}>
+            <div className="min-w-[700px] h-full flex flex-col gap-1.5">
+              {/* Weekday headers */}
+              <div className="grid grid-cols-7 gap-1.5 shrink-0">
+                {['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'].map(d => (
+                  <div key={d} className="text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest py-1">{d}</div>
                 ))}
               </div>
-              
-              {/* 35 Günlük Grid */}
-              <div className="grid grid-cols-7 gap-2 flex-1 auto-rows-fr">
-                {days.map((d) => {
-                  const dateStr = localDateStr(d)
-                  const dayItems = planItems.filter(p => p.date === dateStr)
-                  
-                  let totalMinutes = 0
-                  dayItems.forEach(item => {
-                    const res = allResources.find(r => r.id === item.resource_id)
-                    if (res) totalMinutes += (item.video_count * (res.avg_video_duration || 0))
-                  })
 
-                  const isToday = dateStr === localDateStr(new Date())
+              {/* 5 rows × 7 cols */}
+              {[0, 1, 2, 3, 4].map(week => (
+                <div key={week} className="grid grid-cols-7 gap-1.5 flex-1">
+                  {days.slice(week * 7, week * 7 + 7).map(d => {
+                    const ds = localDateStr(d)
+                    const dItems = planItems.filter(p => p.date === ds)
+                    const isToday = ds === localDateStr(new Date())
+                    const isDragSrc = dragSourceDate === ds
+                    const isDragOver = dragOverDate === ds && dragSourceDate !== ds
 
-                  return (
-                    <div 
-                      key={dateStr}
-                      onClick={() => handleDayClick(d)}
-                      onDragOver={e => e.preventDefault()}
-                      onDrop={e => {
-                        const source = e.dataTransfer.getData('sourceDate')
-                        if (source) handleSwapDays(source, dateStr)
-                      }}
-                      className={`border rounded-lg p-2 flex flex-col transition-all cursor-pointer hover:border-[#2563eb] hover:shadow-sm ${isToday ? 'border-[#2563eb] bg-blue-50/20 ring-1 ring-blue-500/20' : 'border-[#e2e8f0] bg-white'}`}
-                    >
-                      <div className="flex justify-between items-start mb-2 group/header">
-                        <div className="flex items-center gap-1.5">
-                          <div 
-                            draggable 
-                            onDragStart={(e) => { e.dataTransfer.setData('sourceDate', dateStr); e.stopPropagation(); }}
-                            title="Bu günü başka bir güne sürükleyip yer değiştirebilirsiniz"
-                            className="cursor-grab hover:text-blue-500 text-slate-300"
-                            onClick={e => e.stopPropagation()}
-                          >
-                            <GripHorizontal className="h-4 w-4" />
-                          </div>
-                          <span className={`text-[12px] font-bold ${isToday ? 'text-[#2563eb] bg-blue-100 rounded-full px-2' : 'text-[#0f172a]'}`}>
-                            {d.getDate()} {d.toLocaleDateString('tr-TR', { month: 'short' })}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          {dayItems.length > 0 && (
-                            <button onClick={(e) => handleClearDay(e, dateStr)} title="Tüm Günü Temizle" className="opacity-0 group-hover/header:opacity-100 text-slate-300 hover:text-red-500 p-0.5 transition-all">
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          )}
-                          <button onClick={(e) => handleShiftPlan(e, dateStr)} title="Bu gün ve sonrasını 1 gün ertele" className="opacity-0 group-hover/header:opacity-100 text-slate-300 hover:text-[#2563eb] p-0.5 transition-all">
-                            <SkipForward className="h-3.5 w-3.5" />
-                          </button>
-                          {totalMinutes > 0 && (
-                            <span className="text-[10px] font-semibold text-[#64748b] bg-[#f1f5f9] px-1.5 py-0.5 rounded">
-                              {Math.floor(totalMinutes / 60) > 0 ? `${Math.floor(totalMinutes / 60)}sa ` : ''}{totalMinutes % 60}dk
+                    let totalMin = 0
+                    dItems.forEach(p => {
+                      const r = allResources.find(x => x.id === p.resource_id)
+                      totalMin += p.video_count * (r?.avg_video_duration || 0)
+                    })
+
+                    return (
+                      <div
+                        key={ds}
+                        onClick={() => handleDayClick(d)}
+                        draggable={dItems.length > 0}
+                        onDragStart={e => { e.dataTransfer.setData('text/plain', ds); setDragSourceDate(ds) }}
+                        onDragEnd={() => { setDragSourceDate(null); setDragOverDate(null) }}
+                        onDragOver={e => { e.preventDefault(); if (dragOverDate !== ds) setDragOverDate(ds) }}
+                        onDragLeave={() => { if (dragOverDate === ds) setDragOverDate(null) }}
+                        onDrop={e => { e.preventDefault(); const src = e.dataTransfer.getData('text/plain'); if (src) handleSwapDays(src, ds) }}
+                        className={`
+                          rounded-xl p-2 flex flex-col transition-all duration-200 cursor-pointer min-h-[100px] relative group
+                          ${isToday ? 'ring-2 ring-blue-500 bg-blue-50/30' : ''}
+                          ${isDragSrc ? 'opacity-40 scale-[.97] ring-2 ring-blue-300' : ''}
+                          ${isDragOver ? 'ring-2 ring-blue-500 bg-blue-50 scale-[1.02] shadow-lg' : ''}
+                          ${!isToday && !isDragSrc && !isDragOver ? 'border border-slate-100 bg-slate-50/30 hover:bg-white hover:border-slate-200 hover:shadow-sm' : ''}
+                          ${isToday && !isDragOver ? 'border border-blue-200' : ''}
+                        `}
+                      >
+                        {/* Day header */}
+                        <div className="flex items-center justify-between mb-1.5">
+                          <div className="flex items-center gap-1">
+                            {dItems.length > 0 && (
+                              <GripVertical className="h-3 w-3 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab" />
+                            )}
+                            <span className={`text-[11px] font-bold leading-none ${isToday ? 'bg-blue-600 text-white rounded-md px-1.5 py-0.5' : 'text-slate-600'}`}>
+                              {d.getDate()}
                             </span>
-                          )}
-                        </div>
-                      </div>
-                      
-                      <div className="flex-1 overflow-y-auto space-y-1.5 pr-1">
-                        {dayItems.map(item => {
-                          const res = resources.find(r => r.id === item.resource_id)
-                          const col = res ? getSubjectColor(res.subject_id) : { bg: '#f1f5f9', border: '#e2e8f0', text: '#475569' }
-                          return (
-                            <div key={item.id} className="border rounded p-1.5 flex justify-between items-center group relative text-left transition-all" style={{ backgroundColor: col.bg, borderColor: col.border }}>
-                              <div className="flex flex-col min-w-0 pr-4">
-                                <span className="text-[9px] font-bold truncate opacity-80" style={{ color: col.text }}>{cleanName(res?.subject_name || '')}</span>
-                                <span className="text-[10.5px] font-bold truncate" style={{ color: col.text }}>{cleanName(res?.name || 'Bilinmeyen')}</span>
-                                <span className="text-[9.5px] font-semibold mt-0.5" style={{ color: col.text }}>{item.video_count} Video</span>
-                              </div>
-                              <button onClick={(e) => handleDeleteItem(e, item.id)} className="absolute right-1 top-1.5 opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 transition-all bg-white/80 rounded-sm p-0.5">
+                            {isToday && <span className="text-[8px] font-bold text-blue-600 uppercase">Bugün</span>}
+                          </div>
+                          <div className="flex items-center gap-0.5">
+                            {dItems.length > 0 && (
+                              <button onClick={e => handleClearDay(e, ds)} title="Günü temizle"
+                                className="p-0.5 rounded text-slate-300 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-all">
                                 <Trash2 className="h-3 w-3" />
                               </button>
-                            </div>
-                          )
-                        })}
+                            )}
+                            <button onClick={e => handleShiftPlan(e, ds)} title="Sonrasını 1 gün ertele"
+                              className="p-0.5 rounded text-slate-300 hover:text-blue-600 hover:bg-blue-50 opacity-0 group-hover:opacity-100 transition-all">
+                              <SkipForward className="h-3 w-3" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Items */}
+                        <div className="flex-1 space-y-1 overflow-y-auto">
+                          {dItems.map(item => {
+                            const r = resources.find(x => x.id === item.resource_id)
+                            const col = r ? hashColor(r.subject_id) : PALETTE[0]
+                            return (
+                              <div
+                                key={item.id}
+                                className="rounded-lg px-2 py-1.5 group/item relative transition-all hover:shadow-sm"
+                                style={{ backgroundColor: col.card, borderLeft: `3px solid ${col.accent}` }}
+                              >
+                                <p className="text-[9px] font-bold truncate leading-tight" style={{ color: col.text }}>
+                                  {cleanName(r?.subject_name || '')}
+                                </p>
+                                <p className="text-[10px] font-extrabold truncate leading-tight mt-0.5" style={{ color: col.dot }}>
+                                  {cleanName(r?.name || '?')} · {item.video_count}
+                                </p>
+                                <button
+                                  onClick={e => handleDeleteItem(e, item.id)}
+                                  className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover/item:opacity-100 transition-all shadow-sm hover:bg-red-600 active:scale-90"
+                                >
+                                  <X className="h-2.5 w-2.5" />
+                                </button>
+                              </div>
+                            )
+                          })}
+                        </div>
+
+                        {/* Day footer — total time */}
+                        {totalMin > 0 && (
+                          <div className="mt-1.5 pt-1 border-t border-slate-100">
+                            <span className="text-[9px] font-bold text-slate-400">{fmtMinutes(totalMin)}</span>
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  )
-                })}
-              </div>
+                    )
+                  })}
+                </div>
+              ))}
             </div>
           </div>
         </div>
