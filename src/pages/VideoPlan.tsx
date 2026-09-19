@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import {
   Plus, Trash2, Calendar as CalendarIcon, Download, Clock,
   Image as ImageIcon, Settings, EyeOff, SkipForward, X,
-  ChevronLeft, ChevronRight, PlayCircle, GripVertical, CheckSquare, Check
+  ChevronLeft, ChevronRight, PlayCircle, GripVertical, Check
 } from 'lucide-react'
 import Swal from 'sweetalert2'
 import html2canvas from 'html2canvas'
