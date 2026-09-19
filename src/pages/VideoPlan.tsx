@@ -301,7 +301,7 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
   }
 
 
-  const handleMarkDayWatched = async (e: React.MouseEvent, dateStr: string, dayItems: VideoPlanItem[]) => {
+  const handleMarkDayWatched = async (e: React.MouseEvent, dayItems: VideoPlanItem[]) => {
     e.stopPropagation()
     if (!userId || !dayItems.length) return
     const uncompleted = dayItems.filter(i => (i.watched_count || 0) < i.video_count)
@@ -801,7 +801,7 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
                           
                           {dItems.length > 0 && dItems.some(i => (i.watched_count || 0) < i.video_count) && (
                             <button
-                              onClick={(e) => handleMarkDayWatched(e, ds, dItems)}
+                              onClick={(e) => handleMarkDayWatched(e, dItems)}
                               className="mt-1 w-full py-1.5 rounded-lg border border-emerald-100 bg-emerald-50/50 hover:bg-emerald-100/50 text-emerald-600 text-[9px] font-bold flex items-center justify-center gap-1 transition-all opacity-0 group-hover:opacity-100"
                             >
                               <Check className="h-3 w-3" /> Tümünü İzledim
