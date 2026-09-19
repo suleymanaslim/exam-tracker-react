@@ -81,8 +81,6 @@ export default function VideoPlan() {
   const [editTotal, setEditTotal] = useState('')
   const [editAvg, setEditAvg] = useState('')
 
-  /* progress */
-    
   /* selection */
   const [selectedResId, setSelectedResId] = useState<string | null>(null)
 
@@ -402,10 +400,6 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
     }
     const b = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
     const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = 'video_plani.json'; a.click(); URL.revokeObjectURL(u)
-  }
-
-      setWatchedProgress(newProg)
-    localStorage.setItem(`vid_prog_${userId}`, JSON.stringify(newProg))
   }
 
   /* navigate */
