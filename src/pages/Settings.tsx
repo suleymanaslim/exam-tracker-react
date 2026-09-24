@@ -346,11 +346,22 @@ export default function Settings() {
     const { data: allSubj } = await supabase.from('subjects').select('*').eq('user_id', userId)
 
     let totalVideoPlannedMin = 0
+    let totalVideoCompletedMin = 0
+    let totalVideoPlannedCount = 0
+    let totalVideoCompletedCount = 0
+
     const videoPlanDetails = videoPlans.map(vp => {
       const res = allRes?.find(r => r.id === vp.resource_id)
       const sub = allSubj?.find(s => s.id === res?.subject_id)
-      const dk = vp.video_count * (res?.avg_video_duration || 0)
-      totalVideoPlannedMin += dk
+      const avgDk = res?.avg_video_duration || 0
+      
+      const planDk = vp.video_count * avgDk
+      const completedDk = (vp.watched_count || 0) * avgDk
+      
+      totalVideoPlannedMin += planDk
+      totalVideoCompletedMin += completedDk
+      totalVideoPlannedCount += vp.video_count
+      totalVideoCompletedCount += (vp.watched_count || 0)
       
       const dateObj = new Date(vp.date)
       const daysTR = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi']
@@ -358,14 +369,17 @@ export default function Settings() {
         gun: daysTR[dateObj.getDay()],
         ders: sub?.name || '-',
         kaynak: res?.name || '-',
-        planlanan_dk: dk,
+        planlanan_video: vp.video_count,
+        izlenen_video: vp.watched_count || 0,
+        planlanan_dk: planDk,
+        izlenen_dk: completedDk,
         tip: 'Video'
       }
     })
     
     const baseTotalPlanned = planItems.reduce((s: number, i: any) => s + i.planned_minutes, 0)
     const totalPlanned = baseTotalPlanned + totalVideoPlannedMin
-    const totalCompleted = (sessions ?? []).reduce((s: number, i: any) => s + i.duration_minutes, 0)
+    const totalCompleted = (sessions ?? []).reduce((s: number, i: any) => s + i.duration_minutes, 0) + totalVideoCompletedMin
     
     let denemeDurumu = "Bu hafta deneme çözülmedi"
     if (examsData && examsData.length > 0) {
@@ -393,6 +407,12 @@ export default function Settings() {
       toplam_planlanan_dk: totalPlanned, 
       toplam_calisan_dk: totalCompleted,
       gerceklesme_orani: totalPlanned > 0 ? Math.round((totalCompleted / totalPlanned) * 100) : 0,
+      video_ozeti: {
+        planlanan_video_sayisi: totalVideoPlannedCount,
+        izlenen_video_sayisi: totalVideoCompletedCount,
+        planlanan_video_suresi_dk: totalVideoPlannedMin,
+        izlenen_video_suresi_dk: totalVideoCompletedMin
+      },
       deneme_sinavi_durumu: denemeDurumu,
       plan_maddeleri: [
         ...planItems.map(i => ({ gun: i.day_of_week, ders: i.subjects?.name ?? '-', kaynak: i.resources?.name ?? '-', planlanan_dk: i.planned_minutes, tur: 'Normal' })),
