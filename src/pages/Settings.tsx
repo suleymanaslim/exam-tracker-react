@@ -339,7 +339,32 @@ export default function Settings() {
       detailsData = dData || []
     }
     
-    const totalPlanned = planItems.reduce((s: number, i: any) => s + i.planned_minutes, 0)
+    const weekEnd = sunday.toISOString().split('T')[0]
+    const { data: vpiData } = await supabase.from('video_plan_items').select('*').eq('user_id', userId).gte('date', weekStart).lte('date', weekEnd)
+    const videoPlans = vpiData || []
+    const { data: allRes } = await supabase.from('resources').select('*').eq('user_id', userId)
+    const { data: allSubj } = await supabase.from('subjects').select('*').eq('user_id', userId)
+
+    let totalVideoPlannedMin = 0
+    const videoPlanDetails = videoPlans.map(vp => {
+      const res = allRes?.find(r => r.id === vp.resource_id)
+      const sub = allSubj?.find(s => s.id === res?.subject_id)
+      const dk = vp.video_count * (res?.avg_video_duration || 0)
+      totalVideoPlannedMin += dk
+      
+      const dateObj = new Date(vp.date)
+      const daysTR = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi']
+      return {
+        gun: daysTR[dateObj.getDay()],
+        ders: sub?.name || '-',
+        kaynak: res?.name || '-',
+        planlanan_dk: dk,
+        tip: 'Video'
+      }
+    })
+    
+    const baseTotalPlanned = planItems.reduce((s: number, i: any) => s + i.planned_minutes, 0)
+    const totalPlanned = baseTotalPlanned + totalVideoPlannedMin
     const totalCompleted = (sessions ?? []).reduce((s: number, i: any) => s + i.duration_minutes, 0)
     
     let denemeDurumu = "Bu hafta deneme çözülmedi"
@@ -369,7 +394,10 @@ export default function Settings() {
       toplam_calisan_dk: totalCompleted,
       gerceklesme_orani: totalPlanned > 0 ? Math.round((totalCompleted / totalPlanned) * 100) : 0,
       deneme_sinavi_durumu: denemeDurumu,
-      plan_maddeleri: planItems.map(i => ({ gun: i.day_of_week, ders: i.subjects?.name ?? '-', kaynak: i.resources?.name ?? '-', planlanan_dk: i.planned_minutes })),
+      plan_maddeleri: [
+        ...planItems.map(i => ({ gun: i.day_of_week, ders: i.subjects?.name ?? '-', kaynak: i.resources?.name ?? '-', planlanan_dk: i.planned_minutes, tur: 'Normal' })),
+        ...videoPlanDetails
+      ],
       calisma_kayitlari: (sessions ?? []).map(s => ({ ders: s.subjects?.name ?? '-', kaynak: s.resources?.name ?? '-', tur: s.session_type, sure_dk: s.duration_minutes, tarih: new Date(s.started_at).toLocaleString('tr-TR') })),
     }
     const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' })
