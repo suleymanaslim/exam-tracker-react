@@ -28,3 +28,18 @@ test('question comparison uses penalty-adjusted nets and never compares drafts',
 test('exams without a wrong-answer penalty do not subtract wrong answers', () => {
   assert.equal(answerNet(10, 5, null), 10); assert.equal(answerNet(10, 5, 0), 10)
 })
+
+test('topic changes group increases, decreases, zero and missing records separately', async () => {
+  const { groupQuestionChanges } = await import('../src/lib/examAnalytics.ts')
+  const rows = questionComparison([result('a', '2026-10-01'), result('b', '2026-10-02')], [answer('a', 'up', 10, 0), answer('b', 'up', 11, 0), answer('a', 'down', 10, 0), answer('b', 'down', 9, 0), answer('a', 'same', 10, 0), answer('b', 'same', 10, 0), answer('b', 'missing', 5, 0)], exam, ['up', 'down', 'same', 'missing'].map(id => ({ id, exam_id: 'exam', name: id })))
+  const groups = groupQuestionChanges(rows)
+  assert.equal(groups.increases[0].change, 1); assert.equal(groups.decreases[0].change, -1)
+  assert.equal(groups.unchanged[0].change, 0); assert.equal(groups.unavailable[0].change, null)
+  assert.equal(Object.values(groups).flat().length, 4)
+})
+test('largest topic changes appear first without mutating the comparison', async () => {
+  const { groupQuestionChanges } = await import('../src/lib/examAnalytics.ts')
+  const rows = questionComparison([result('a', '2026-10-01'), result('b', '2026-10-02')], [answer('a', 'small', 10, 0), answer('b', 'small', 11, 0), answer('a', 'large', 10, 0), answer('b', 'large', 14, 0)], exam, ['small', 'large'].map(id => ({ id, exam_id: 'exam', name: id })))
+  assert.equal(groupQuestionChanges(rows).increases[0].id, 'large')
+  assert.equal(rows[0].id, 'small')
+})

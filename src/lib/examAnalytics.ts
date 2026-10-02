@@ -28,3 +28,14 @@ export function questionComparison(results: ExamEntry[], details: AnswerEntry[],
     return { id: q.id, name: q.name, correct: last?.correct_count ?? null, incorrect: last?.incorrect_count ?? null, latestNet, previousNet, change: latestNet !== null && previousNet !== null ? Math.round((latestNet - previousNet) * 100) / 100 : null }
   })
 }
+
+/** Rank comparable topics by the size of the change; missing answers stay separate. */
+export function groupQuestionChanges(rows: ReturnType<typeof questionComparison>) {
+  const sorted = [...rows].sort((a, b) => Math.abs(b.change ?? 0) - Math.abs(a.change ?? 0) || a.name.localeCompare(b.name, 'tr'))
+  return {
+    increases: sorted.filter(row => row.change !== null && row.change > 0),
+    decreases: sorted.filter(row => row.change !== null && row.change < 0),
+    unchanged: sorted.filter(row => row.change === 0),
+    unavailable: sorted.filter(row => row.change === null),
+  }
+}

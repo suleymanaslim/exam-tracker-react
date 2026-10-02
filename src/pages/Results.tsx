@@ -7,7 +7,7 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ReferenceLine, Tooltip as
 import Swal from 'sweetalert2'
 import CustomSelect from '../components/CustomSelect'
 import { useAdminStore } from '../lib/adminStore'
-import { examTrend, questionComparison } from '../lib/examAnalytics'
+import { examTrend, questionComparison, groupQuestionChanges } from '../lib/examAnalytics'
 
 interface Exam { id: string; name: string; color: string; wrong_penalty: number | null; point_per_net: number }
 interface QuestionType { id: string; exam_id: string; name: string; sort_order: number; question_count: number }
@@ -189,7 +189,12 @@ export default function Results() {
   const latest = measured.at(-1), previous = measured.at(-2)
   const focused = displayedChart.find(row => row.id === focusedResult) || latest
   const changes = useMemo(() => questionComparison(results, details, selectedExam, questionTypes), [results, details, selectedExam, questionTypes])
+  const changeGroups = useMemo(() => groupQuestionChanges(changes), [changes])
+  const comparisonHistory = useMemo(() => examTrend(results, details, selectedExam), [results, details, selectedExam])
+  const comparisonLatest = comparisonHistory.at(-1), comparisonPrevious = comparisonHistory.at(-2)
+  const totalChange = comparisonLatest?.net != null && comparisonPrevious?.net != null ? Math.round((comparisonLatest.net - comparisonPrevious.net) * 100) / 100 : null
   const formatNumber = (value: number | null | undefined) => value == null ? '—' : value.toLocaleString('tr-TR', { maximumFractionDigits: 2 })
+  const signedChange = (value: number) => `${value > 0 ? '+' : value < 0 ? '−' : ''}${formatNumber(Math.abs(value))}`
   const chartDate = (value: string) => new Date(`${value}T00:00:00`).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' })
 
   const activeDrafts = useMemo(() => {
@@ -223,7 +228,7 @@ export default function Results() {
       {!showForm && (
         <div className="flex overflow-x-auto gap-2 shrink-0 border-b border-[#e3e9f0] pb-2">
           <button onClick={() => setTab('list')} className={`px-4 py-2 text-sm font-medium transition-all border-b-2 ${tab === 'list' ? 'border-[#4269a8] text-[#4269a8]' : 'border-transparent text-[#62748b] hover:text-[#24354a]'}`}>Tüm Sonuçlar</button>
-          <button onClick={() => setTab('stats')} className={`px-4 py-2 text-sm font-medium transition-all border-b-2 ${tab === 'stats' ? 'border-[#4269a8] text-[#4269a8]' : 'border-transparent text-[#62748b] hover:text-[#24354a]'}`}>Gelişim Grafikleri</button>
+          <button onClick={() => setTab('stats')} className={`px-4 py-2 text-sm font-medium transition-all border-b-2 ${tab === 'stats' ? 'border-[#4269a8] text-[#4269a8]' : 'border-transparent text-[#62748b] hover:text-[#24354a]'}`}>Gelişim ve Değişimler</button>
         </div>
       )}
 
@@ -348,8 +353,19 @@ export default function Results() {
           </div>
         ) : (
           <div className="result-analysis">
-            <div className="result-analysis-toolbar"><label>Sınav<CustomSelect value={selectedExamId} onChange={value => { setSelectedExamId(value); setChartQuestion(''); setFocusedResult(null) }} options={exams.map(e => ({ value: e.id, label: e.name }))} /></label><label>Soru türü<CustomSelect value={chartQuestion} onChange={value => { setChartQuestion(value); setFocusedResult(null) }} options={[{ value: '', label: 'Tüm soru türleri' }, ...questionTypes.filter(q => q.exam_id === selectedExamId).map(q => ({ value: q.id, label: q.name }))]} /></label><div className="result-chart-toggle" aria-label="Grafik ölçüsü">{(['net', 'points'] as const).map(value => <button key={value} aria-pressed={metric === value} onClick={() => setMetric(value)}>{value === 'net' ? 'Net' : 'Puan'}</button>)}</div></div>
+            <div className="result-change-filter"><h2>Önceki denemeye göre değişim</h2><CustomSelect value={selectedExamId} onChange={value => { setSelectedExamId(value); setChartQuestion(''); setFocusedResult(null) }} options={exams.map(e => ({ value: e.id, label: e.name }))} /></div>
             {chartData.length === 0 ? <p className="result-empty">Bu sınav için henüz deneme sonucu yok.</p> : <>
+              <section className="result-comparison-banner">
+                <div className={`result-total-change ${totalChange !== null && totalChange > 0 ? 'is-gain' : totalChange !== null && totalChange < 0 ? 'is-loss' : ''}`}><span>Toplam net değişimi</span><strong>{totalChange === null ? '—' : signedChange(totalChange)}<small>net</small></strong><p>{comparisonPrevious ? 'Son iki deneme arasında' : 'Karşılaştırmak için bir deneme daha ekle'}</p></div>
+                <div className="result-comparison-pair">{[comparisonPrevious, comparisonLatest].map((row, i) => <div key={i}><span>{i === 0 ? 'Önceki deneme' : 'Son deneme'}</span><strong>{row?.name || 'Henüz yok'}</strong><p>{row ? `${chartDate(row.date)} · ${formatNumber(row.net)} net` : '—'}</p></div>)}</div>
+              </section>
+              {changes.length > 0 && comparisonPrevious && <div className="result-change-columns">{([
+                { title: 'Artan konular', rows: changeGroups.increases, kind: 'gain', empty: 'Artış gösteren konu yok.' },
+                { title: 'Azalan konular', rows: changeGroups.decreases, kind: 'loss', empty: 'Azalış gösteren konu yok.' },
+              ] as const).map(group => <section key={group.kind} className={`result-change-group is-${group.kind}`}><header><h3>{group.title}</h3><span>{group.rows.length} konu</span></header>{group.rows.length === 0 ? <p className="result-change-empty">{group.empty}</p> : group.rows.map(row => <article className="result-change-card" key={row.id}><div className="result-change-main"><h4>{row.name}</h4><strong>{signedChange(row.change!)}<small>net</small></strong></div><div className="result-change-before-after"><span>Önceki <b>{formatNumber(row.previousNet)}</b></span><span aria-hidden="true">→</span><span>Son <b>{formatNumber(row.latestNet)}</b></span></div><p>Son deneme: {row.correct} doğru · {row.incorrect} yanlış</p></article>)}</section>)}</div>}
+              {changeGroups.unchanged.length > 0 && <details className="result-other-changes"><summary>Değişmeyen konular <span>{changeGroups.unchanged.length}</span></summary><div>{changeGroups.unchanged.map(row => <article key={row.id}><strong>{row.name}</strong><b>0 <small>net</small></b><span>{formatNumber(row.previousNet)} → {formatNumber(row.latestNet)} net</span></article>)}</div></details>}
+              {changeGroups.unavailable.length > 0 && <details className="result-other-changes"><summary>Karşılaştırma için kayıt eksik <span>{changeGroups.unavailable.length}</span></summary><div>{changeGroups.unavailable.map(row => <article key={row.id}><strong>{row.name}</strong><span>Önceki: {formatNumber(row.previousNet)} net · Son: {formatNumber(row.latestNet)} net</span></article>)}</div></details>}
+              <details className="result-history-details"><summary>Deneme geçmişi ve çizgi grafiği</summary><div className="result-analysis-toolbar"><label>Soru türü<CustomSelect value={chartQuestion} onChange={value => { setChartQuestion(value); setFocusedResult(null) }} options={[{ value: '', label: 'Tüm soru türleri' }, ...questionTypes.filter(q => q.exam_id === selectedExamId).map(q => ({ value: q.id, label: q.name }))]} /></label><div className="result-chart-toggle" aria-label="Grafik ölçüsü">{(['net', 'points'] as const).map(value => <button key={value} aria-pressed={metric === value} onClick={() => setMetric(value)}>{value === 'net' ? 'Net' : 'Puan'}</button>)}</div></div>
               <div className="result-kpis">{[
                 ['Son sonuç', formatNumber(latest?.[metric])],
                 ['Ortalama', measured.length ? formatNumber(average) : '—'],
@@ -370,7 +386,7 @@ export default function Results() {
                 </AreaChart></ResponsiveContainer></div>}
                 {focused && <div className="result-focused" aria-live="polite"><div><strong>{focused.name}</strong><span>{chartDate(focused.date)} · {focused.order}. deneme</span></div><div><span className="result-up">{focused.correct} doğru</span><span className="result-down">{focused.incorrect} yanlış</span><strong>{formatNumber(focused[metric])} {metric === 'net' ? 'net' : 'puan'}</strong><button onClick={() => setSelectedDetailResult(results.find(r => r.id === focused.id) || null)}>Detay</button></div></div>}
               </section>
-              {changes.length > 0 && <section className="result-question-chart"><div className="result-chart-heading"><div><h3>Son deneme · soru türleri</h3><p>{chartData.at(-1)?.name}</p></div><div className="result-answer-legend"><span className="result-up">Doğru</span><span className="result-down">Yanlış</span></div></div><div className="result-question-grid">{changes.map(row => { const answered = (row.correct || 0) + (row.incorrect || 0); return <article key={row.id}><div className="result-question-label"><strong>{row.name}</strong><span>{formatNumber(row.latestNet)} net</span></div>{row.latestNet === null ? <p className="result-no-answer">Kayıt yok</p> : <><div className="result-answer-bar"><i style={{ width: `${answered ? (row.correct || 0) / answered * 100 : 0}%` }} /><i style={{ width: `${answered ? (row.incorrect || 0) / answered * 100 : 0}%` }} /></div><div className="result-answer-counts"><span>{row.correct} D · {row.incorrect} Y</span><span className={row.change !== null && row.change < 0 ? 'result-down' : 'result-up'}>{row.change === null ? 'Önceki kayıt yok' : `${row.change > 0 ? '+' : ''}${formatNumber(row.change)} net`}</span></div><small>Önceki: {formatNumber(row.previousNet)} net</small></>}</article> })}</div></section>}
+              </details>
             </>}
           </div>
         )}
