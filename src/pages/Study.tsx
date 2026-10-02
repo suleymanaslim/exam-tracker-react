@@ -3,17 +3,22 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useTimerStore } from '../lib/timerStore'
+import { saveTimerSession } from '../lib/useGlobalTimer'
+import { recoveryFor } from '../lib/timerRecovery'
 import Swal from 'sweetalert2'
 import {
   Timer, Play, Pause, RotateCcw, Plus, Clock,
   Target, CheckCircle2, Coffee, SkipForward, X
 } from 'lucide-react'
 import { useAdminStore } from '../lib/adminStore'
+import FocusReset from '../components/FocusReset'
+import { playlistURL } from '../lib/playlist'
+import { unlockTimerAlarm, stopTimerAlarm, playTimerAlarm } from '../lib/timerAudio'
 import { localDayKey } from '../lib/statsPeriod'
 
 interface Exam { id: string; name: string; color: string }
 interface Subject { id: string; exam_id: string; name: string }
-interface Resource { id: string; subject_id: string; name: string }
+interface Resource { id: string; subject_id: string; name: string; resource_type: string; url: string | null }
 interface PomodoroSettings {
   long_focus_minutes: number
   long_break_minutes: number
@@ -51,20 +56,13 @@ export default function Study() {
   const [pomodoroCount, setPomodoroCount] = useState(2)
   const [todaySessions, setTodaySessions] = useState<any[]>([])
 
-  // Yeni kaynak ekleme
-  const [showNewResource, setShowNewResource] = useState(false)
-  const [newResourceName, setNewResourceName] = useState('')
-
   // Manuel Oturum Modal State
   const [showManualModal, setShowManualModal] = useState(false)
   const [manualExamId, setManualExamId] = useState('')
   const [manualSubjectId, setManualSubjectId] = useState('')
-  const [manualResourceId, setManualResourceId] = useState('')
   const [manualDuration, setManualDuration] = useState<number | ''>(45)
-  const [manualDate, setManualDate] = useState<string>(localDayKey(new Date()))
+  const [manualDate, setManualDate] = useState<string>(() => localDayKey(new Date()))
   const [manualNote, setManualNote] = useState('')
-  const [showManualNewResource, setShowManualNewResource] = useState(false)
-  const [manualNewResourceName, setManualNewResourceName] = useState('')
   const [manualSaving, setManualSaving] = useState(false)
 
   // ── Global timer store ─────────────────────────────────────────────
@@ -78,17 +76,17 @@ export default function Study() {
     selExam,
     selSubject,
     selResource,
-    deadlineEpoch,
-    setIsRunning,
+    ownerId,
+    recovery,
+    startTimer,
+    pauseTimer,
+    focusSeconds: storedFocusSeconds,
     setSecondsLeft,
     setTotalSeconds,
-    setStartedAt,
     setMode,
-    setPhase,
     setSelExam,
     setSelSubject,
     setSelResource,
-    setDeadlineEpoch,
     setBreakSeconds,
     resetTimer,
   } = useTimerStore()
@@ -169,34 +167,24 @@ export default function Study() {
 
   // ── Break seconds'ı ayarlardan store'a yaz ─────────────────────────
   useEffect(() => {
+    if (isRunning || startedAt || recovery || phase === 'break') return
     const breakMins = mode === 'pomodoro_long' ? settings.long_break_minutes : settings.short_break_minutes
     setBreakSeconds(breakMins * 60)
-  }, [mode, settings, setBreakSeconds])
+  }, [mode, settings, isRunning, startedAt, recovery, phase, setBreakSeconds])
 
   // ── Initialize timer when mode, settings, or pomodoro count change (only if not running) ──
   useEffect(() => {
-    if (!isRunning && !startedAt && phase === 'focus') {
+    if (ownerId === userId && !isRunning && !startedAt && !recovery && phase === 'focus') {
       setSecondsLeft(focusSeconds)
       setTotalSeconds(focusSeconds)
     }
-  }, [mode, focusSeconds, pomodoroCount])
+  }, [mode, focusSeconds, pomodoroCount, ownerId, userId, isRunning, startedAt, recovery, phase, setSecondsLeft, setTotalSeconds])
 
   // ── Toggle timer ───────────────────────────────────────────────────
   const toggleTimer = () => {
-    if (!selSubject) { alert('Lütfen önce sınav ve ders seçin.'); return }
-    if (!isRunning) {
-      const now = Date.now()
-      if (!startedAt && phase === 'focus') setStartedAt(new Date())
-      setDeadlineEpoch(now + secondsLeft * 1000)
-      setIsRunning(true)
-    } else {
-      if (deadlineEpoch !== null) {
-        const remaining = Math.max(0, Math.round((deadlineEpoch - Date.now()) / 1000))
-        setSecondsLeft(remaining)
-        setDeadlineEpoch(null)
-      }
-      setIsRunning(false)
-    }
+    if (!selSubject || !userId || ownerId !== userId || recovery) return
+    if (isRunning) pauseTimer()
+    else { unlockTimerAlarm(); startTimer() }
   }
 
   const handleReset = async () => {
@@ -204,115 +192,30 @@ export default function Study() {
       const result = await Swal.fire({ title: 'Oturumu sıfırla?', text: 'Bu oturumdaki süre kaydedilmez. Kaydetmek için bitir düğmesini kullanabilirsin.', icon: 'question', showCancelButton: true, confirmButtonText: 'Sıfırla', cancelButtonText: 'Devam et' })
       if (!result.isConfirmed) return
     }
-    resetTimer(focusSeconds)
+    resetTimer(storedFocusSeconds || focusSeconds)
   }
 
   const skipBreak = () => {
-    setIsRunning(false)
-    setDeadlineEpoch(null)
-    setPhase('focus')
-    setSecondsLeft(focusSeconds)
-    setTotalSeconds(focusSeconds)
-    setStartedAt(null)
-    document.title = 'ExamTracker'
+    useTimerStore.getState().finishBreak()
   }
 
   const endEarly = async () => {
-    if (!isRunning && !startedAt) return
-
-    // Mola sırasında erken bitir — sadece skip
-    if (phase === 'break') {
-      skipBreak()
-      return
+    if (!startedAt || recovery) return
+    const result = await Swal.fire({ title: 'Çalışmayı bitir ve kaydet?', icon: 'question', showCancelButton: true, confirmButtonText: 'Bitir ve kaydet', cancelButtonText: 'Devam et', confirmButtonColor: '#4269a8' })
+    if (!result.isConfirmed) return
+    const current = useTimerStore.getState()
+    if (!current.ownerId) return
+    const session = recoveryFor({ ...current, ownerId: current.ownerId, startedAt: current.startedAt?.toISOString() || null }, Date.now())
+    if (!session) return
+    pauseTimer()
+    try {
+      await saveTimerSession(session)
+      resetTimer(current.focusSeconds)
+      void Swal.fire({ icon: session.durationMinutes ? 'success' : 'info', title: session.durationMinutes ? 'Kaydedildi' : 'Kaydedilmedi', text: session.durationMinutes ? `${session.durationMinutes} dakikalık oturum kaydedildi.` : 'Bir dakikadan kısa oturum kaydedilmedi.', timer: 2000, showConfirmButton: false })
+    } catch (error) {
+      console.error(error)
+      void Swal.fire('Kaydedilemedi', 'Çalışma süren korunuyor. Tekrar deneyebilirsin.', 'error')
     }
-
-    const res = await Swal.fire({
-      title: 'Erken Bitir',
-      text: 'Çalışmayı erken bitirmek istediğinize emin misiniz?',
-      icon: 'warning',
-      showCancelButton: true,
-      confirmButtonColor: '#ef4444',
-      cancelButtonColor: '#94a3b8',
-      confirmButtonText: 'Evet, Bitir',
-      cancelButtonText: 'İptal'
-    })
-    if (!res.isConfirmed) return
-
-    const elapsed = deadlineEpoch !== null
-      ? totalSeconds - Math.max(0, Math.round((deadlineEpoch - Date.now()) / 1000))
-      : totalSeconds - secondsLeft
-    const passedMins = Math.floor(elapsed / 60)
-
-    setIsRunning(false)
-    setDeadlineEpoch(null)
-
-    if (passedMins > 0 && userId && selSubject) {
-      const start = startedAt ?? new Date(Date.now() - passedMins * 60_000)
-      const now = new Date()
-      const { error } = await supabase.from('study_sessions').insert({
-        user_id: userId,
-        subject_id: selSubject || null,
-        resource_id: selResource || null,
-        session_type: mode,
-        started_at: start.toISOString(),
-        ended_at: now.toISOString(),
-        duration_minutes: passedMins,
-      })
-      if (error) {
-        setSecondsLeft(Math.max(0, totalSeconds - elapsed))
-        void Swal.fire('Kaydedilemedi', 'Çalışma süren korunuyor. Kaydetmeyi tekrar deneyebilirsin.', 'error')
-        return
-      }
-      Swal.fire({ icon: 'success', title: 'Başarılı', text: `${passedMins} dakikalık oturum kaydedildi!`, timer: 2500, showConfirmButton: false })
-      loadTodaySessions(userId)
-    } else {
-      Swal.fire({ icon: 'info', title: 'Kaydedilmedi', text: '1 dakikadan az çalışıldığı için oturum kaydedilmedi.', confirmButtonColor: '#4269a8' })
-    }
-
-    resetTimer(focusSeconds)
-  }
-
-  // ── Resource change handler ──────────────────────────────────────────
-  const handleResourceChange = (value: string) => {
-    if (value === '__new__') {
-      setShowNewResource(true)
-      setSelResource('')
-    } else {
-      setSelResource(value)
-      setShowNewResource(false)
-    }
-  }
-
-  // ── Yeni kaynak ekleme ──────────────────────────────────────────────
-  const handleAddNewResource = async () => {
-    if (!newResourceName.trim() || !userId || !selSubject) return
-    const { data, error } = await supabase.from('resources').insert({
-      user_id: userId,
-      subject_id: selSubject,
-      name: newResourceName.trim(),
-      resource_type: 'diger',
-    }).select().single()
-    if (error) { console.error(error); return }
-    setResources(prev => [...prev, data as Resource])
-    setSelResource(data.id)
-    setNewResourceName('')
-    setShowNewResource(false)
-  }
-
-  // ── Manuel Oturum Ekleme Handlers ────────────────────────────────────
-  const handleAddManualNewResource = async () => {
-    if (!manualNewResourceName.trim() || !userId || !manualSubjectId) return
-    const { data, error } = await supabase.from('resources').insert({
-      user_id: userId,
-      subject_id: manualSubjectId,
-      name: manualNewResourceName.trim(),
-      resource_type: 'diger',
-    }).select().single()
-    if (error) { console.error(error); return }
-    setResources(prev => [...prev, data as Resource])
-    setManualResourceId(data.id)
-    setManualNewResourceName('')
-    setShowManualNewResource(false)
   }
 
   const handleSaveManualSession = async () => {
@@ -336,7 +239,7 @@ export default function Study() {
       const { error } = await supabase.from('study_sessions').insert({
         user_id: userId,
         subject_id: manualSubjectId,
-        resource_id: manualResourceId || null,
+        resource_id: null,
         session_type: 'manual',
         started_at: startDate.toISOString(),
         ended_at: baseDate.toISOString(),
@@ -361,12 +264,9 @@ export default function Study() {
         setShowManualModal(false)
         setManualExamId('')
         setManualSubjectId('')
-        setManualResourceId('')
         setManualDuration(45)
         setManualDate(localDayKey(new Date()))
         setManualNote('')
-        setShowManualNewResource(false)
-        setManualNewResourceName('')
       }
     } catch (err) {
       console.error(err)
@@ -387,16 +287,15 @@ export default function Study() {
 
   // ── Derived values ─────────────────────────────────────────────────
   const filteredSubjects = subjects.filter(s => s.exam_id === selExam)
-  const filteredResources = resources.filter(r => r.subject_id === selSubject)
+  const playlistResources = resources.filter(resource => resource.subject_id === selSubject && resource.resource_type === 'video_ders' && playlistURL(resource.url))
 
   const minutes = Math.floor(secondsLeft / 60)
   const secs = secondsLeft % 60
   const progress = totalSeconds > 0 ? ((totalSeconds - secondsLeft) / totalSeconds) * 100 : 0
 
-  const isTimerActive = isRunning || !!startedAt || phase === 'break'
+  const isTimerActive = isRunning || !!startedAt || phase === 'break' || !!recovery
 
   const getSubjectName = (id: string | null) => subjects.find(s => s.id === id)?.name ?? ''
-  const getResourceName = (id: string | null) => resources.find(r => r.id === id)?.name ?? ''
   const getExamColor = (sid: string | null) => {
     const sub = subjects.find(s => s.id === sid)
     if (!sub) return '#94a3b8'
@@ -409,6 +308,7 @@ export default function Study() {
   const formatDuration = (value: number) => `${Math.floor(value / 60) ? `${Math.floor(value / 60)} sa ` : ''}${value % 60} dk`
   const selectedSubject = subjects.find(subject => subject.id === selSubject)
   const selectedResource = resources.find(resource => resource.id === selResource)
+  const activePlaylistURL = playlistURL(selectedResource?.url)
   const modeOptions: { key: SessionMode; label: string; description: string }[] = [
     { key: 'pomodoro_short', label: 'Kısa Pomodoro', description: `${settings.short_focus_minutes} dk odak · ${settings.short_break_minutes} dk mola` },
     { key: 'pomodoro_long', label: 'Uzun Pomodoro', description: `${settings.long_focus_minutes} dk odak · ${settings.long_break_minutes} dk mola` },
@@ -419,16 +319,19 @@ export default function Study() {
     <div className="study-page">
       <header className="study-header">
         <div><p className="study-eyebrow">ODAKLAN · TAMAMLA · İLERLE</p><h1>Çalışma alanı</h1><p>Dersini seç, ritmini bul. Gerisini zamanlayıcıya bırak.</p></div>
-        <button className="study-button study-button-secondary" onClick={() => setShowManualModal(true)}><Plus size={17} /> Çalışma ekle</button>
+        <div className="study-header-actions"><FocusReset onOpen={() => { stopTimerAlarm(); if (isRunning && phase === 'focus') pauseTimer() }} /><button className="study-button study-button-secondary" onClick={() => setShowManualModal(true)}><Plus size={17} /> Çalışma ekle</button></div>
       </header>
+
+      {recovery && <div className="study-recovery-banner"><span>Önceki oturumun onay bekliyor.</span><button className="study-button study-button-secondary" onClick={() => useTimerStore.setState({ recovery: { ...recovery } })}>Oturumu değerlendir</button></div>}
+      {startedAt && !recovery && phase === 'focus' && activePlaylistURL && <div className="study-playlist-banner"><div><span>{selectedSubject?.name} · oynatma listesi</span><a href={activePlaylistURL} target="_blank" rel="noopener noreferrer">{activePlaylistURL}</a></div><a className="study-button study-button-primary" href={activePlaylistURL} target="_blank" rel="noopener noreferrer"><Play size={17} /> Listeyi aç</a></div>}
 
       <div className="study-grid">
         <aside className="study-side">
-          <section className="study-card study-plan"><div className="study-card-heading"><h2><Target size={18} /> Bugünün planı</h2><span>{todayPlan.length} görev</span></div><p className="study-card-description">Bir görev seçerek ders ve kaynağı hızlıca yükle.</p>
+          <section className="study-card study-plan"><div className="study-card-heading"><h2><Target size={18} /> Bugünün planı</h2><span>{todayPlan.length} görev</span></div><p className="study-card-description">Bir görev seçerek dersini hızlıca yükle.</p>
             <div className="study-plan-list">{todayPlan.length === 0 ? <div className="study-empty"><Target size={24} /><p>Bugün için plan bulunmuyor.</p><Link to="/plan">Haftalık planı aç</Link></div> : todayPlan.map(item => {
               const studied = todaySessions.filter(session => session.subject_id === item.subject_id && (!item.resource_id || session.resource_id === item.resource_id)).reduce((sum, session) => sum + session.duration_minutes, 0)
               const done = item.planned_minutes > 0 && studied >= item.planned_minutes
-              return <button key={item.id} onClick={() => loadPlanItem(item)} disabled={isTimerActive || !item.subject_id} className={`study-plan-item ${done ? 'is-done' : ''}`}><i style={{ backgroundColor: getExamColor(item.subject_id) }} /><div><strong>{item.title || getSubjectName(item.subject_id) || 'Çalışma'}</strong><span>{getSubjectName(item.subject_id)}{getResourceName(item.resource_id) ? ` · ${getResourceName(item.resource_id)}` : ''}</span><div className="study-plan-metrics"><span>{formatDuration(item.planned_minutes)}</span>{done && <CheckCircle2 size={15} />}</div></div></button>
+              return <button key={item.id} onClick={() => loadPlanItem(item)} disabled={isTimerActive || !item.subject_id} className={`study-plan-item ${done ? 'is-done' : ''}`}><i style={{ backgroundColor: getExamColor(item.subject_id) }} /><div><strong>{getSubjectName(item.subject_id) || 'Çalışma'}</strong><span>{item.id.startsWith('vpi_') ? 'Video çalışması' : 'Günlük plan'}</span><div className="study-plan-metrics"><span>{formatDuration(item.planned_minutes)}</span>{done && <CheckCircle2 size={15} />}</div></div></button>
             })}</div>
           </section>
 
@@ -437,7 +340,7 @@ export default function Study() {
         <section className={`study-card study-focus ${isBreak ? 'study-break' : ''}`}>
           <div className="study-card-heading"><h2><Timer size={18} /> Odak oturumu</h2><span className={`study-status ${isRunning ? 'is-running' : ''}`}>{isBreak ? 'Mola' : isRunning ? 'Çalışılıyor' : startedAt ? 'Duraklatıldı' : 'Hazır'}</span></div>
           <details className="study-mode-picker">
-            <summary>{modeOptions.find(option => option.key === mode)?.label} <span>· {focusMinutes} dk</span></summary>
+            <summary>{modeOptions.find(option => option.key === mode)?.label} <span>· {isTimerActive ? Math.round(storedFocusSeconds / 60) : focusMinutes} dk</span></summary>
           <div className="study-modes" role="group" aria-label="Çalışma modu">
             {modeOptions.map(option => <button key={option.key} disabled={isTimerActive} onClick={event => { setMode(option.key); event.currentTarget.closest('details')?.removeAttribute('open') }} aria-pressed={mode === option.key} className={mode === option.key ? 'selected' : ''}><strong>{option.label}</strong><span>{option.description}</span></button>)}
           </div>
@@ -449,20 +352,21 @@ export default function Study() {
           <div className="study-selection">
             <label>Sınav<select value={selExam} disabled={isTimerActive} onChange={event => { setSelExam(event.target.value); setSelSubject(''); setSelResource('') }}><option value="">Sınav seç</option>{exams.map(exam => <option key={exam.id} value={exam.id}>{exam.name}</option>)}</select></label>
             <label>Ders<select value={selSubject} disabled={isTimerActive || !selExam} onChange={event => { setSelSubject(event.target.value); setSelResource('') }}><option value="">Ders seç</option>{filteredSubjects.map(subject => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</select></label>
-            <label>Kaynak <span>(isteğe bağlı)</span><select value={selResource} disabled={isTimerActive || !selSubject} onChange={event => handleResourceChange(event.target.value)}><option value="">Kaynak seç</option>{filteredResources.map(resource => <option key={resource.id} value={resource.id}>{resource.name}</option>)}<option value="__new__">+ Yeni kaynak ekle</option></select></label>
+            {playlistResources.length > 0 && <label>Video oynatma listesi<select value={playlistResources.some(resource => resource.id === selResource) ? selResource : ''} disabled={isTimerActive} onChange={event => setSelResource(event.target.value)}><option value="">Liste seç (isteğe bağlı)</option>{playlistResources.map((resource, index) => <option key={resource.id} value={resource.id}>{selectedSubject?.name}{playlistResources.length > 1 ? ` · Liste ${index + 1}` : ''}</option>)}</select></label>}
           </div>
-          {showNewResource && <div className="study-new-resource"><input autoFocus value={newResourceName} onChange={event => setNewResourceName(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') void handleAddNewResource() }} placeholder="Yeni kaynak adı" aria-label="Yeni kaynak adı" /><button className="study-button study-button-primary" onClick={handleAddNewResource}>Ekle</button><button className="study-icon-button" onClick={() => setShowNewResource(false)} aria-label="Vazgeç"><X size={17} /></button></div>}
+
 
           <div className="study-timer">
             <div className="study-timer-context">{isBreak ? <><Coffee size={17} /> Mola zamanı</> : selectedSubject?.name || 'İlk adım: dersini seç'}</div>
             <div className="study-clock" role="timer" aria-label="Kalan süre">{String(minutes).padStart(2, '0')}<span>:</span>{String(secs).padStart(2, '0')}</div>
-            <p>{isBreak ? 'Dinlen, ardından yeni bir odak oturumuna geç.' : selectedResource?.name || `${focusMinutes} dakika odak · bildirimle tamamla`}</p>
+            <p>{isBreak ? 'Dinlen, ardından yeni bir odak oturumuna geç.' : `${Math.round((startedAt ? totalSeconds : focusSeconds) / 60)} dakika odak · bildirimle tamamla`}</p>
             <div className="study-timer-progress" role="progressbar" aria-label="Oturum ilerlemesi" aria-valuenow={Math.round(progress)} aria-valuemin={0} aria-valuemax={100}><i style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} /></div>
             <div className="study-controls">
               <button className="study-icon-button" onClick={isBreak ? skipBreak : handleReset} aria-label={isBreak ? 'Molayı atla' : 'Sayacı sıfırla'} title={isBreak ? 'Molayı atla' : 'Sıfırla'}>{isBreak ? <SkipForward size={19} /> : <RotateCcw size={19} />}</button>
-              <button className="study-button study-button-primary study-start" onClick={toggleTimer} disabled={!selSubject}>{isRunning ? <Pause size={19} /> : <Play size={19} />}{isRunning ? 'Duraklat' : startedAt || isBreak ? 'Devam et' : 'Odaklanmaya başla'}</button>
-              {!isBreak && <button className="study-icon-button" onClick={endEarly} disabled={!startedAt} aria-label="Çalışmayı bitir ve kaydet" title="Bitir ve kaydet"><CheckCircle2 size={19} /></button>}
+              <button className="study-button study-button-primary study-start" onClick={toggleTimer} disabled={!selSubject || !userId || ownerId !== userId || !!recovery}>{isRunning ? <Pause size={19} /> : <Play size={19} />}{isRunning ? 'Duraklat' : startedAt || isBreak ? 'Devam et' : 'Odaklanmaya başla'}</button>
+              {!isBreak && <button className="study-icon-button" onClick={endEarly} disabled={!startedAt || !!recovery} aria-label="Çalışmayı bitir ve kaydet" title="Bitir ve kaydet"><CheckCircle2 size={19} /></button>}
             </div>
+            <button className="study-test-end" disabled={!!recovery} onClick={() => { const timer = useTimerStore.getState(); if (timer.phase === 'break') timer.finishBreak(); else timer.finishFocus(); playTimerAlarm() }}>Bitişi test et · kayıt yok</button>
             <p className="study-timer-hint">{!selSubject ? 'Başlamak için sınav ve ders seçmelisin.' : isBreak ? 'Mola süresi çalışma toplamına eklenmez.' : 'Tamamlanan oturum otomatik kaydedilir.'}</p>
           </div>
 
@@ -504,8 +408,7 @@ export default function Study() {
                   onChange={e => {
                     setManualExamId(e.target.value)
                     setManualSubjectId('')
-                    setManualResourceId('')
-                  }}
+                              }}
                   className="mt-1 w-full h-10 rounded-xl border border-[#e2e8f0] bg-[#f8fafc] px-3 text-[13px] text-[#24354a] focus:outline-none focus:ring-2 focus:ring-[#4269a8]/30"
                 >
                   <option value="">Sınav seçiniz...</option>
@@ -520,8 +423,7 @@ export default function Study() {
                   value={manualSubjectId}
                   onChange={e => {
                     setManualSubjectId(e.target.value)
-                    setManualResourceId('')
-                  }}
+                              }}
                   disabled={!manualExamId}
                   className="mt-1 w-full h-10 rounded-xl border border-[#e2e8f0] bg-[#f8fafc] px-3 text-[13px] text-[#24354a] focus:outline-none focus:ring-2 focus:ring-[#4269a8]/30 disabled:opacity-50"
                 >
@@ -530,60 +432,6 @@ export default function Study() {
                     <option key={s.id} value={s.id}>{s.name}</option>
                   ))}
                 </select>
-              </div>
-
-              {/* Kaynak Seçimi (Opsiyonel) */}
-              <div>
-                <label className="text-[13px] font-semibold text-[#62748b] uppercase tracking-wider">Kaynak <span className="text-[13px] text-[#94a3b8] font-normal">(opsiyonel)</span></label>
-                <select
-                  value={manualResourceId}
-                  onChange={e => {
-                    if (e.target.value === '__new__') {
-                      setShowManualNewResource(true)
-                      setManualResourceId('')
-                    } else {
-                      setManualResourceId(e.target.value)
-                      setShowManualNewResource(false)
-                    }
-                  }}
-                  disabled={!manualSubjectId}
-                  className="mt-1 w-full h-10 rounded-xl border border-[#e2e8f0] bg-[#f8fafc] px-3 text-[13px] text-[#24354a] focus:outline-none focus:ring-2 focus:ring-[#4269a8]/30 disabled:opacity-50"
-                >
-                  <option value="">Kaynak seçiniz (opsiyonel)...</option>
-                  {resources.filter(r => r.subject_id === manualSubjectId).map(r => (
-                    <option key={r.id} value={r.id}>{r.name}</option>
-                  ))}
-                  {manualSubjectId && <option value="__new__">+ Yeni Kaynak Ekle</option>}
-                </select>
-
-                {/* Inline yeni kaynak input */}
-                {showManualNewResource && (
-                  <div className="mt-1.5 flex items-center gap-1.5">
-                    <input
-                      autoFocus
-                      value={manualNewResourceName}
-                      onChange={e => setManualNewResourceName(e.target.value)}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter') handleAddManualNewResource()
-                        if (e.key === 'Escape') { setShowManualNewResource(false); setManualNewResourceName('') }
-                      }}
-                      placeholder="Kaynak adı yaz..."
-                      className="flex-1 h-9 rounded-lg border border-[#4269a8] px-2.5 text-[14px] focus:outline-none"
-                    />
-                    <button
-                      onClick={handleAddManualNewResource}
-                      className="h-9 w-9 flex items-center justify-center rounded-lg bg-[#4269a8] text-white hover:bg-blue-600 shrink-0"
-                    >
-                      <Plus className="h-4 w-4" />
-                    </button>
-                    <button
-                      onClick={() => { setShowManualNewResource(false); setManualNewResourceName('') }}
-                      className="h-9 w-9 flex items-center justify-center rounded-lg border border-[#e2e8f0] text-[#94a3b8] hover:bg-[#f1f5f9] shrink-0"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-                )}
               </div>
 
               {/* Süre (Dakika cinsinden) ve Tarih */}

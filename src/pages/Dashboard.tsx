@@ -399,6 +399,8 @@ export default function Dashboard() {
   const todayPlanItems = weekPlanItems.filter(p => p.day_of_week === todayDayOfWeekNum)
 
   const startFromPlan = (item: any) => {
+    const timer = useTimerStore.getState()
+    if (timer.isRunning || timer.startedAt || timer.recovery || timer.phase === 'break') { navigate('/study'); return }
     const sub = subjects.find(s => s.id === item.subject_id)
     if (!sub) return
     setSelExam(sub.exam_id)
@@ -412,6 +414,8 @@ export default function Dashboard() {
   }
 
   const startQuick = () => {
+    const timer = useTimerStore.getState()
+    if (timer.isRunning || timer.startedAt || timer.recovery || timer.phase === 'break') { navigate('/study'); return }
     if (!quickSubject) return
     setSelExam(quickExam)
     setSelSubject(quickSubject)
@@ -423,6 +427,8 @@ export default function Dashboard() {
   }
 
   const startReview = (subjectId: string, resourceId: string | null) => {
+    const timer = useTimerStore.getState()
+    if (timer.isRunning || timer.startedAt || timer.recovery || timer.phase === 'break') { navigate('/study'); return }
     const sub = subjects.find(s => s.id === subjectId)
     if (!sub) return
     setSelExam(sub.exam_id)

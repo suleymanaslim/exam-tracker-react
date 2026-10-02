@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { Plus, Trash2, Download, Printer, Settings, EyeOff, SkipForward, X, Check, ChevronUp, ChevronDown } from 'lucide-react'
 import Swal from 'sweetalert2'
 import { useAdminStore } from '../lib/adminStore'
+import { playlistURL } from '../lib/playlist'
 import { videoPlanPrintHTML } from '../lib/videoPlanPrint'
 
 /* ─────────────── Types ─────────────── */
@@ -20,7 +21,7 @@ function showPlanError(error: { code?: string; message: string }) {
 
 interface Resource {
   id: string; subject_id: string; name: string; resource_type: string
-  total_videos: number; avg_video_duration: number; subject_name?: string
+  total_videos: number; avg_video_duration: number; subject_name?: string; url?: string | null
 }
 interface VideoPlanItem {
   id: string; resource_id: string; date: string; video_count: number;
@@ -86,6 +87,8 @@ export default function VideoPlan() {
   const [editingRes, setEditingRes] = useState<Resource | null>(null)
   const [editTotal, setEditTotal] = useState('')
   const [editAvg, setEditAvg] = useState('')
+  const [editPlaylistURL, setEditPlaylistURL] = useState('')
+  const [savingResource, setSavingResource] = useState(false)
 
   /* selection */
   const [selectedResId, setSelectedResId] = useState<string | null>(null)
@@ -385,15 +388,23 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
     setEditingRes(r)
     setEditTotal(r.total_videos?.toString() || '0')
     setEditAvg(r.avg_video_duration?.toString() || '0')
+    setEditPlaylistURL(r.url || '')
   }
 
   const saveEditResource = async () => {
-    if (!editingRes) return
-    const t = parseInt(editTotal) || 0
-    const a = parseInt(editAvg) || 0
-    await supabase.from('resources').update({ total_videos: t, avg_video_duration: a }).eq('id', editingRes.id)
-    setResources(p => p.map(r => r.id === editingRes.id ? { ...r, total_videos: t, avg_video_duration: a } : r))
-    setAllResources(p => p.map(r => r.id === editingRes.id ? { ...r, total_videos: t, avg_video_duration: a } : r))
+    if (!editingRes || savingResource) return
+    const url = playlistURL(editPlaylistURL)
+    if (editPlaylistURL.trim() && !url) {
+      void Swal.fire('Geçersiz bağlantı', 'https:// veya http:// ile başlayan geçerli bir oynatma listesi bağlantısı girin.', 'warning')
+      return
+    }
+    const values = { total_videos: parseInt(editTotal) || 0, avg_video_duration: parseInt(editAvg) || 0, url }
+    setSavingResource(true)
+    const { error } = await supabase.from('resources').update(values).eq('id', editingRes.id)
+    setSavingResource(false)
+    if (error) { void showPlanError(error); return }
+    setResources(previous => previous.map(resource => resource.id === editingRes.id ? { ...resource, ...values } : resource))
+    setAllResources(previous => previous.map(resource => resource.id === editingRes.id ? { ...resource, ...values } : resource))
     setEditingRes(null)
   }
 
@@ -411,15 +422,22 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
 
     const { value: det } = await Swal.fire({
       title: 'Video Bilgileri',
-      html: `<input id="sw-t" className="swal2-input" placeholder="Toplam Video" type="number" min="1"><input id="sw-a" className="swal2-input" placeholder="Ort. Süre (dk)" type="number" min="1">`,
+      html: `<input id="sw-t" className="swal2-input" placeholder="Toplam Video" type="number" min="1"><input id="sw-a" className="swal2-input" placeholder="Ort. Süre (dk)" type="number" min="1"><input id="sw-url" className="swal2-input" placeholder="Oynatma listesi URL (isteğe bağlı)" type="url">`,
       focusConfirm: false, showCancelButton: true, confirmButtonText: 'Kaydet', confirmButtonColor: '#2563eb',
-      preConfirm: () => ({ tot: parseInt((document.getElementById('sw-t') as HTMLInputElement).value) || 0, avg: parseInt((document.getElementById('sw-a') as HTMLInputElement).value) || 0 }),
+      preConfirm: () => {
+        const entered = (document.getElementById('sw-url') as HTMLInputElement).value
+        const url = playlistURL(entered)
+        if (entered.trim() && !url) { Swal.showValidationMessage('Geçerli bir http:// veya https:// bağlantısı girin.'); return false }
+        return { tot: parseInt((document.getElementById('sw-t') as HTMLInputElement).value) || 0, avg: parseInt((document.getElementById('sw-a') as HTMLInputElement).value) || 0, url }
+      },
     })
-    const tot = det?.tot || 0, avg = det?.avg || 0
-    await supabase.from('resources').update({ resource_type: 'video_ders', total_videos: tot, avg_video_duration: avg }).eq('id', resId)
+    if (!det) return
+    const tot = det.tot, avg = det.avg
+    const { error } = await supabase.from('resources').update({ resource_type: 'video_ders', total_videos: tot, avg_video_duration: avg, url: det.url }).eq('id', resId)
+    if (error) { void showPlanError(error); return }
     const found = allResources.find(r => r.id === resId)
     if (found) {
-      const nr = { ...found, resource_type: 'video_ders', total_videos: tot, avg_video_duration: avg }
+      const nr = { ...found, resource_type: 'video_ders', total_videos: tot, avg_video_duration: avg, url: det.url }
       setResources(p => [...p, nr])
       setAllResources(p => p.map(r => r.id === resId ? nr : r))
     }
@@ -617,9 +635,10 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
                           <input type="number" min="0" value={editTotal} onChange={e => setEditTotal(e.target.value)} placeholder="Top. vid" className="w-full h-7 px-2 text-xs border border-slate-200 rounded focus:outline-none focus:border-slate-900 tabular-nums" />
                           <input type="number" min="0" value={editAvg} onChange={e => setEditAvg(e.target.value)} placeholder="Dk/vid" className="w-full h-7 px-2 text-xs border border-slate-200 rounded focus:outline-none focus:border-slate-900 tabular-nums" />
                         </div>
+                        <label className="block text-[12px] text-slate-600 mb-2">Oynatma listesi bağlantısı<input type="url" value={editPlaylistURL} onChange={event => setEditPlaylistURL(event.target.value)} placeholder="https://www.youtube.com/playlist?list=…" className="mt-1 w-full h-8 px-2 text-xs border border-slate-200 rounded focus:outline-none focus:border-slate-900" /></label>
                         <div className="flex gap-1">
-                          <button onClick={() => setEditingRes(null)} className="flex-1 h-6 rounded border border-slate-200 text-[11px] font-medium text-slate-500 hover:bg-slate-50">İptal</button>
-                          <button onClick={saveEditResource} className="flex-1 h-6 rounded bg-slate-900 text-white text-[11px] font-medium hover:bg-slate-700">Kaydet</button>
+                          <button disabled={savingResource} onClick={() => setEditingRes(null)} className="flex-1 h-6 rounded border border-slate-200 text-[11px] font-medium text-slate-500 hover:bg-slate-50">İptal</button>
+                          <button disabled={savingResource} onClick={saveEditResource} className="flex-1 h-6 rounded bg-slate-900 text-white text-[11px] font-medium hover:bg-slate-700">{savingResource ? 'Kaydediliyor…' : 'Kaydet'}</button>
                         </div>
                       </div>
                     ) : (

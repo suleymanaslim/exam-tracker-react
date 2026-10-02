@@ -1,238 +1,126 @@
-/**
- * useGlobalTimer
- *
- * App.tsx seviyesinde mount edilir — sayfa değişse bile timer çalışmaya devam eder.
- * Deadline-based yaklaşım: Date.now() farkı ile hesaplama yapılır.
- * Phase desteği: focus → break → focus döngüsü.
- * Web Notification API: tab arka plandayken bildirim gönderir.
- */
-import { useEffect, useRef, useCallback } from 'react'
-import { useTimerStore } from './timerStore'
+import { useEffect, useRef } from 'react'
+import { bindTimerOwner, useTimerStore } from './timerStore'
+import { recoveryFor, remainingSeconds, sessionPayload } from './timerRecovery'
+import type { RecoverySession } from './timerRecovery'
 import { supabase } from './supabase'
 import { useAdminStore } from './adminStore'
 import Swal from 'sweetalert2'
+import { playTimerAlarm, stopTimerAlarm } from './timerAudio'
 
-const ALARM_URL = 'https://actions.google.com/sounds/v1/alarms/beep_short.ogg'
-
-function playAlarm() {
-  const audio = new Audio(ALARM_URL)
-  audio.play().catch(() => {})
-}
-
-function sendNotification(title: string, body: string) {
+function alarm(title: string, body: string) {
+  playTimerAlarm()
   if ('Notification' in window && Notification.permission === 'granted') {
-    try {
-      new Notification(title, { body, icon: '/studytracker-favicon.png' })
-    } catch (_e) { /* mobile fallback */ }
+    try { new Notification(title, { body, icon: '/studytracker-favicon.png' }) } catch { /* browser restrictions */ }
   }
 }
 
-export function useGlobalTimer() {
-  const {
-    isRunning,
-    secondsLeft,
-    totalSeconds,
-    startedAt,
-    mode,
-    phase,
-    selSubject,
-    selResource,
-    deadlineEpoch,
-    breakSeconds,
-    setIsRunning,
-    setSecondsLeft,
-    setTotalSeconds,
-    setStartedAt,
-    setDeadlineEpoch,
-    setPhase,
-  } = useTimerStore()
+export async function saveTimerSession(session: RecoverySession) {
+  if (session.durationMinutes < 1) return true
+  // The stable UUID prevents a retry/reload from inserting the same portion twice.
+  const { error } = await supabase.from('study_sessions').upsert(sessionPayload(session), { onConflict: 'id', ignoreDuplicates: true })
+  if (error) throw error
+  window.dispatchEvent(new Event('study-session-saved'))
+  return true
+}
 
-
-  // Focus süresi referansı — mola sonrası geri dönmek için
-  const focusTotalRef = useRef(totalSeconds)
-  useEffect(() => { if (phase === 'focus' && totalSeconds > 0) focusTotalRef.current = totalSeconds }, [phase, totalSeconds])
-
-  // ── Bildirim izni iste ──────────────────────────────────────────────
-  useEffect(() => {
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission()
-    }
-  }, [])
-
-  // ── Save session to DB ──────────────────────────────────────────────
-  const saveSession = useCallback(async (durationMins: number, start: Date) => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user || !selSubject) return
-    const now = new Date()
-    const { error } = await supabase.from('study_sessions').insert({
-      user_id: useAdminStore.getState().impersonatedUserId || user.id,
-      subject_id: selSubject || null,
-      resource_id: selResource || null,
-      session_type: mode,
-      started_at: start.toISOString(),
-      ended_at: now.toISOString(),
-      duration_minutes: durationMins,
-    })
-    if (error) {
-      console.error('Study session save failed:', error)
-      void Swal.fire('Oturum kaydedilemedi', 'Tamamlanan çalışma kaydedilemedi. Çalışma ekle düğmesiyle bu süreyi tekrar kaydedebilirsin.', 'error')
-      return
-    }
-    window.dispatchEvent(new Event('study-session-saved'))
-  }, [selSubject, selResource, mode])
-
-  // ── Handle timer reaching zero ──────────────────────────────────────
-  const handleEnd = useCallback((total: number, start: Date | null) => {
-    if (phase === 'focus') {
-      // ── Focus bitti → oturumu kaydet → molaya geç ──────────────
-      const durationMins = Math.round(total / 60)
-      const startDate = start ?? new Date(Date.now() - durationMins * 60_000)
-
-      setIsRunning(false)
-      setDeadlineEpoch(null)
-      setStartedAt(null)
-
-      playAlarm()
-      sendNotification('⏱ Süre Doldu!', `${durationMins} dk çalışma tamamlandı. Mola zamanı!`)
-      document.title = '✅ Süre Doldu! — ExamTracker'
-
-      if (durationMins > 0) {
-        saveSession(durationMins, startDate)
-      }
-
-      // Mola moduna geç (manual modda mola yok)
-      if (mode !== 'manual' && breakSeconds > 0) {
-        setTimeout(() => {
-          setPhase('break')
-          setSecondsLeft(breakSeconds)
-          setTotalSeconds(breakSeconds)
-          setDeadlineEpoch(Date.now() + breakSeconds * 1000)
-          setIsRunning(true)
-          document.title = `☕ Mola Başladı — ExamTracker`
-        }, 1500) // 1.5s gecikme — "Süre Doldu!" mesajı görünsün
-      } else {
-        // Manuel mod — sadece sıfırla
-        setSecondsLeft(total)
-      }
-    } else {
-      // ── Mola bitti → tekrar focus'a dön ────────────────────────
-      setIsRunning(false)
-      setDeadlineEpoch(null)
-      setStartedAt(null)
-
-      playAlarm()
-      sendNotification('☕ Mola Bitti!', 'Çalışmaya devam etmeye hazır mısın?')
-      document.title = '🟢 Mola Bitti! — ExamTracker'
-      setTimeout(() => { document.title = 'ExamTracker' }, 5000)
-
-      // Focus moduna dön
-      setPhase('focus')
-      const focusSecs = focusTotalRef.current > 0 ? focusTotalRef.current : 3000
-      setSecondsLeft(focusSecs)
-      setTotalSeconds(focusSecs)
-    }
-  }, [phase, mode, breakSeconds, setIsRunning, setSecondsLeft, setTotalSeconds, setDeadlineEpoch, setStartedAt, setPhase, saveSession])
-
-  // ── Tick: deadline-based with Web Worker for background reliability ─
-  const workerRef = useRef<Worker | null>(null)
+export function useGlobalTimer(authenticatedUserId: string | null) {
+  const { impersonatedUserId } = useAdminStore()
+  const ownerId = authenticatedUserId ? impersonatedUserId || authenticatedUserId : null
+  const state = useTimerStore()
+  const savingRef = useRef(false)
+  const promptingRef = useRef(false)
 
   useEffect(() => {
-    // Worker oluştur (sadece bir kez)
-    if (!workerRef.current) {
-      const workerCode = `
-        let timer = null;
-        self.onmessage = (e) => {
-          if (e.data === 'start') {
-            if (timer) clearInterval(timer);
-            timer = setInterval(() => self.postMessage('tick'), 500);
-          } else if (e.data === 'stop') {
-            if (timer) clearInterval(timer);
+    if (promptingRef.current) { Swal.close(); promptingRef.current = false }
+    stopTimerAlarm()
+    bindTimerOwner(ownerId)
+  }, [ownerId])
+
+  useEffect(() => {
+    if (!ownerId || state.ownerId !== ownerId || !state.recovery || promptingRef.current) return
+    const recovery = state.recovery
+    promptingRef.current = true
+    void (async () => {
+      const result = await Swal.fire({
+        title: recovery.reason === 'save-failed' ? 'Oturum kaydedilemedi' : 'Bu süre içinde çalıştınız mı?',
+        text: recovery.reason === 'save-failed' ? `${recovery.durationMinutes} dakikalık çalışma korunuyor. Kaydetmeyi tekrar deneyebilirsin.` : recovery.durationMinutes > 0
+          ? `Önceki oturumdan ${recovery.durationMinutes} dakika geçti. Çalıştıysanız bu süreyi kaydedebiliriz.`
+          : 'Önceki oturumda bir dakikadan az süre geçti. Çalışmaya devam etmek ister misiniz?',
+        icon: 'question', showDenyButton: recovery.reason !== 'save-failed', showCancelButton: true,
+        confirmButtonText: recovery.reason === 'save-failed' ? 'Tekrar kaydet' : recovery.durationMinutes > 0 ? 'Evet, kaydet' : 'Evet, devam et',
+        denyButtonText: 'Hayır, kaydetme', cancelButtonText: 'Sonra karar ver',
+        confirmButtonColor: '#4269a8', allowOutsideClick: false,
+        showLoaderOnConfirm: true,
+        preConfirm: async () => {
+          if (useTimerStore.getState().ownerId !== recovery.ownerId) return false
+          try { await saveTimerSession(recovery); return true }
+          catch (error) {
+            console.error('Recovered timer save failed:', error)
+            Swal.showValidationMessage('Kaydedilemedi. Süren korunuyor; tekrar deneyebilirsin.')
+            return false
           }
-        };
-      `;
-      const blob = new Blob([workerCode], { type: 'application/javascript' });
-      workerRef.current = new Worker(URL.createObjectURL(blob));
-    }
+        },
+      })
+      if (useTimerStore.getState().ownerId === recovery.ownerId && useTimerStore.getState().recovery?.id === recovery.id) {
+        if (result.isConfirmed) useTimerStore.getState().resolveRecovery(true)
+        else if (result.isDenied) useTimerStore.getState().resolveRecovery(false)
+      }
+      promptingRef.current = false
+    })()
+  }, [ownerId, state.ownerId, state.recovery])
 
-    return () => {
-      workerRef.current?.terminate();
-      workerRef.current = null;
-    }
-  }, []);
-
+  // Run independently of the current route. Reopening the page is handled by hydration above.
   useEffect(() => {
-    if (!isRunning || deadlineEpoch === null) {
-      workerRef.current?.postMessage('stop');
-      return
-    }
-
+    if (!ownerId || state.ownerId !== ownerId) return
+    let worker: Worker | null = null
+    let interval: ReturnType<typeof setInterval> | null = null
+    let workerURL: string | null = null
     const tick = () => {
-      const remaining = Math.max(0, Math.round((deadlineEpoch - Date.now()) / 1000))
-      setSecondsLeft(remaining)
-
-      // Update tab title
-      const mm = String(Math.floor(remaining / 60)).padStart(2, '0')
-      const ss = String(remaining % 60).padStart(2, '0')
-      if (phase === 'break') {
-        document.title = `☕ ${mm}:${ss} — Mola`
-      } else {
-        document.title = `⏱ ${mm}:${ss} — ExamTracker`
+      const current = useTimerStore.getState()
+      if (current.ownerId !== ownerId || !current.isRunning || current.deadlineEpoch === null || current.recovery || savingRef.current) return
+      const remaining = remainingSeconds(current, Date.now())
+      current.setSecondsLeft(remaining)
+      document.title = `${current.phase === 'break' ? 'Mola' : 'Odak'} ${String(Math.floor(remaining / 60)).padStart(2, '0')}:${String(remaining % 60).padStart(2, '0')} — ExamTracker`
+      if (remaining > 0) return
+      if (current.phase === 'break') {
+        current.finishBreak()
+        alarm('Mola bitti', 'Yeni bir odak oturumuna hazırsın.')
+        return
       }
-
-      if (remaining <= 0) {
-        workerRef.current?.postMessage('stop');
-        handleEnd(totalSeconds, startedAt)
-      }
+      const session = recoveryFor({ ...current, ownerId, startedAt: current.startedAt?.toISOString() || null }, Date.now())
+      if (!session) { current.resetTimer(current.focusSeconds); return }
+      savingRef.current = true
+      // Keep the completed session intact until the database confirms the insert.
+      current.pauseTimer()
+      void saveTimerSession(session).then(() => {
+        if (useTimerStore.getState().ownerId === ownerId && useTimerStore.getState().sessionId === session.id) {
+          useTimerStore.getState().finishFocus()
+          alarm('Süre doldu', `${session.durationMinutes} dakika çalışma tamamlandı.`)
+        }
+      }).catch(error => {
+        console.error('Timer save failed:', error)
+        if (useTimerStore.getState().ownerId === ownerId) {
+          useTimerStore.getState().queueRecovery()
+        }
+      }).finally(() => { savingRef.current = false })
     }
-
-    // İlk tick manuel
+    try {
+      workerURL = URL.createObjectURL(new Blob(['setInterval(() => self.postMessage("tick"), 500)'], { type: 'application/javascript' }))
+      worker = new Worker(workerURL)
+      worker.onmessage = tick
+    } catch { interval = setInterval(tick, 1000) }
     tick()
-
-    // Worker ile tick tetikle
-    if (workerRef.current) {
-      workerRef.current.onmessage = () => {
-        tick();
-      };
-      workerRef.current.postMessage('start');
-    }
-
-    return () => {
-      workerRef.current?.postMessage('stop');
-      if (workerRef.current) {
-        workerRef.current.onmessage = null;
-      }
-    }
-  }, [isRunning, deadlineEpoch]) // intentionally minimal deps
-
-  // ── Restore title when not running ─────────────────────────────────
-  useEffect(() => {
-    if (!isRunning) {
-      if (secondsLeft > 0 && secondsLeft < totalSeconds) {
-        const mm = String(Math.floor(secondsLeft / 60)).padStart(2, '0')
-        const ss = String(secondsLeft % 60).padStart(2, '0')
-        if (phase === 'break') {
-          document.title = `⏸ ${mm}:${ss} — Mola`
-        } else {
-          document.title = `⏸ ${mm}:${ss} — ExamTracker`
-        }
-      } else {
-        document.title = 'ExamTracker'
-      }
-    }
-  }, [isRunning, secondsLeft, totalSeconds, phase])
-
-  // ── Page Visibility API: recover after tab comes back ──────────────
-  useEffect(() => {
-    const onVisible = () => {
-      if (isRunning && deadlineEpoch !== null) {
-        const remaining = Math.max(0, Math.round((deadlineEpoch - Date.now()) / 1000))
-        setSecondsLeft(remaining)
-        if (remaining <= 0) {
-          handleEnd(totalSeconds, startedAt)
-        }
-      }
-    }
+    const onVisible = () => { if (document.visibilityState === 'visible') tick() }
     document.addEventListener('visibilitychange', onVisible)
-    return () => document.removeEventListener('visibilitychange', onVisible)
-  }, [isRunning, deadlineEpoch, totalSeconds, startedAt, handleEnd, setSecondsLeft])
+    return () => {
+      worker?.terminate()
+      if (workerURL) URL.revokeObjectURL(workerURL)
+      if (interval) clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [ownerId, state.ownerId])
+
+  useEffect(() => {
+    if (!state.isRunning) document.title = state.recovery ? 'Oturum onayı — ExamTracker' : 'ExamTracker'
+  }, [state.isRunning, state.recovery])
 }
