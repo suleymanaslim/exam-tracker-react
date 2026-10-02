@@ -6,6 +6,17 @@ import html2canvas from 'html2canvas'
 import { useAdminStore } from '../lib/adminStore'
 
 /* ─────────────── Types ─────────────── */
+function showPlanError(error: { code?: string; message: string }) {
+  return Swal.fire({
+    icon: 'error',
+    title: 'Plan kaydedilemedi',
+    text: error.code === '42501'
+      ? 'Bu kullanıcının video planını düzenleme izni yok. Admin video planı izinlerinin Supabase üzerinde uygulanması gerekiyor.'
+      : error.message,
+    confirmButtonText: 'Tamam',
+  })
+}
+
 interface Resource {
   id: string; subject_id: string; name: string; resource_type: string
   total_videos: number; avg_video_duration: number; subject_name?: string
@@ -169,17 +180,19 @@ export default function VideoPlan() {
     })
     if (count && count > 0) {
       const maxOrder = planItems.filter(p => p.date === dateStr).reduce((m, p) => Math.max(m, p.sort_order || 0), 0)
-      const { data } = await supabase.from('video_plan_items').insert({
+      const { data, error } = await supabase.from('video_plan_items').insert({
         user_id: userId, resource_id: selectedResId,
         date: dateStr, video_count: count, sort_order: maxOrder + 1,
       }).select().single()
+      if (error) { await showPlanError(error); return }
       if (data) setPlanItems(p => [...p, data])
     }
   }
 
   const handleDeleteItem = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation()
-    await supabase.from('video_plan_items').delete().eq('id', id)
+    const { error } = await supabase.from('video_plan_items').delete().eq('id', id)
+    if (error) { await showPlanError(error); return }
     setPlanItems(p => p.filter(i => i.id !== id))
   }
 
@@ -195,7 +208,8 @@ export default function VideoPlan() {
       confirmButtonColor: '#ef4444',
     })
     if (c.isConfirmed && userId) {
-      await supabase.from('video_plan_items').delete().in('id', dayItems.map(d => d.id))
+      const { error } = await supabase.from('video_plan_items').delete().in('id', dayItems.map(d => d.id))
+      if (error) { await showPlanError(error); return }
       setPlanItems(p => p.filter(i => i.date !== dateStr))
     }
   }
@@ -212,6 +226,7 @@ export default function VideoPlan() {
     tgtItems.forEach(i => batch.push({ id: i.id, user_id: userId, resource_id: i.resource_id, video_count: i.video_count, date: src }))
 
     const { error } = await supabase.from('video_plan_items').upsert(batch)
+    if (error) await showPlanError(error)
     if (!error) {
       setPlanItems(prev => {
         const rest = prev.filter(p => p.date !== src && p.date !== tgt)
@@ -242,6 +257,7 @@ export default function VideoPlan() {
       return { id: i.id, user_id: userId, resource_id: i.resource_id, video_count: i.video_count, date: localDateStr(d) }
     })
     const { error } = await supabase.from('video_plan_items').upsert(batch)
+    if (error) await showPlanError(error)
     if (!error) {
       setPlanItems(prev => prev.map(p => {
         const u = batch.find(b => b.id === p.id)
@@ -433,10 +449,11 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
     const otherOrder = other.sort_order || targetIdx
 
     setLoading(true)
-    await supabase.from('video_plan_items').upsert([
+    const { error } = await supabase.from('video_plan_items').upsert([
       { id: item.id, user_id: userId!, resource_id: item.resource_id, date: item.date, video_count: item.video_count, sort_order: otherOrder },
       { id: other.id, user_id: userId!, resource_id: other.resource_id, date: other.date, video_count: other.video_count, sort_order: myOrder },
     ])
+    if (error) { setLoading(false); await showPlanError(error); return }
     setPlanItems(prev => prev.map(p => {
       if (p.id === item.id) return { ...p, sort_order: otherOrder }
       if (p.id === other.id) return { ...p, sort_order: myOrder }
