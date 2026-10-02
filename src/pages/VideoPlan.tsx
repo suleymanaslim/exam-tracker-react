@@ -3,7 +3,6 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { Plus, Trash2, Download, Image as ImageIcon, Settings, EyeOff, SkipForward, X, Check, ChevronUp, ChevronDown } from 'lucide-react'
 import Swal from 'sweetalert2'
-import html2canvas from 'html2canvas'
 import { useAdminStore } from '../lib/adminStore'
 
 /* ─────────────── Types ─────────────── */
@@ -82,6 +81,7 @@ export default function VideoPlan() {
   const [loading, setLoading] = useState(true)
 
   const calendarRef = useRef<HTMLDivElement>(null)
+  const [exportingPNG, setExportingPNG] = useState(false)
 
   /* editing */
   const [editingRes, setEditingRes] = useState<Resource | null>(null)
@@ -486,14 +486,55 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
   }
 
   const exportPNG = async () => {
-    if (!calendarRef.current) return
+    const calendar = calendarRef.current
+    if (!calendar || exportingPNG) return
+    setExportingPNG(true)
     try {
-      const canvas = await html2canvas(calendarRef.current, { scale: 2, backgroundColor: '#ffffff' })
+      const { default: html2canvas } = await import('html2canvas-pro')
+      await document.fonts.ready
+      const canvas = await html2canvas(calendar, {
+        scale: 2,
+        backgroundColor: '#ffffff',
+        logging: false,
+        windowWidth: Math.max(window.innerWidth, 1280),
+        onclone: async (doc, clonedCalendar) => {
+          await doc.fonts.ready
+          // Expand only the export copy, keeping all seven days readable on mobile.
+          Object.assign(clonedCalendar.style, {
+            width: `${Math.max(calendar.scrollWidth, 1120)}px`,
+            height: 'auto', maxHeight: 'none', minHeight: '0',
+            flex: 'none', overflow: 'visible',
+            position: 'absolute', top: '0', left: '0',
+          })
+          clonedCalendar.scrollTop = 0
+          clonedCalendar.scrollLeft = 0
+          const header = clonedCalendar.firstElementChild as HTMLElement | null
+          if (header) header.style.position = 'static'
+          let ancestor = clonedCalendar.parentElement
+          while (ancestor) {
+            ancestor.style.overflow = 'visible'
+            ancestor = ancestor.parentElement
+          }
+        },
+      })
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(result => result ? resolve(result) : reject(new Error('PNG oluşturulamadı')), 'image/png')
+      })
+      const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
-      link.download = 'video_plani.png'
-      link.href = canvas.toDataURL('image/png')
+      link.download = `video_plani_${localDateStr(startDate)}.png`
+      link.href = url
+      document.body.appendChild(link)
       link.click()
-    } catch (e) { console.error(e); Swal.fire('Hata', 'Görsel oluşturulamadı.', 'error') }
+      link.remove()
+      // Allow browsers time to start reading the download before releasing it.
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    } catch (error) {
+      console.error('Video plan PNG export failed:', error)
+      void Swal.fire('Hata', 'Görsel oluşturulamadı. Lütfen tekrar deneyin.', 'error')
+    } finally {
+      setExportingPNG(false)
+    }
   }
 
   const DOW = ['Pzt','Sal','Çar','Per','Cum','Cmt','Paz']
@@ -538,8 +579,8 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
             {days[0].toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' })} – {days[6].toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', year: 'numeric' })}
           </span>
           <div className="w-px h-5 bg-slate-200 mx-1"></div>
-          <button onClick={exportPNG} className="h-7 px-2.5 rounded-md border border-slate-200 bg-white text-xs font-medium text-slate-500 hover:text-slate-900 transition-colors inline-flex items-center gap-1.5">
-            <ImageIcon className="h-3.5 w-3.5" /> PNG
+          <button onClick={exportPNG} disabled={exportingPNG} aria-busy={exportingPNG} className="disabled:opacity-50 disabled:cursor-wait h-7 px-2.5 rounded-md border border-slate-200 bg-white text-xs font-medium text-slate-500 hover:text-slate-900 transition-colors inline-flex items-center gap-1.5">
+            <ImageIcon className="h-3.5 w-3.5" /> {exportingPNG ? 'Hazırlanıyor…' : 'PNG'}
           </button>
           <button onClick={exportJSON} className="h-7 px-3 rounded-md bg-slate-900 text-white text-xs font-medium hover:bg-slate-700 transition-colors inline-flex items-center gap-1.5">
             <Download className="h-3.5 w-3.5" /> JSON
