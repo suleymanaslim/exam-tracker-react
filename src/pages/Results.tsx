@@ -3,10 +3,11 @@ import './Results.css'
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { Plus, Trash2, Calendar, Award, List, X, Edit3, Eye } from 'lucide-react'
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts'
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ReferenceLine, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts'
 import Swal from 'sweetalert2'
 import CustomSelect from '../components/CustomSelect'
 import { useAdminStore } from '../lib/adminStore'
+import { examTrend, questionComparison } from '../lib/examAnalytics'
 
 interface Exam { id: string; name: string; color: string; wrong_penalty: number | null; point_per_net: number }
 interface QuestionType { id: string; exam_id: string; name: string; sort_order: number; question_count: number }
@@ -32,6 +33,9 @@ export default function Results() {
   const [formError, setFormError] = useState('')
   const [saving, setSaving] = useState(false)
   const [metric, setMetric] = useState<'net' | 'points'>('net')
+  const [chartRange, setChartRange] = useState<'10' | 'all'>('10')
+  const [chartQuestion, setChartQuestion] = useState('')
+  const [focusedResult, setFocusedResult] = useState<string | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [formTitle, setFormTitle] = useState('')
   const [formDate, setFormDate] = useState(new Date().toISOString().split('T')[0])
@@ -177,14 +181,16 @@ export default function Results() {
     return { net: Math.max(0, parseFloat(net.toFixed(2))), points: Math.max(0, parseFloat(points.toFixed(2))), totalCorrect: correct, totalIncorrect: incorrect }
   }
 
-  const chartData = useMemo(() => {
-    if (!selectedExamId) return []
-    const examResults = results.filter(r => r.exam_id === selectedExamId && !r.is_draft).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-    return examResults.map(r => {
-      const stats = calculateScore(selectedExamId, r.id)
-      return { name: r.title, date: new Date(r.date).toLocaleDateString('tr-TR'), net: stats.net, points: stats.points }
-    })
-  }, [results, details, selectedExamId, exams])
+  const selectedExam = exams.find(e => e.id === selectedExamId)
+  const chartData = useMemo(() => examTrend(results, details, selectedExam, chartQuestion), [results, details, selectedExam, chartQuestion])
+  const displayedChart = chartRange === '10' ? chartData.slice(-10) : chartData
+  const measured = displayedChart.filter(row => row[metric] !== null)
+  const average = measured.length ? measured.reduce((sum, row) => sum + row[metric]!, 0) / measured.length : 0
+  const latest = measured.at(-1), previous = measured.at(-2)
+  const focused = displayedChart.find(row => row.id === focusedResult) || latest
+  const changes = useMemo(() => questionComparison(results, details, selectedExam, questionTypes), [results, details, selectedExam, questionTypes])
+  const formatNumber = (value: number | null | undefined) => value == null ? '—' : value.toLocaleString('tr-TR', { maximumFractionDigits: 2 })
+  const chartDate = (value: string) => new Date(`${value}T00:00:00`).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' })
 
   const activeDrafts = useMemo(() => {
     const oneDayAgo = new Date().getTime() - 24 * 60 * 60 * 1000
@@ -195,58 +201,6 @@ export default function Results() {
     return results.filter(r => !r.is_draft)
   }, [results])
 
-  const comparisonData = useMemo(() => {
-    if (!selectedExamId) return null
-    const examResults = results.filter(r => r.exam_id === selectedExamId && !r.is_draft).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-    if (examResults.length < 2) return null
-
-    const latest = examResults[0]
-    const previous = examResults[1]
-
-    const latestStats = calculateScore(selectedExamId, latest.id)
-    const previousStats = calculateScore(selectedExamId, previous.id)
-
-    const latestDetails = details.filter(d => d.result_id === latest.id)
-    const previousDetails = details.filter(d => d.result_id === previous.id)
-
-    const diffs = questionTypes.filter(q => q.exam_id === selectedExamId).map(qt => {
-      const latDet = latestDetails.find(d => d.question_type_id === qt.id)
-      const prevDet = previousDetails.find(d => d.question_type_id === qt.id)
-
-      const latC = latDet ? latDet.correct_count : 0
-      const latI = latDet ? latDet.incorrect_count : 0
-      const prevC = prevDet ? prevDet.correct_count : 0
-      const prevI = prevDet ? prevDet.incorrect_count : 0
-
-      const exam = exams.find(e => e.id === selectedExamId)
-      let latNet = latC
-      let prevNet = prevC
-      if (exam && exam.wrong_penalty && exam.wrong_penalty > 0) {
-        latNet = latC - (latI / exam.wrong_penalty)
-        prevNet = prevC - (prevI / exam.wrong_penalty)
-      }
-      const netDiff = latNet - prevNet
-
-      return {
-        name: qt.name,
-        latestCorrect: latC,
-        latestIncorrect: latI,
-        previousCorrect: prevC,
-        previousIncorrect: prevI,
-        netDiff: parseFloat(netDiff.toFixed(2)),
-      }
-    })
-
-    return {
-      latestTitle: latest.title,
-      previousTitle: previous.title,
-      latestNet: latestStats.net,
-      previousNet: previousStats.net,
-      latestPoints: latestStats.points,
-      previousPoints: previousStats.points,
-      diffs,
-    }
-  }, [results, details, selectedExamId, exams, questionTypes])
 
   if (loading) return <div className="h-full flex items-center justify-center text-[#718096]">Yükleniyor...</div>
 
@@ -394,16 +348,29 @@ export default function Results() {
           </div>
         ) : (
           <div className="result-analysis">
-            <div className="result-analysis-filter"><CustomSelect value={selectedExamId} onChange={setSelectedExamId} options={exams.map(e => ({ value: e.id, label: e.name }))} /><div>{(['net', 'points'] as const).map(value => <button key={value} aria-pressed={metric === value} onClick={() => setMetric(value)}>{value === 'net' ? 'Net' : 'Puan'}</button>)}</div></div>
+            <div className="result-analysis-toolbar"><label>Sınav<CustomSelect value={selectedExamId} onChange={value => { setSelectedExamId(value); setChartQuestion(''); setFocusedResult(null) }} options={exams.map(e => ({ value: e.id, label: e.name }))} /></label><label>Soru türü<CustomSelect value={chartQuestion} onChange={value => { setChartQuestion(value); setFocusedResult(null) }} options={[{ value: '', label: 'Tüm soru türleri' }, ...questionTypes.filter(q => q.exam_id === selectedExamId).map(q => ({ value: q.id, label: q.name }))]} /></label><div className="result-chart-toggle" aria-label="Grafik ölçüsü">{(['net', 'points'] as const).map(value => <button key={value} aria-pressed={metric === value} onClick={() => setMetric(value)}>{value === 'net' ? 'Net' : 'Puan'}</button>)}</div></div>
             {chartData.length === 0 ? <p className="result-empty">Bu sınav için henüz deneme sonucu yok.</p> : <>
               <div className="result-kpis">{[
-                ['Son sonuç', chartData.at(-1)![metric].toFixed(2)],
-                ['Ortalama', (chartData.reduce((sum, r) => sum + r[metric], 0) / chartData.length).toFixed(2)],
-                ['En iyi', Math.max(...chartData.map(r => r[metric])).toFixed(2)],
-                ['Son değişim', chartData.length > 1 ? ((chartData.at(-1)![metric] - chartData.at(-2)![metric]) >= 0 ? '+' : '') + (chartData.at(-1)![metric] - chartData.at(-2)![metric]).toFixed(2) : '—'],
+                ['Son sonuç', formatNumber(latest?.[metric])],
+                ['Ortalama', measured.length ? formatNumber(average) : '—'],
+                ['En iyi', measured.length ? formatNumber(Math.max(...measured.map(r => r[metric]!))) : '—'],
+                ['Son değişim', latest && previous ? (latest[metric]! - previous[metric]! > 0 ? '+' : '') + formatNumber(latest[metric]! - previous[metric]!) : '—'],
               ].map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>
-              <section className="result-chart"><h3>{metric === 'net' ? 'Net gelişimi' : 'Puan gelişimi'} <span>{chartData.length} deneme</span></h3><div style={{ height: 210 }}><ResponsiveContainer width="100%" height="100%"><AreaChart data={chartData} margin={{ top: 12, right: 12, left: -16, bottom: 0 }}><CartesianGrid vertical={false} stroke="#edf1f6" /><XAxis dataKey="date" tick={{ fontSize: 12 }} axisLine={false} tickLine={false} /><YAxis tick={{ fontSize: 12 }} axisLine={false} tickLine={false} /><RechartsTooltip labelFormatter={(_, payload) => payload?.[0]?.payload?.name ?? ''} /><Area type="linear" dataKey={metric} name={metric === 'net' ? 'Net' : 'Puan'} stroke="#4269a8" fill="#eaf0fa" strokeWidth={2} /></AreaChart></ResponsiveContainer></div></section>
-              {comparisonData && <section className="result-topic-changes"><h3>Son iki deneme · soru türleri</h3><div className="result-topic-head"><span>Soru türü</span><span>Önceki → Son</span><span>Net farkı</span></div>{comparisonData.diffs.map(diff => <div key={diff.name}><span>{diff.name}</span><span>{diff.previousCorrect}D {diff.previousIncorrect}Y → {diff.latestCorrect}D {diff.latestIncorrect}Y</span><strong className={diff.netDiff < 0 ? 'result-down' : 'result-up'}>{diff.netDiff > 0 ? '+' : ''}{diff.netDiff}</strong></div>)}</section>}
+              <section className="result-chart result-history-chart">
+                <div className="result-chart-heading"><div><h3>{metric === 'net' ? 'Net gelişimi' : 'Puan gelişimi'}</h3><p>{chartQuestion ? questionTypes.find(q => q.id === chartQuestion)?.name : selectedExam?.name} · {measured.length} sonuç</p></div><div className="result-chart-toggle" aria-label="Grafik aralığı"><button aria-pressed={chartRange === '10'} onClick={() => setChartRange('10')}>Son 10</button><button aria-pressed={chartRange === 'all'} onClick={() => setChartRange('all')}>Tümü</button></div></div>
+                <div className="result-chart-legend"><span><i />{metric === 'net' ? 'Net' : 'Puan'}</span><span><i className="is-average" />Ortalama {formatNumber(average)}</span></div>
+                {measured.length === 0 ? <p className="result-empty">Bu soru türüne ait kayıt yok.</p> : <div className="result-history-canvas"><ResponsiveContainer width="100%" height="100%"><AreaChart data={displayedChart} margin={{ top: 18, right: 16, left: -14, bottom: 2 }} onClick={event => { const index = event?.activeTooltipIndex; if (index != null) { const row = displayedChart[Number(index)]; if (row) setFocusedResult(row.id) } }}>
+                  <defs><linearGradient id="exam-history-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#6a8cbf" stopOpacity={.25} /><stop offset="100%" stopColor="#6a8cbf" stopOpacity={.02} /></linearGradient></defs>
+                  <CartesianGrid vertical={false} stroke="#edf1f6" strokeDasharray="3 4" />
+                  <XAxis dataKey="order" tick={{ fontSize: 12, fill: '#62748b' }} axisLine={false} tickLine={false} minTickGap={22} tickFormatter={n => `${n}.`} />
+                  <YAxis width={48} domain={['auto', 'auto']} tick={{ fontSize: 12, fill: '#62748b' }} tickFormatter={n => formatNumber(n)} axisLine={false} tickLine={false} />
+                  <ReferenceLine y={average} stroke="#9baabd" strokeDasharray="5 5" />
+                  <RechartsTooltip cursor={{ stroke: '#c6d4e7', strokeDasharray: '3 4' }} content={({ active, payload }) => { const row = payload?.[0]?.payload; if (!active || !row) return null; return <div className="result-history-tooltip"><strong>{row.name}</strong><span>{chartDate(row.date)}</span><b>{formatNumber(row[metric])} {metric === 'net' ? 'net' : 'puan'}</b><small>{row.correct} doğru · {row.incorrect} yanlış</small></div> }} />
+                  <Area type="linear" dataKey={metric} connectNulls={false} stroke="#4269a8" fill="url(#exam-history-fill)" strokeWidth={2.5} dot={displayedChart.length <= 30 ? { r: 4, fill: '#fff', stroke: '#4269a8', strokeWidth: 2 } : false} activeDot={{ r: 6, fill: '#4269a8', stroke: '#fff', strokeWidth: 3 }} />
+                </AreaChart></ResponsiveContainer></div>}
+                {focused && <div className="result-focused" aria-live="polite"><div><strong>{focused.name}</strong><span>{chartDate(focused.date)} · {focused.order}. deneme</span></div><div><span className="result-up">{focused.correct} doğru</span><span className="result-down">{focused.incorrect} yanlış</span><strong>{formatNumber(focused[metric])} {metric === 'net' ? 'net' : 'puan'}</strong><button onClick={() => setSelectedDetailResult(results.find(r => r.id === focused.id) || null)}>Detay</button></div></div>}
+              </section>
+              {changes.length > 0 && <section className="result-question-chart"><div className="result-chart-heading"><div><h3>Son deneme · soru türleri</h3><p>{chartData.at(-1)?.name}</p></div><div className="result-answer-legend"><span className="result-up">Doğru</span><span className="result-down">Yanlış</span></div></div><div className="result-question-grid">{changes.map(row => { const answered = (row.correct || 0) + (row.incorrect || 0); return <article key={row.id}><div className="result-question-label"><strong>{row.name}</strong><span>{formatNumber(row.latestNet)} net</span></div>{row.latestNet === null ? <p className="result-no-answer">Kayıt yok</p> : <><div className="result-answer-bar"><i style={{ width: `${answered ? (row.correct || 0) / answered * 100 : 0}%` }} /><i style={{ width: `${answered ? (row.incorrect || 0) / answered * 100 : 0}%` }} /></div><div className="result-answer-counts"><span>{row.correct} D · {row.incorrect} Y</span><span className={row.change !== null && row.change < 0 ? 'result-down' : 'result-up'}>{row.change === null ? 'Önceki kayıt yok' : `${row.change > 0 ? '+' : ''}${formatNumber(row.change)} net`}</span></div><small>Önceki: {formatNumber(row.previousNet)} net</small></>}</article> })}</div></section>}
             </>}
           </div>
         )}
