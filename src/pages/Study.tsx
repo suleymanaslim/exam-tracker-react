@@ -318,7 +318,7 @@ export default function Study() {
   return (
     <div className="study-page">
       <header className="study-header">
-        <div><p className="study-eyebrow">ODAKLAN · TAMAMLA · İLERLE</p><h1>Çalışma alanı</h1><p>Dersini seç, ritmini bul. Gerisini zamanlayıcıya bırak.</p></div>
+        <div><h1>Çalışma alanı</h1></div>
         <div className="study-header-actions"><FocusReset onOpen={() => { stopTimerAlarm(); if (isRunning && phase === 'focus') pauseTimer() }} /><button className="study-button study-button-secondary" onClick={() => setShowManualModal(true)}><Plus size={17} /> Çalışma ekle</button></div>
       </header>
 
@@ -327,7 +327,7 @@ export default function Study() {
 
       <div className="study-grid">
         <aside className="study-side">
-          <section className="study-card study-plan"><div className="study-card-heading"><h2><Target size={18} /> Bugünün planı</h2><span>{todayPlan.length} görev</span></div><p className="study-card-description">Bir görev seçerek dersini hızlıca yükle.</p>
+          <section className="study-card study-plan"><div className="study-card-heading"><h2><Target size={18} /> Bugünün planı</h2><span>{todayPlan.length} görev</span></div>
             <div className="study-plan-list">{todayPlan.length === 0 ? <div className="study-empty"><Target size={24} /><p>Bugün için plan bulunmuyor.</p><Link to="/plan">Haftalık planı aç</Link></div> : todayPlan.map(item => {
               const studied = todaySessions.filter(session => session.subject_id === item.subject_id && (!item.resource_id || session.resource_id === item.resource_id)).reduce((sum, session) => sum + session.duration_minutes, 0)
               const done = item.planned_minutes > 0 && studied >= item.planned_minutes
@@ -346,7 +346,7 @@ export default function Study() {
           </div>
           {mode === 'manual' && <label className="study-block-count">Odak süresi<select disabled={isTimerActive} value={pomodoroCount} onChange={event => setPomodoroCount(Number(event.target.value))}>{[1,2,3,4,5].map(count => <option key={count} value={count}>{count * settings.long_focus_minutes} dakika</option>)}</select></label>}
 
-          <details className="study-pomodoro-settings"><summary>Pomodoro sürelerini düzenle</summary><div>{([{key: 'short_focus_minutes', label: 'Kısa odak'}, {key: 'short_break_minutes', label: 'Kısa mola'}, {key: 'long_focus_minutes', label: 'Uzun odak'}, {key: 'long_break_minutes', label: 'Uzun mola'}] as const).map(field => <label key={field.key}>{field.label}<input type="number" min="1" max="180" disabled={isTimerActive} value={settings[field.key]} onChange={event => { const value = Number(event.target.value); if (Number.isFinite(value) && value >= 1 && value <= 180) setSettings(current => ({ ...current, [field.key]: value })) }} /><span>dk</span></label>)}</div><p>Bu sayfadaki değişiklikler bu kullanım için geçerlidir. Kalıcı sürelerini Ayarlar’dan belirleyebilirsin.</p></details>
+          <details className="study-pomodoro-settings"><summary>Oturum süreleri</summary><div>{([{key: 'short_focus_minutes', label: 'Kısa odak'}, {key: 'short_break_minutes', label: 'Kısa mola'}, {key: 'long_focus_minutes', label: 'Uzun odak'}, {key: 'long_break_minutes', label: 'Uzun mola'}] as const).map(field => <label key={field.key}>{field.label}<input type="number" min="1" max="180" disabled={isTimerActive} value={settings[field.key]} onChange={event => { const value = Number(event.target.value); if (Number.isFinite(value) && value >= 1 && value <= 180) setSettings(current => ({ ...current, [field.key]: value })) }} /><span>dk</span></label>)}</div></details>
           </details>
 
           <div className="study-selection">
@@ -357,9 +357,8 @@ export default function Study() {
 
 
           <div className="study-timer">
-            <div className="study-timer-context">{isBreak ? <><Coffee size={17} /> Mola zamanı</> : selectedSubject?.name || 'İlk adım: dersini seç'}</div>
+            <div className="study-timer-context">{isBreak ? <><Coffee size={17} /> Mola zamanı</> : selectedSubject?.name || 'Ders seç'}</div>
             <div className="study-clock" role="timer" aria-label="Kalan süre">{String(minutes).padStart(2, '0')}<span>:</span>{String(secs).padStart(2, '0')}</div>
-            <p>{isBreak ? 'Dinlen, ardından yeni bir odak oturumuna geç.' : `${Math.round((startedAt ? totalSeconds : focusSeconds) / 60)} dakika odak · bildirimle tamamla`}</p>
             <div className="study-timer-progress" role="progressbar" aria-label="Oturum ilerlemesi" aria-valuenow={Math.round(progress)} aria-valuemin={0} aria-valuemax={100}><i style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} /></div>
             <div className="study-controls">
               <button className="study-icon-button" onClick={isBreak ? skipBreak : handleReset} aria-label={isBreak ? 'Molayı atla' : 'Sayacı sıfırla'} title={isBreak ? 'Molayı atla' : 'Sıfırla'}>{isBreak ? <SkipForward size={19} /> : <RotateCcw size={19} />}</button>
@@ -367,7 +366,6 @@ export default function Study() {
               {!isBreak && <button className="study-icon-button" onClick={endEarly} disabled={!startedAt || !!recovery} aria-label="Çalışmayı bitir ve kaydet" title="Bitir ve kaydet"><CheckCircle2 size={19} /></button>}
             </div>
             <button className="study-test-end" disabled={!!recovery} onClick={() => { const timer = useTimerStore.getState(); if (timer.phase === 'break') timer.finishBreak(); else timer.finishFocus(); playTimerAlarm() }}>Bitişi test et · kayıt yok</button>
-            <p className="study-timer-hint">{!selSubject ? 'Başlamak için sınav ve ders seçmelisin.' : isBreak ? 'Mola süresi çalışma toplamına eklenmez.' : 'Tamamlanan oturum otomatik kaydedilir.'}</p>
           </div>
 
         </section>
@@ -387,7 +385,6 @@ export default function Study() {
                 </div>
                 <div>
                   <h3 className="text-sm font-semibold text-[#24354a]">Manuel Oturum Ekle</h3>
-                  <p className="text-[14px] text-[#62748b]">Tamamladığın çalışmayı elle sisteme kaydet.</p>
                 </div>
               </div>
               <button
