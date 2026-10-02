@@ -7,8 +7,8 @@ import { Link, Outlet, useLocation, useNavigate, useSearchParams } from 'react-r
 import { useState, useEffect } from 'react'
 import {
   LayoutDashboard, Calendar, Timer, History,
-  BarChart3, Settings, LogOut, GraduationCap,
-  BookMarked, PanelLeftClose, PanelLeftOpen, Award, PlayCircle
+  BarChart3, Settings, LogOut,
+  BookMarked, Award, PlayCircle
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useTimerStore } from '../lib/timerStore'
@@ -41,7 +41,7 @@ export default function AppLayout() {
   const location = useLocation()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const [expanded, setExpanded] = useState(true)
+  const [expanded, setExpanded] = useState(false)
   const { isRunning, secondsLeft } = useTimerStore()
   const { isAdmin, impersonatedUserId, setIsAdmin, setImpersonatedUserId } = useAdminStore()
 
@@ -85,15 +85,16 @@ export default function AppLayout() {
 
   return (
     <div className="app-shell flex h-dvh w-full overflow-hidden bg-[#f0f4f8]">
-      <aside className={`app-sidebar ${expanded ? 'is-expanded' : 'is-collapsed'}`}>
-        <div className="app-brand"><span className="app-brand-icon"><GraduationCap size={21} /></span><div className="app-nav-label"><strong>StudyTracker</strong><span>Çalışma alanın</span></div></div>
+      <aside className={`app-sidebar ${expanded ? 'is-expanded' : 'is-collapsed'}`} onMouseEnter={() => setExpanded(true)} onMouseLeave={e => { if (!e.currentTarget.contains(document.activeElement)) setExpanded(false) }} onFocus={() => setExpanded(true)} onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) setExpanded(false) }}>
+        <div className="app-brand"><img className="app-brand-image" src="/studytracker-logo.png" alt="StudyTracker logosu" width="36" height="36" /><div className="app-nav-label"><strong>StudyTracker</strong><span>Çalışma alanın</span></div></div>
+
         {isRunning && <Link to="/study" className="app-timer" aria-label={`Çalışmaya dön, kalan süre ${timerMM}:${timerSS}`}><span className="app-timer-dot" /><span>{timerMM}:{timerSS}</span></Link>}
         <nav className="app-nav" aria-label="Ana gezinme">
           <p className="app-nav-caption app-nav-label">ÇALIŞMA ALANI</p>
           {navItems.map(item => <Link key={item.href} to={item.href} title={item.label} aria-label={item.label} aria-current={location.pathname === item.href ? 'page' : undefined} className={`app-nav-link ${location.pathname === item.href ? 'is-active' : ''}`}><item.icon size={19} /><span className="app-nav-label">{item.label}</span></Link>)}
           {isAdmin && <Link to="/admin" title="Admin Paneli" aria-label="Admin Paneli" aria-current={location.pathname === '/admin' ? 'page' : undefined} className={`app-nav-link app-admin-link ${location.pathname === '/admin' ? 'is-active' : ''}`}><ShieldAlert size={19} /><span className="app-nav-label">Admin Paneli</span></Link>}
         </nav>
-        <div className="app-sidebar-footer"><button onClick={handleLogout} title="Çıkış Yap" aria-label="Çıkış Yap" className="app-nav-link app-logout"><LogOut size={19} /><span className="app-nav-label">Çıkış Yap</span></button><button className="app-sidebar-toggle" aria-label={expanded ? 'Gezinmeyi daralt' : 'Gezinmeyi genişlet'} aria-expanded={expanded} onClick={() => setExpanded(p => !p)}>{expanded ? <PanelLeftClose size={17} /> : <PanelLeftOpen size={17} />}<span className="app-nav-label">Menüyü daralt</span></button></div>
+        <div className="app-sidebar-footer"><button onClick={handleLogout} title="Çıkış Yap" aria-label="Çıkış Yap" className="app-nav-link app-logout"><LogOut size={19} /><span className="app-nav-label">Çıkış Yap</span></button></div>
       </aside>
 
       {/* ── Main ────────────────────────────────────────────────────── */}
@@ -103,7 +104,7 @@ export default function AppLayout() {
           <div className="md:hidden flex items-center justify-between px-4 py-3 app-mobile-header shrink-0">
             <div className="flex items-center gap-2.5">
               <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#edf2f8]">
-                <GraduationCap className="h-4 w-4 text-[#4269a8]" />
+                <img src="/studytracker-logo.png" alt="" className="h-7 w-7 rounded-lg" />
               </div>
               <span className="text-[16px] font-semibold text-[#24354a]">StudyTracker</span>
             </div>
