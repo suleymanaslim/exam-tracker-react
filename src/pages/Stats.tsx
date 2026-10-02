@@ -2,12 +2,13 @@ import './SuitePages.css'
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import {
-  Calendar as CalendarIcon, Flame, TrendingUp, Target, BookOpen, Trophy, Zap, Sun, BarChart3
+  Calendar as CalendarIcon, Flame, ChevronLeft, ChevronRight, Target, BookOpen, Trophy, Zap, Sun, BarChart3
 } from 'lucide-react'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar
 } from 'recharts'
 import { useAdminStore } from '../lib/adminStore'
+import { localDayKey, mondayOf, weekBounds, sessionsInWeek, studyTrend } from '../lib/statsPeriod'
 
 interface Session { id: string; subject_id: string; duration_minutes: number; started_at: string }
 interface Subject { id: string; exam_id: string; name: string }
@@ -18,6 +19,8 @@ export default function Stats() {
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [exams, setExams] = useState<Exam[]>([])
   const [loading, setLoading] = useState(true)
+  const [period, setPeriod] = useState<'all' | 'week'>('all')
+  const [selectedWeek, setSelectedWeek] = useState(() => localDayKey(mondayOf(new Date())))
   const { impersonatedUserId } = useAdminStore()
 
   useEffect(() => {
@@ -44,51 +47,28 @@ export default function Stats() {
     return map
   }, [subjects])
 
-  // --- Genel Özet ---
-  const totalMinutes = sessions.reduce((sum, s) => sum + s.duration_minutes, 0)
+  const periodSessions = useMemo(() => period === 'all' ? sessions : sessionsInWeek(sessions, selectedWeek), [sessions, period, selectedWeek])
+  const totalMinutes = periodSessions.reduce((sum, session) => sum + session.duration_minutes, 0)
   const totalHours = Math.floor(totalMinutes / 60)
-  
-  // Bu hafta hesaplaması
-  const now = new Date()
-  const todayDay = now.getDay()
-  const diff = now.getDate() - todayDay + (todayDay === 0 ? -6 : 1)
-  const monday = new Date(now)
-  monday.setDate(diff)
-  monday.setHours(0, 0, 0, 0)
-  const weekMinutes = sessions
-    .filter(s => new Date(s.started_at) >= monday)
-    .reduce((sum, s) => sum + s.duration_minutes, 0)
-
-  // Aktif gün sayısı ve günlük ortalama
-  const activeDays = new Set(sessions.map(s => s.started_at?.split('T')?.[0] || '')).size - (sessions.length > 0 ? 0 : 1)
-  const safeActiveDays = Math.max(0, activeDays)
+  const safeActiveDays = new Set(periodSessions.map(session => localDayKey(new Date(session.started_at)))).size
   const dailyAverage = safeActiveDays > 0 ? Math.round(totalMinutes / safeActiveDays) : 0
-
-  // --- 14 Günlük Trend (Area Chart) ---
-  const trendData = useMemo(() => {
-    const days: { label: string; dateStr: string; minutes: number }[] = []
-    for (let i = 13; i >= 0; i--) {
-      const d = new Date()
-      d.setDate(d.getDate() - i)
-      const dateStr = d.toISOString().split('T')[0]
-      const label = d.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' })
-      days.push({ label, dateStr, minutes: 0 })
-    }
-    sessions.forEach(s => {
-      const sDate = s.started_at?.split('T')?.[0]
-      if (sDate) {
-        const day = days.find(d => d.dateStr === sDate)
-        if (day) day.minutes += (s.duration_minutes || 0)
-      }
-    })
-    return days
-  }, [sessions])
+  const trendData = useMemo(() => studyTrend(periodSessions, period === 'week' ? selectedWeek : null), [periodSessions, period, selectedWeek])
+  const { start: weekStart, end: weekEnd } = weekBounds(selectedWeek)
+  const lastDay = new Date(weekEnd)
+  lastDay.setDate(lastDay.getDate() - 1)
+  const dateLabel = (date: Date) => date.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', year: 'numeric' })
+  const periodLabel = period === 'all' ? 'Tüm zamanlar' : `${dateLabel(weekStart)} – ${dateLabel(lastDay)}`
+  const shiftWeek = (direction: number) => {
+    const date = new Date(weekStart)
+    date.setDate(date.getDate() + direction * 7)
+    setSelectedWeek(localDayKey(date))
+  }
 
   // --- Sınav Dağılımı (Donut Chart) ---
   const examData = useMemo(() => {
     const map: Record<string, number> = {}
     exams.forEach(e => { map[e.id] = 0 })
-    sessions.forEach(s => {
+    periodSessions.forEach(s => {
       const eid = subjectToExam[s.subject_id]
       if (eid) map[eid] = (map[eid] ?? 0) + s.duration_minutes
     })
@@ -97,12 +77,12 @@ export default function Stats() {
       minutes: map[e.id] ?? 0,
       color: e.color,
     })).filter(e => e.minutes > 0).sort((a, b) => b.minutes - a.minutes)
-  }, [sessions, subjects, exams, subjectToExam])
+  }, [periodSessions, subjects, exams, subjectToExam])
 
   // --- En Çok Çalışılan Dersler (Bar List) ---
   const subjectData = useMemo(() => {
     const map: Record<string, number> = {}
-    sessions.forEach(s => {
+    periodSessions.forEach(s => {
       if (s.subject_id) map[s.subject_id] = (map[s.subject_id] ?? 0) + s.duration_minutes
     })
     return Object.entries(map)
@@ -113,14 +93,14 @@ export default function Stats() {
       })
       .sort((a, b) => b.minutes - a.minutes)
       .slice(0, 5) // Top 5
-  }, [sessions, subjects, exams])
+  }, [periodSessions, subjects, exams])
   
   const maxSubjectMin = Math.max(...subjectData.map(s => s.minutes), 1)
 
   // --- Zaman Dilimi Verimliliği (Radar Chart) ---
   const timeOfDayData = useMemo(() => {
     let morning = 0, afternoon = 0, evening = 0, night = 0
-    sessions.forEach(s => {
+    periodSessions.forEach(s => {
       const hour = new Date(s.started_at).getHours()
       if (hour >= 6 && hour < 12) morning += s.duration_minutes
       else if (hour >= 12 && hour < 18) afternoon += s.duration_minutes
@@ -133,7 +113,7 @@ export default function Stats() {
       { subject: 'Akşam', A: evening },
       { subject: 'Gece', A: night },
     ]
-  }, [sessions])
+  }, [periodSessions])
 
   const mostProductiveTime = [...timeOfDayData].sort((a, b) => b.A - a.A)[0]
 
@@ -152,6 +132,30 @@ export default function Stats() {
         </div>
       </div>
 
+      <div className="rounded-2xl border border-[#e3e9f0] bg-white p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between shrink-0">
+        <div className="flex rounded-xl bg-[#f1f5f9] p-1 self-start" role="group" aria-label="İstatistik dönemi">
+          {(['all', 'week'] as const).map(value => (
+            <button key={value} onClick={() => setPeriod(value)} aria-pressed={period === value}
+              className={`rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${period === value ? 'bg-white text-[#24354a] shadow-sm' : 'text-[#62748b] hover:text-[#24354a]'}`}>
+              {value === 'all' ? 'Tüm zamanlar' : 'Haftalık'}
+            </button>
+          ))}
+        </div>
+        {period === 'week' && (
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={() => shiftWeek(-1)} aria-label="Önceki hafta" className="rounded-lg border border-[#e3e9f0] p-2 hover:bg-slate-50"><ChevronLeft className="h-4 w-4" /></button>
+            <label className="flex items-center gap-2 text-sm text-[#62748b]">
+              <span>Hafta seç</span>
+              <input type="date" value={selectedWeek} onChange={event => { if (event.target.value) setSelectedWeek(localDayKey(mondayOf(new Date(`${event.target.value}T00:00:00`)))) }}
+                className="rounded-lg border border-[#e3e9f0] bg-white px-2 py-1.5 text-[#24354a] min-w-0" />
+            </label>
+            <button onClick={() => shiftWeek(1)} aria-label="Sonraki hafta" className="rounded-lg border border-[#e3e9f0] p-2 hover:bg-slate-50"><ChevronRight className="h-4 w-4" /></button>
+            <button onClick={() => setSelectedWeek(localDayKey(mondayOf(new Date())))} className="text-sm font-semibold text-[#4269a8] px-2 py-2">Bu hafta</button>
+          </div>
+        )}
+      </div>
+      <p className="text-sm text-[#62748b]" aria-live="polite">{periodLabel} · {periodSessions.length} çalışma kaydı</p>
+
       {/* Row 1: KPI Kartları */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 shrink-0">
         <div className="rounded-2xl border border-[#e3e9f0] bg-white p-5 hover:shadow-sm transition-all relative overflow-hidden group">
@@ -164,21 +168,21 @@ export default function Stats() {
           </div>
           <div className="relative">
             <p className="text-3xl font-semibold text-[#24354a]">{totalHours}<span className="text-base text-[#718096] font-semibold ml-1">sa</span> {totalMinutes % 60}<span className="text-base text-[#718096] font-semibold ml-1">dk</span></p>
-            <p className="text-[13px] font-medium text-[#62748b] mt-1">Tüm zamanların toplamı</p>
+            <p className="text-[13px] font-medium text-[#62748b] mt-1">{periodLabel}</p>
           </div>
         </div>
 
         <div className="rounded-2xl border border-[#e3e9f0] bg-white p-5 hover:shadow-sm transition-all relative overflow-hidden group">
           <div className="absolute -right-6 -top-6 h-24 w-24 rounded-full bg-emerald-50/50 group-hover:scale-150 transition-all duration-500" />
           <div className="flex items-center justify-between mb-4 relative">
-            <h3 className="text-[13px] font-semibold text-[#62748b] uppercase tracking-wider">Bu Hafta</h3>
+            <h3 className="text-[13px] font-semibold text-[#62748b] uppercase tracking-wider">Aktif Gün</h3>
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
-              <TrendingUp className="h-5 w-5" />
+              <CalendarIcon className="h-5 w-5" />
             </div>
           </div>
           <div className="relative">
-            <p className="text-3xl font-semibold text-[#24354a]">{Math.floor(weekMinutes / 60)}<span className="text-base text-[#718096] font-semibold ml-1">sa</span> {weekMinutes % 60}<span className="text-base text-[#718096] font-semibold ml-1">dk</span></p>
-            <p className="text-[13px] font-medium text-[#62748b] mt-1">Pazartesi'den itibaren</p>
+            <p className="text-3xl font-semibold text-[#24354a]">{safeActiveDays}<span className="text-base text-[#718096] font-semibold ml-1">gün</span></p>
+            <p className="text-[13px] font-medium text-[#62748b] mt-1">Seçilen dönemde çalışılan gün sayısı</p>
           </div>
         </div>
 
@@ -205,7 +209,7 @@ export default function Stats() {
             </div>
           </div>
           <div className="relative">
-            <p className="text-2xl font-semibold text-[#24354a] break-words">{mostProductiveTime?.subject || 'Bilinmiyor'}</p>
+            <p className="text-2xl font-semibold text-[#24354a] break-words">{totalMinutes > 0 ? mostProductiveTime?.subject : 'Henüz veri yok'}</p>
             <p className="text-[13px] font-medium text-[#62748b] mt-1">{(mostProductiveTime?.A || 0) > 0 ? 'Bu zaman diliminde daha iyisin' : 'Henüz veri yok'}</p>
           </div>
         </div>
@@ -217,10 +221,10 @@ export default function Stats() {
         <div className="col-span-1 lg:col-span-2 rounded-2xl border border-[#e3e9f0] bg-white flex flex-col p-5 min-h-[300px] lg:min-h-0">
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-sm font-semibold text-[#24354a] flex items-center gap-2">
-              <CalendarIcon className="h-4 w-4 text-[#4269a8]" /> Son 14 Günlük Performans
+              <CalendarIcon className="h-4 w-4 text-[#4269a8]" /> {period === 'week' ? 'Haftanın Günlük Performansı' : 'Tüm Zamanların Haftalık Performansı'}
             </h3>
           </div>
-          <div className="flex-1">
+          <div className="flex-1 min-h-[220px]">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={trendData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
                 <defs>
@@ -231,7 +235,7 @@ export default function Stats() {
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                 <XAxis dataKey="label" tick={{ fontSize: 12, fill: '#62748b' }} axisLine={false} tickLine={false} dy={10} />
-                <YAxis tick={{ fontSize: 12, fill: '#62748b' }} axisLine={false} tickLine={false} tickFormatter={v => `${v}m`} />
+                <YAxis tick={{ fontSize: 12, fill: '#62748b' }} axisLine={false} tickLine={false} tickFormatter={v => `${v}dk`} />
                 <Tooltip 
                   contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
                   formatter={(val: any) => [`${Math.floor(val/60)} sa ${val%60} dk`, 'Süre']}
