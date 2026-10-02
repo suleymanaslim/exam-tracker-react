@@ -406,10 +406,6 @@ export default function Study() {
 
   // Mola teması
   const isBreak = phase === 'break'
-  const todayMinutes = todaySessions.reduce((sum, session) => sum + session.duration_minutes, 0)
-  const plannedMinutes = todayPlan.reduce((sum, item) => sum + item.planned_minutes, 0)
-  const targetProgress = plannedMinutes > 0 ? Math.min(100, Math.round(todayMinutes / plannedMinutes * 100)) : 0
-  const completedFocus = todaySessions.filter(session => session.session_type !== 'manual').length
   const formatDuration = (value: number) => `${Math.floor(value / 60) ? `${Math.floor(value / 60)} sa ` : ''}${value % 60} dk`
   const selectedSubject = subjects.find(subject => subject.id === selSubject)
   const selectedResource = resources.find(resource => resource.id === selResource)
@@ -426,20 +422,29 @@ export default function Study() {
         <button className="study-button study-button-secondary" onClick={() => setShowManualModal(true)}><Plus size={17} /> Çalışma ekle</button>
       </header>
 
-      <section className="study-summary" aria-label="Bugünün özeti">
-        <div><span>Bugün çalışılan</span><strong>{formatDuration(todayMinutes)}</strong></div>
-        <div><span>Günlük plan</span><strong>{plannedMinutes ? formatDuration(plannedMinutes) : 'Plan yok'}</strong></div>
-        <div><span>Oturum</span><strong>{todaySessions.length}<small> / {completedFocus} odak</small></strong></div>
-        <div className="study-summary-progress"><span>Hedefe ilerleme</span><strong>{plannedMinutes ? `%${targetProgress}` : '—'}</strong><div className="study-track"><i style={{ width: `${targetProgress}%` }} /></div></div>
-      </section>
-
       <div className="study-grid">
+        <aside className="study-side">
+          <section className="study-card study-plan"><div className="study-card-heading"><h2><Target size={18} /> Bugünün planı</h2><span>{todayPlan.length} görev</span></div><p className="study-card-description">Bir görev seçerek ders ve kaynağı hızlıca yükle.</p>
+            <div className="study-plan-list">{todayPlan.length === 0 ? <div className="study-empty"><Target size={24} /><p>Bugün için plan bulunmuyor.</p><Link to="/plan">Haftalık planı aç</Link></div> : todayPlan.map(item => {
+              const studied = todaySessions.filter(session => session.subject_id === item.subject_id && (!item.resource_id || session.resource_id === item.resource_id)).reduce((sum, session) => sum + session.duration_minutes, 0)
+              const done = item.planned_minutes > 0 && studied >= item.planned_minutes
+              return <button key={item.id} onClick={() => loadPlanItem(item)} disabled={isTimerActive || !item.subject_id} className={`study-plan-item ${done ? 'is-done' : ''}`}><i style={{ backgroundColor: getExamColor(item.subject_id) }} /><div><strong>{item.title || getSubjectName(item.subject_id) || 'Çalışma'}</strong><span>{getSubjectName(item.subject_id)}{getResourceName(item.resource_id) ? ` · ${getResourceName(item.resource_id)}` : ''}</span><div className="study-plan-metrics"><span>{formatDuration(item.planned_minutes)}</span>{done && <CheckCircle2 size={15} />}</div></div></button>
+            })}</div>
+          </section>
+
+        </aside>
+
         <section className={`study-card study-focus ${isBreak ? 'study-break' : ''}`}>
           <div className="study-card-heading"><h2><Timer size={18} /> Odak oturumu</h2><span className={`study-status ${isRunning ? 'is-running' : ''}`}>{isBreak ? 'Mola' : isRunning ? 'Çalışılıyor' : startedAt ? 'Duraklatıldı' : 'Hazır'}</span></div>
+          <details className="study-mode-picker">
+            <summary>{modeOptions.find(option => option.key === mode)?.label} <span>· {focusMinutes} dk</span></summary>
           <div className="study-modes" role="group" aria-label="Çalışma modu">
-            {modeOptions.map(option => <button key={option.key} disabled={isTimerActive} onClick={() => setMode(option.key)} aria-pressed={mode === option.key} className={mode === option.key ? 'selected' : ''}><strong>{option.label}</strong><span>{option.description}</span></button>)}
+            {modeOptions.map(option => <button key={option.key} disabled={isTimerActive} onClick={event => { setMode(option.key); event.currentTarget.closest('details')?.removeAttribute('open') }} aria-pressed={mode === option.key} className={mode === option.key ? 'selected' : ''}><strong>{option.label}</strong><span>{option.description}</span></button>)}
           </div>
           {mode === 'manual' && <label className="study-block-count">Odak süresi<select disabled={isTimerActive} value={pomodoroCount} onChange={event => setPomodoroCount(Number(event.target.value))}>{[1,2,3,4,5].map(count => <option key={count} value={count}>{count * settings.long_focus_minutes} dakika</option>)}</select></label>}
+
+          <details className="study-pomodoro-settings"><summary>Pomodoro sürelerini düzenle</summary><div>{([{key: 'short_focus_minutes', label: 'Kısa odak'}, {key: 'short_break_minutes', label: 'Kısa mola'}, {key: 'long_focus_minutes', label: 'Uzun odak'}, {key: 'long_break_minutes', label: 'Uzun mola'}] as const).map(field => <label key={field.key}>{field.label}<input type="number" min="1" max="180" disabled={isTimerActive} value={settings[field.key]} onChange={event => { const value = Number(event.target.value); if (Number.isFinite(value) && value >= 1 && value <= 180) setSettings(current => ({ ...current, [field.key]: value })) }} /><span>dk</span></label>)}</div><p>Bu sayfadaki değişiklikler bu kullanım için geçerlidir. Kalıcı sürelerini Ayarlar’dan belirleyebilirsin.</p></details>
+          </details>
 
           <div className="study-selection">
             <label>Sınav<select value={selExam} disabled={isTimerActive} onChange={event => { setSelExam(event.target.value); setSelSubject(''); setSelResource('') }}><option value="">Sınav seç</option>{exams.map(exam => <option key={exam.id} value={exam.id}>{exam.name}</option>)}</select></label>
@@ -460,19 +465,10 @@ export default function Study() {
             </div>
             <p className="study-timer-hint">{!selSubject ? 'Başlamak için sınav ve ders seçmelisin.' : isBreak ? 'Mola süresi çalışma toplamına eklenmez.' : 'Tamamlanan oturum otomatik kaydedilir.'}</p>
           </div>
-          <details className="study-pomodoro-settings"><summary>Pomodoro sürelerini düzenle</summary><div>{([{key: 'short_focus_minutes', label: 'Kısa odak'}, {key: 'short_break_minutes', label: 'Kısa mola'}, {key: 'long_focus_minutes', label: 'Uzun odak'}, {key: 'long_break_minutes', label: 'Uzun mola'}] as const).map(field => <label key={field.key}>{field.label}<input type="number" min="1" max="180" disabled={isTimerActive} value={settings[field.key]} onChange={event => { const value = Number(event.target.value); if (Number.isFinite(value) && value >= 1 && value <= 180) setSettings(current => ({ ...current, [field.key]: value })) }} /><span>dk</span></label>)}</div><p>Bu sayfadaki değişiklikler bu kullanım için geçerlidir. Kalıcı sürelerini Ayarlar’dan belirleyebilirsin.</p></details>
+
         </section>
 
-        <aside className="study-side">
-          <section className="study-card study-plan"><div className="study-card-heading"><h2><Target size={18} /> Bugünün planı</h2><span>{todayPlan.length} görev</span></div><p className="study-card-description">Bir görev seçerek ders ve kaynağı hızlıca yükle.</p>
-            <div className="study-plan-list">{todayPlan.length === 0 ? <div className="study-empty"><Target size={24} /><p>Bugün için plan bulunmuyor.</p><Link to="/plan">Haftalık planı aç</Link></div> : todayPlan.map(item => {
-              const studied = todaySessions.filter(session => session.subject_id === item.subject_id && (!item.resource_id || session.resource_id === item.resource_id)).reduce((sum, session) => sum + session.duration_minutes, 0)
-              const done = item.planned_minutes > 0 && studied >= item.planned_minutes
-              return <button key={item.id} onClick={() => loadPlanItem(item)} disabled={isTimerActive || !item.subject_id} className={`study-plan-item ${done ? 'is-done' : ''}`}><i style={{ backgroundColor: getExamColor(item.subject_id) }} /><div><strong>{item.title || getSubjectName(item.subject_id) || 'Çalışma'}</strong><span>{getSubjectName(item.subject_id)}{getResourceName(item.resource_id) ? ` · ${getResourceName(item.resource_id)}` : ''}</span><div className="study-plan-metrics"><span>{formatDuration(studied)} / {formatDuration(item.planned_minutes)}</span>{done && <CheckCircle2 size={15} />}</div><div className="study-track"><i style={{ width: `${item.planned_minutes > 0 ? Math.min(100, studied / item.planned_minutes * 100) : 0}%` }} /></div></div></button>
-            })}</div>
-          </section>
-          <section className="study-card study-sessions"><div className="study-card-heading"><h2><Clock size={18} /> Bugünkü oturumlar</h2><span>{formatDuration(todayMinutes)}</span></div><div className="study-session-list">{todaySessions.length === 0 ? <p className="study-empty">İlk oturumun burada görünecek.</p> : todaySessions.map(session => <div className="study-session-item" key={session.id}><i style={{ backgroundColor: getExamColor(session.subject_id) }} /><div><strong>{getSubjectName(session.subject_id) || 'Çalışma'}</strong><span>{new Date(session.started_at).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })} · {session.session_type === 'manual' ? 'Manuel kayıt' : session.session_type === 'pomodoro_short' ? 'Kısa Pomodoro' : 'Uzun Pomodoro'}</span></div><b>{formatDuration(session.duration_minutes)}</b></div>)}</div></section>
-        </aside>
+
       </div>
 
       {/* ══ MANUEL OTURUM EKLE MODAL ══════════════════════════════════ */}
