@@ -38,24 +38,34 @@ export default function AppLayout() {
   const [searchParams] = useSearchParams()
   const [expanded, setExpanded] = useState(false)
   const { isRunning, secondsLeft } = useTimerStore()
-  const { isAdmin, setIsAdmin, setImpersonatedUserId } = useAdminStore()
+  const { isAdmin, impersonatedUserId, setIsAdmin, setImpersonatedUserId } = useAdminStore()
+
+  const [contextReady, setContextReady] = useState(false)
 
   useEffect(() => {
+    let cancelled = false
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (user) {
         supabase.from('profiles').select('role').eq('id', user.id).single().then(r => {
+          if (cancelled) return
           const isUserAdmin = r.data?.role === 'admin'
           setIsAdmin(isUserAdmin)
           
+          if (!isUserAdmin) setImpersonatedUserId(null)
           if (isUserAdmin) {
             const impId = searchParams.get('impersonate')
             if (impId) {
               setImpersonatedUserId(impId)
             }
           }
+          setContextReady(true)
         })
+      } else {
+        setImpersonatedUserId(null)
+        setContextReady(true)
       }
     })
+    return () => { cancelled = true }
   }, [setIsAdmin, searchParams, setImpersonatedUserId])
 
   const handleLogout = async () => {
@@ -69,7 +79,7 @@ export default function AppLayout() {
   const timerSS = String(secondsLeft % 60).padStart(2, '0')
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[#f0f4f8]">
+    <div className="flex h-dvh w-full overflow-hidden bg-[#f0f4f8]">
       {/* ── Sidebar (Desktop Only) ─────────────────────────────────── */}
       <aside
         className={`hidden md:flex flex-col shrink-0 bg-[#0a1628] transition-all duration-300 ${expanded ? 'w-[200px]' : 'w-[60px]'} relative group`}
@@ -178,8 +188,19 @@ export default function AppLayout() {
           </div>
         )}
 
+        {isAdmin && impersonatedUserId && (
+          <div className="shrink-0 border-b border-indigo-200 bg-indigo-50 px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+              <span className="font-semibold text-indigo-900">Kullanıcı hesabını görüntülüyorsun</span>
+              <button className="min-h-9 rounded-lg border border-indigo-200 bg-white px-3 font-semibold text-indigo-700" onClick={() => { setImpersonatedUserId(null); navigate('/admin') }}>Kendi hesabıma dön</button>
+            </div>
+            <nav aria-label="Kullanıcı hesabı sayfaları" className="mt-2 flex flex-wrap gap-1">
+              {navItems.filter(item => item.href !== '/settings' && item.href !== '/study').map(item => <Link key={item.href} to={item.href} className={`rounded-lg px-3 py-2 text-xs font-medium ${location.pathname === item.href ? 'bg-indigo-600 text-white' : 'text-indigo-700 hover:bg-indigo-100'}`}>{item.label}</Link>)}
+            </nav>
+          </div>
+        )}
         <div className="flex-1 overflow-auto p-4 md:p-5 pb-20 md:pb-5">
-          <Outlet />
+          <>{contextReady ? <Outlet key={impersonatedUserId || 'self'} /> : <p className="p-4 text-sm text-slate-500">Hesap yükleniyor…</p>}</>
         </div>
       </main>
 
@@ -191,7 +212,7 @@ export default function AppLayout() {
             <Link
               key={item.href}
               to={item.href}
-              className={`flex flex-col items-center justify-center gap-1 px-2 rounded-xl transition-all min-w-[60px] h-12 ${
+              className={`flex flex-col items-center justify-center gap-1 px-1 rounded-xl transition-all min-w-0 flex-1 h-12 ${
                 isActive ? 'text-blue-300 bg-white/10' : 'text-white/50 hover:text-white'
               }`}
             >
@@ -203,7 +224,7 @@ export default function AppLayout() {
         {isAdmin && (
           <Link
             to="/admin"
-            className={`flex flex-col items-center justify-center gap-1 px-2 rounded-xl transition-all min-w-[60px] h-12 ${
+            className={`flex flex-col items-center justify-center gap-1 px-1 rounded-xl transition-all min-w-0 flex-1 h-12 ${
               location.pathname === '/admin' ? 'text-indigo-300 bg-indigo-500/20' : 'text-indigo-400/60 hover:text-indigo-300'
             }`}
           >

@@ -145,10 +145,10 @@ export default function Study() {
           setTodayPlan(items)
         })
 
-        loadTodaySessions(user.id)
+        loadTodaySessions(targetUid)
       }
     })
-  }, [])
+  }, [impersonatedUserId])
 
   // ── Focus minutes from settings ────────────────────────────────────
   let focusMinutes = settings.long_focus_minutes

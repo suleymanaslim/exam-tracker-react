@@ -1,3 +1,4 @@
+import { DailyProgress, WeeklyProgress, DashboardSummary } from '../components/DashboardProgress'
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { useNavigate } from 'react-router-dom'
@@ -6,9 +7,9 @@ import { useTimerStore } from '../lib/timerStore'
 import { useAdminStore } from '../lib/adminStore'
 import Swal from 'sweetalert2'
 import {
-  Play, Clock, TrendingUp, Zap, ChevronDown, ChevronRight,
+  Play, Clock, Zap, ChevronDown, ChevronRight,
   Shield, Globe, BookOpen, Calculator, Target,
-  Flame, CalendarClock, RotateCcw, Download, FileJson, MessageSquare, Check, Trophy, Copy
+  CalendarClock, RotateCcw, Download, FileJson, MessageSquare, Check, Trophy, Copy
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { defaultVocabularyText } from '../lib/defaultVocabulary'
@@ -186,7 +187,7 @@ export default function Dashboard() {
       const monday = getMonday(new Date())
       const sunday = new Date(monday)
       sunday.setDate(sunday.getDate() + 6)
-      sunday.setHours(23, 59, 59)
+      sunday.setHours(23, 59, 59, 999)
       supabase.from('study_sessions').select('*').eq('user_id', targetUid)
         .gte('started_at', monday.toISOString())
         .lte('started_at', sunday.toISOString())
@@ -211,7 +212,7 @@ export default function Dashboard() {
         }
         if (vpiRes.data) {
           const vpis = vpiRes.data.map((v: any) => {
-            const dateObj = new Date(v.date)
+            const dateObj = new Date(`${v.date}T00:00:00`)
             const dayOfWeek = dateObj.getDay() === 0 ? 7 : dateObj.getDay()
             const res = v.resources || {}
             
@@ -334,10 +335,6 @@ export default function Dashboard() {
 
   const totalWeekMinutes = weekSessions.reduce((a, s) => a + s.duration_minutes, 0)
   const totalWeekPlannedMinutes = weekPlanItems.reduce((a, p) => a + p.planned_minutes, 0)
-  const weekProgressPercent = totalWeekPlannedMinutes > 0
-    ? Math.min(100, Math.round((totalWeekMinutes / totalWeekPlannedMinutes) * 100))
-    : 0
-
   const dayProgress = DAY_LABELS.map((label, i) => {
     const dayDate = new Date(getMonday(new Date()))
     dayDate.setDate(dayDate.getDate() + i)
@@ -443,7 +440,7 @@ export default function Dashboard() {
     let planItems: any[] = []
     if (plan) { const { data } = await supabase.from('plan_items').select('*, subjects(name), resources(name)').eq('weekly_plan_id', plan.id); planItems = data ?? [] }
 
-    const sunday = new Date(monday); sunday.setDate(sunday.getDate() + 6); sunday.setHours(23, 59, 59)
+    const sunday = new Date(monday); sunday.setDate(sunday.getDate() + 6); sunday.setHours(23, 59, 59, 999)
     const { data: sessions } = await supabase.from('study_sessions').select('*, subjects(name), resources(name)').eq('user_id', user.id).gte('started_at', monday.toISOString()).lte('started_at', sunday.toISOString())
 
     const { data: examsData } = await supabase.from('exam_results').select('*, exams(name, wrong_penalty, point_per_net)').eq('user_id', user.id).gte('created_at', monday.toISOString()).lte('created_at', sunday.toISOString())
@@ -546,7 +543,7 @@ export default function Dashboard() {
   }
 
   return (
-    <motion.div variants={container} initial="hidden" animate="show" className="flex flex-col h-full gap-3 overflow-y-auto">
+    <motion.div variants={container} initial="hidden" animate="show" className="flex min-w-0 flex-col gap-4 pb-3">
 
       {/* Name Onboarding Modal */}
       {showNameModal && (
@@ -587,76 +584,13 @@ export default function Dashboard() {
           </div>
         </motion.div>
 
-        {/* MOBİL ROW 2 — Stats row (streak, bu hafta, geri sayım) */}
-        <motion.div variants={item} className="grid grid-cols-3 gap-2">
-          {/* Seri */}
-          <div className="bg-gradient-to-br from-orange-50 to-amber-50 border border-orange-200 rounded-xl p-3 flex flex-col items-center justify-center">
-            <Flame className={`h-5 w-5 mb-1 ${streak > 0 ? 'text-orange-500' : 'text-[#94a3b8]'}`} />
-            <p className="text-[18px] font-black text-[#0f172a] leading-none">{streak}</p>
-            <p className="text-[9px] text-[#94a3b8] font-semibold uppercase mt-0.5">Gün Seri</p>
-          </div>
-
-          {/* Bu Hafta */}
-          <div className="bg-white border border-[#e2e8f0] rounded-xl p-3 flex flex-col items-center justify-center">
-            <TrendingUp className="h-5 w-5 mb-1 text-[#2563eb]" />
-            <p className="text-[18px] font-black text-[#0f172a] leading-none">
-              {Math.floor(totalWeekMinutes / 60)}<span className="text-[11px] font-semibold text-[#94a3b8]">sa</span>
-            </p>
-            <p className="text-[9px] text-[#94a3b8] font-semibold uppercase mt-0.5">Bu Hafta</p>
-          </div>
-
-          {/* Sınav Geri Sayım */}
-          <div className={`rounded-xl p-3 flex flex-col items-center justify-center border ${
-            countdownDays !== null && countdownDays <= 7 ? 'bg-red-50 border-red-200' :
-            countdownDays !== null && countdownDays <= 30 ? 'bg-orange-50 border-orange-200' :
-            'bg-white border-[#e2e8f0]'
-          }`}>
-            <CalendarClock className={`h-5 w-5 mb-1 ${
-              countdownDays !== null && countdownDays <= 7 ? 'text-red-500' :
-              countdownDays !== null && countdownDays <= 30 ? 'text-orange-500' :
-              'text-[#2563eb]'
-            }`} />
-            {countdownDays !== null ? (
-              <>
-                <p className={`text-[18px] font-black leading-none ${
-                  countdownDays <= 7 ? 'text-red-500' : countdownDays <= 30 ? 'text-orange-500' : 'text-[#0f172a]'
-                }`}>{countdownDays}</p>
-                <p className="text-[9px] text-[#94a3b8] font-semibold uppercase mt-0.5">Gün Kaldı</p>
-              </>
-            ) : (
-              <p className="text-[9px] text-[#94a3b8] text-center font-semibold">Tarih Girilmemiş</p>
-            )}
-          </div>
-        </motion.div>
-
-        {/* MOBİL ROW 3 — Haftalık İlerleme Barları (kompakt) */}
-        <motion.div variants={item} className="bg-white rounded-xl border border-[#e2e8f0] px-3 py-3">
-          <div className="flex items-center justify-between mb-2.5">
-            <h3 className="text-[11px] font-bold text-[#0f172a] flex items-center gap-1">
-              <TrendingUp className="h-3 w-3 text-[#2563eb]" /> Haftalık İlerleme
-            </h3>
-            <span className="text-[9px] text-[#64748b]">
-              {Math.floor(totalWeekMinutes / 60)}sa / {Math.floor(totalWeekPlannedMinutes / 60)}sa
-              {totalWeekPlannedMinutes > 0 && <span className="ml-1 font-bold text-[#2563eb]">%{weekProgressPercent}</span>}
-            </span>
-          </div>
-          <div className="flex items-end justify-between gap-1 h-[56px]">
-            {dayProgress.map((d, i) => (
-              <div key={d.label} className="flex-1 flex flex-col items-center gap-0.5 justify-end h-full">
-                <div className="relative w-full flex items-end" style={{ height: '44px' }}>
-                  {d.planned > 0 && <div className="absolute inset-x-0.5 bottom-0 rounded-sm bg-[#e2e8f0]" style={{ height: '100%' }} />}
-                  <motion.div
-                    initial={{ height: 0 }}
-                    animate={{ height: d.pct > 0 ? `${Math.max(8, d.pct)}%` : '2px' }}
-                    transition={{ duration: 0.5, type: 'spring', bounce: 0.3, delay: i * 0.04 }}
-                    className={`absolute inset-x-0.5 bottom-0 rounded-sm ${d.isToday ? 'bg-[#2563eb]' : d.pct >= 100 ? 'bg-emerald-500' : 'bg-[#93c5fd]'}`}
-                  />
-                </div>
-                <span className={`text-[8px] font-bold ${d.isToday ? 'text-[#2563eb]' : 'text-[#94a3b8]'}`}>{d.label}</span>
-              </div>
-            ))}
-          </div>
-        </motion.div>
+        <DashboardSummary streak={streak} studied={totalWeekMinutes} planned={totalWeekPlannedMinutes} />
+        <DailyProgress day={dayProgress[todayIdx]} regularMinutes={todayPlanItems.filter(p => !p.isVideo).reduce((sum, p) => sum + p.planned_minutes, 0)} videoMinutes={todayPlanItems.filter(p => p.isVideo).reduce((sum, p) => sum + p.planned_minutes, 0)} />
+        <WeeklyProgress days={dayProgress} />
+        <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-3 text-xs">
+          <span className="font-semibold text-slate-700">{countdownExam?.name || 'Sınav'} geri sayımı</span>
+          <span className="font-bold text-blue-700">{countdownDays === null ? 'Tarih girilmemiş' : `${countdownDays} gün`}</span>
+        </div>
 
         {/* MOBİL ROW 4 — Sınav Kartları (görünür, büyük) */}
         {exams.length > 0 && (
@@ -696,7 +630,7 @@ export default function Dashboard() {
               <h3 className="text-[12px] font-bold text-[#0f172a]">Bugünün Planı</h3>
             </div>
             <div className="p-2.5 space-y-1.5">
-              {todayPlanItems.slice(0, 4).map((planItem: any) => {
+              {todayPlanItems.map((planItem: any) => {
                 const subName = getSubjectName(planItem.subject_id)
                 const ex = exams.find(e => subjects.find(s => s.id === planItem.subject_id)?.exam_id === e.id)
                 return (
@@ -766,7 +700,7 @@ export default function Dashboard() {
                 className="w-full bg-[#f8fafc] border border-[#e2e8f0] rounded-lg pl-8 pr-3 py-2 text-[12px] text-[#0f172a] focus:outline-none focus:border-indigo-400"
               />
             </div>
-            <button onClick={saveDailyMessage} disabled={isSavingMessage} className="bg-indigo-50 border border-indigo-100 text-indigo-600 rounded-lg p-2 transition-all shrink-0">
+            <button onClick={saveDailyMessage} disabled={isSavingMessage} aria-label="Durum mesajını kaydet" className="bg-indigo-50 border border-indigo-100 text-indigo-600 rounded-lg p-2 transition-all shrink-0">
               {isSavingMessage ? <div className="h-4 w-4 rounded-full border-2 border-indigo-400 border-t-transparent animate-spin" /> : <Check className="h-4 w-4" />}
             </button>
           </div>
@@ -809,7 +743,7 @@ export default function Dashboard() {
       {/* Name Onboarding Modal - handled above */}
 
       {/* Header */}
-      <motion.div variants={item} className="flex flex-col md:flex-row md:items-start justify-between shrink-0 gap-4">
+      <motion.div variants={item} className="flex flex-col lg:flex-row lg:items-start justify-between shrink-0 gap-4">
         <div>
           <h1 className="text-2xl font-black text-[#0f172a] tracking-tight">Merhaba, {displayName} 👋</h1>
           <p className="text-[13px] text-[#64748b] mt-1 font-medium">{quote.text} — <span className="text-[#94a3b8] italic">{quote.author}</span></p>
@@ -832,80 +766,19 @@ export default function Dashboard() {
             </button>
           </div>
         </div>
-        <div className="flex items-center gap-4 shrink-0 self-start md:self-auto mt-2 md:mt-0">
-          {/* Streak */}
-          <div className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-orange-50 to-amber-50 border border-orange-200 px-3 py-2">
-            <Flame className={`h-5 w-5 ${streak > 0 ? 'text-orange-500 animate-pulse' : 'text-[#94a3b8]'}`} />
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-[#94a3b8]">Seri</p>
-              <p className="text-lg font-black text-[#0f172a] leading-none">{streak}<span className="text-[10px] font-semibold text-[#94a3b8] ml-0.5">gün</span></p>
-            </div>
-          </div>
-          {/* Bu hafta toplam */}
-          <div className="text-right">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-[#94a3b8]">Bu Hafta</p>
-            <p className="text-xl font-black text-[#0f172a] leading-none">
-              {Math.floor(totalWeekMinutes / 60)}<span className="text-sm font-semibold text-[#64748b]"> sa </span>
-              {totalWeekMinutes % 60}<span className="text-sm font-semibold text-[#64748b]"> dk</span>
-            </p>
-          </div>
-          {totalWeekPlannedMinutes > 0 && (
-            <div className="flex h-14 w-14 items-center justify-center rounded-full border-4 border-[#2563eb]/20 bg-[#eff6ff] relative">
-              <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 56 56">
-                <circle cx="28" cy="28" r="24" fill="none" stroke="#e2e8f0" strokeWidth="4" />
-                <circle cx="28" cy="28" r="24" fill="none" stroke="#2563eb" strokeWidth="4"
-                  strokeDasharray={2 * Math.PI * 24}
-                  strokeDashoffset={2 * Math.PI * 24 * (1 - weekProgressPercent / 100)}
-                  strokeLinecap="round" />
-              </svg>
-              <span className="text-[11px] font-black text-[#2563eb] z-10">%{weekProgressPercent}</span>
-            </div>
-          )}
+        <div className="w-full lg:w-auto lg:min-w-[350px] shrink-0">
+          <DashboardSummary streak={streak} studied={totalWeekMinutes} planned={totalWeekPlannedMinutes} />
         </div>
       </motion.div>
+      <DailyProgress day={dayProgress[todayIdx]} regularMinutes={todayPlanItems.filter(p => !p.isVideo).reduce((sum, p) => sum + p.planned_minutes, 0)} videoMinutes={todayPlanItems.filter(p => p.isVideo).reduce((sum, p) => sum + p.planned_minutes, 0)} />
 
       {/* ══ ROW 2 — Haftalık Barlar + Hızlı Başla + Sınav Geri Sayım ═════ */}
       <motion.div variants={item} className="grid grid-cols-1 md:grid-cols-12 gap-3 shrink-0">
 
-        {/* Haftalık İlerleme Barları */}
-        <div className="md:col-span-5 rounded-xl border border-[#e2e8f0] bg-white px-4 py-3 overflow-x-auto">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-[12px] font-bold text-[#0f172a] flex items-center gap-1.5">
-              <TrendingUp className="h-3.5 w-3.5 text-[#2563eb]" /> Haftalık İlerleme
-            </h3>
-            <span className="text-[10px] text-[#64748b]">
-              {Math.floor(totalWeekMinutes / 60)}sa / {Math.floor(totalWeekPlannedMinutes / 60)}sa
-            </span>
-          </div>
-          <div className="flex items-end justify-between gap-1.5 h-[72px]">
-            {dayProgress.map((d, i) => (
-              <div key={d.label} className="flex-1 flex flex-col items-center gap-0.5 justify-end h-full relative group">
-                <div className="absolute -top-10 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-all duration-150 pointer-events-none z-20 whitespace-nowrap">
-                  <div className="bg-[#0f172a] text-white text-[9px] font-semibold py-1 px-2 rounded-lg shadow-xl">
-                    {d.studied > 0
-                      ? <><span className="text-emerald-400">{Math.floor(d.studied / 60)}s {d.studied % 60}d</span>{d.planned > 0 ? ` / ${Math.floor(d.planned / 60)}s` : ''}</>
-                      : d.planned > 0 ? `Hedef: ${Math.floor(d.planned / 60)}s` : 'Yok'
-                    }
-                  </div>
-                  <div className="w-1.5 h-1.5 bg-[#0f172a] rotate-45 mx-auto -mt-0.5" />
-                </div>
-                <div className="relative w-full flex items-end" style={{ height: '56px' }}>
-                  {d.planned > 0 && <div className="absolute inset-x-0.5 bottom-0 rounded-md bg-[#e2e8f0]" style={{ height: '100%' }} />}
-                  <motion.div
-                    initial={{ height: 0 }}
-                    animate={{ height: d.pct > 0 ? `${Math.max(10, d.pct)}%` : '3px' }}
-                    transition={{ duration: 0.5, type: 'spring', bounce: 0.3, delay: i * 0.04 }}
-                    className={`absolute inset-x-0.5 bottom-0 rounded-md ${d.isToday ? 'bg-[#2563eb]' : d.pct >= 100 ? 'bg-emerald-500' : 'bg-[#93c5fd]'}`}
-                  />
-                </div>
-                <span className={`text-[9px] font-semibold ${d.isToday ? 'text-[#2563eb]' : 'text-[#94a3b8]'}`}>{d.label}</span>
-              </div>
-            ))}
-          </div>
-        </div>
+        <div className="md:col-span-12 xl:col-span-5 min-w-0"><WeeklyProgress days={dayProgress} /></div>
 
         {/* Hızlı Başla */}
-        <div className="md:col-span-4 rounded-xl border border-[#e2e8f0] bg-white overflow-hidden flex flex-col">
+        <div className="md:col-span-8 xl:col-span-4 rounded-xl border border-[#e2e8f0] bg-white overflow-hidden flex flex-col">
           <div className="px-3 py-2.5 border-b border-[#e2e8f0] flex items-center justify-between">
             <h3 className="text-[12px] font-bold text-[#0f172a] flex items-center gap-1.5">
               <Zap className="h-3.5 w-3.5 text-amber-500" /> Hızlı Başla
@@ -970,7 +843,7 @@ export default function Dashboard() {
         </div>
 
         {/* Sınav Geri Sayım + Rapor */}
-        <div className="md:col-span-3 flex md:flex-col gap-3">
+        <div className="md:col-span-4 xl:col-span-3 flex flex-col gap-3">
           {/* Geri sayım */}
           <div className="rounded-xl border border-[#e2e8f0] bg-white px-3 py-3 flex-1">
             <div className="flex items-center justify-between mb-2">
