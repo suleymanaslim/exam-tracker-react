@@ -4,7 +4,7 @@ import '@fontsource/source-sans-3/latin-ext-600.css'
 import '@fontsource/source-sans-3/latin-400.css'
 import '@fontsource/source-sans-3/latin-600.css'
 import { Link, Outlet, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   LayoutDashboard, Calendar, Timer, History,
   BarChart3, Settings, LogOut,
@@ -42,6 +42,12 @@ export default function AppLayout() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const [expanded, setExpanded] = useState(false)
+  const sidebarTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const scheduleSidebar = (open: boolean, delay: number) => {
+    if (sidebarTimer.current) clearTimeout(sidebarTimer.current)
+    sidebarTimer.current = setTimeout(() => setExpanded(open), delay)
+  }
+  useEffect(() => () => { if (sidebarTimer.current) clearTimeout(sidebarTimer.current) }, [])
   const { isRunning, secondsLeft } = useTimerStore()
   const { isAdmin, impersonatedUserId, setIsAdmin, setImpersonatedUserId } = useAdminStore()
 
@@ -85,7 +91,7 @@ export default function AppLayout() {
 
   return (
     <div className="app-shell flex h-dvh w-full overflow-hidden bg-[#f0f4f8]">
-      <aside className={`app-sidebar ${expanded ? 'is-expanded' : 'is-collapsed'}`} onMouseEnter={() => setExpanded(true)} onMouseLeave={e => { if (!e.currentTarget.contains(document.activeElement)) setExpanded(false) }} onFocus={() => setExpanded(true)} onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) setExpanded(false) }}>
+      <aside className={`app-sidebar ${expanded ? 'is-expanded' : 'is-collapsed'}`} onMouseEnter={() => scheduleSidebar(true, 120)} onMouseLeave={() => scheduleSidebar(false, 320)} onFocus={() => scheduleSidebar(true, 0)} onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) scheduleSidebar(false, 320) }}>
         <div className="app-brand"><img className="app-brand-image" src="/studytracker-logo.png" alt="StudyTracker logosu" width="36" height="36" /><div className="app-nav-label"><strong>StudyTracker</strong><span>Çalışma alanın</span></div></div>
 
         {isRunning && <Link to="/study" className="app-timer" aria-label={`Çalışmaya dön, kalan süre ${timerMM}:${timerSS}`}><span className="app-timer-dot" /><span>{timerMM}:{timerSS}</span></Link>}

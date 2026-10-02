@@ -1,3 +1,4 @@
+import './SuitePages.css'
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import Swal from 'sweetalert2'
@@ -83,7 +84,7 @@ export default function History() {
       icon: 'warning',
       showCancelButton: true,
       confirmButtonColor: '#ef4444',
-      cancelButtonColor: '#94a3b8',
+      cancelButtonColor: '#718096',
       confirmButtonText: 'Evet, Sil',
       cancelButtonText: 'İptal'
     })
@@ -152,13 +153,14 @@ export default function History() {
   }, [sessions])
 
   return (
-    <div className="flex flex-col h-full gap-3">
+    <div className="suite-page suite-history flex flex-col h-full gap-3">
       {/* Header */}
       <div className="shrink-0">
-        <h1 className="text-lg font-bold text-[#0f172a] flex items-center gap-2">
-          <HistoryIcon className="h-5 w-5 text-[#2563eb]" /> Çalışma Geçmişi
+        <p className="suite-eyebrow">ÇALIŞMA ARŞİVİN</p>
+          <h1 className="text-lg font-semibold text-[#24354a] flex items-center gap-2">
+          <HistoryIcon className="h-5 w-5 text-[#4269a8]" /> Çalışma Geçmişi
         </h1>
-        <p className="text-[12px] text-[#64748b]">Tüm çalışma kayıtlarını incele, ders/kaynak düzenle veya sil.</p>
+        <p className="text-[14px] text-[#62748b]">Tüm çalışma kayıtlarını incele, ders/kaynak düzenle veya sil.</p>
       </div>
 
       {/* Edit Modal */}
@@ -169,17 +171,17 @@ export default function History() {
             onClick={e => e.stopPropagation()}
           >
             {/* Modal Header */}
-            <div className="bg-[#0a1628] px-6 py-4">
-              <h2 className="text-white font-bold text-base flex items-center gap-2">
+            <div className="bg-[#4269a8] px-6 py-4">
+              <h2 className="text-white font-semibold text-base flex items-center gap-2">
                 <Pencil className="h-4 w-4" /> Kaydı Düzenle
               </h2>
-              <p className="text-[#94a3b8] text-[12px] mt-0.5">Ders, kaynak, süre veya notu güncelleyebilirsin.</p>
+              <p className="text-[#718096] text-[14px] mt-0.5">Ders, kaynak, süre veya notu güncelleyebilirsin.</p>
             </div>
 
             <div className="p-6 space-y-4">
               {/* Sınav Seçimi */}
               <div>
-                <label className="text-[11px] font-semibold text-[#64748b] uppercase tracking-wider">Sınav</label>
+                <label className="text-[13px] font-semibold text-[#62748b] uppercase tracking-wider">Sınav</label>
                 <select
                   value={editSubjectExam}
                   onChange={e => {
@@ -187,7 +189,7 @@ export default function History() {
                     const firstSub = subjects.find(s => s.exam_id === e.target.value)
                     setEdit(prev => prev ? { ...prev, subject_id: firstSub?.id ?? '', resource_id: '' } : prev)
                   }}
-                  className="mt-1 w-full h-10 rounded-xl border border-[#e2e8f0] bg-[#f8fafc] px-3 text-[13px] text-[#0f172a] focus:outline-none focus:ring-2 focus:ring-[#2563eb]/30"
+                  className="mt-1 w-full h-10 rounded-2xl border border-[#e3e9f0] bg-[#f8fafc] px-3 text-[15px] text-[#24354a] focus:outline-none focus:ring-2 focus:ring-[#4269a8]/30"
                 >
                   <option value="">Sınav seç...</option>
                   {exams.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
@@ -196,11 +198,11 @@ export default function History() {
 
               {/* Ders Seçimi */}
               <div>
-                <label className="text-[11px] font-semibold text-[#64748b] uppercase tracking-wider">Ders</label>
+                <label className="text-[13px] font-semibold text-[#62748b] uppercase tracking-wider">Ders</label>
                 <select
                   value={edit.subject_id}
                   onChange={e => setEdit(prev => prev ? { ...prev, subject_id: e.target.value, resource_id: '' } : prev)}
-                  className="mt-1 w-full h-10 rounded-xl border border-[#e2e8f0] bg-[#f8fafc] px-3 text-[13px] text-[#0f172a] focus:outline-none focus:ring-2 focus:ring-[#2563eb]/30"
+                  className="mt-1 w-full h-10 rounded-2xl border border-[#e3e9f0] bg-[#f8fafc] px-3 text-[15px] text-[#24354a] focus:outline-none focus:ring-2 focus:ring-[#4269a8]/30"
                 >
                   <option value="">Ders seç...</option>
                   {editFilteredSubjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -209,12 +211,12 @@ export default function History() {
 
               {/* Kaynak Seçimi */}
               <div>
-                <label className="text-[11px] font-semibold text-[#64748b] uppercase tracking-wider">Kaynak</label>
+                <label className="text-[13px] font-semibold text-[#62748b] uppercase tracking-wider">Kaynak</label>
                 <select
                   value={edit.resource_id}
                   onChange={e => setEdit(prev => prev ? { ...prev, resource_id: e.target.value } : prev)}
                   disabled={!edit.subject_id}
-                  className="mt-1 w-full h-10 rounded-xl border border-[#e2e8f0] bg-[#f8fafc] px-3 text-[13px] text-[#0f172a] focus:outline-none focus:ring-2 focus:ring-[#2563eb]/30 disabled:opacity-50"
+                  className="mt-1 w-full h-10 rounded-2xl border border-[#e3e9f0] bg-[#f8fafc] px-3 text-[15px] text-[#24354a] focus:outline-none focus:ring-2 focus:ring-[#4269a8]/30 disabled:opacity-50"
                 >
                   <option value="">Kaynak seç (opsiyonel)...</option>
                   {editFilteredResources.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
@@ -223,22 +225,22 @@ export default function History() {
 
               {/* Süre */}
               <div>
-                <label className="text-[11px] font-semibold text-[#64748b] uppercase tracking-wider">Süre (dakika)</label>
+                <label className="text-[13px] font-semibold text-[#62748b] uppercase tracking-wider">Süre (dakika)</label>
                 <input
                   type="number" min={1} value={edit.duration_minutes}
                   onChange={e => setEdit(prev => prev ? { ...prev, duration_minutes: Number(e.target.value) } : prev)}
-                  className="mt-1 w-full h-10 rounded-xl border border-[#e2e8f0] bg-[#f8fafc] px-3 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#2563eb]/30"
+                  className="mt-1 w-full h-10 rounded-2xl border border-[#e3e9f0] bg-[#f8fafc] px-3 text-[15px] focus:outline-none focus:ring-2 focus:ring-[#4269a8]/30"
                 />
               </div>
 
               {/* Not */}
               <div>
-                <label className="text-[11px] font-semibold text-[#64748b] uppercase tracking-wider">Not (opsiyonel)</label>
+                <label className="text-[13px] font-semibold text-[#62748b] uppercase tracking-wider">Not (opsiyonel)</label>
                 <input
                   type="text" value={edit.note}
                   onChange={e => setEdit(prev => prev ? { ...prev, note: e.target.value } : prev)}
                   placeholder="ör. 30 soru çözdüm"
-                  className="mt-1 w-full h-10 rounded-xl border border-[#e2e8f0] bg-[#f8fafc] px-3 text-[13px] placeholder:text-[#94a3b8] focus:outline-none focus:ring-2 focus:ring-[#2563eb]/30"
+                  className="mt-1 w-full h-10 rounded-2xl border border-[#e3e9f0] bg-[#f8fafc] px-3 text-[15px] placeholder:text-[#718096] focus:outline-none focus:ring-2 focus:ring-[#4269a8]/30"
                 />
               </div>
             </div>
@@ -247,13 +249,13 @@ export default function History() {
             <div className="flex gap-3 px-6 pb-6">
               <button
                 onClick={cancelEdit}
-                className="flex-1 h-10 rounded-xl border border-[#e2e8f0] text-[13px] font-semibold text-[#64748b] hover:bg-[#f8fafc] transition-all"
+                className="flex-1 h-10 rounded-2xl border border-[#e3e9f0] text-[15px] font-semibold text-[#62748b] hover:bg-[#f8fafc] transition-all"
               >
                 İptal
               </button>
               <button
                 onClick={saveEdit}
-                className="flex-1 h-10 rounded-xl bg-[#2563eb] text-white text-[13px] font-bold hover:bg-blue-600 transition-all flex items-center justify-center gap-2 shadow-md shadow-blue-500/20"
+                className="flex-1 h-10 rounded-xl bg-[#4269a8] text-white text-[15px] font-semibold hover:bg-blue-600 transition-all flex items-center justify-center gap-2 shadow-md shadow-blue-500/20"
               >
                 <Check className="h-4 w-4" /> Kaydet
               </button>
@@ -263,11 +265,11 @@ export default function History() {
       )}
 
       {/* Table */}
-      <div className="flex-1 min-h-0 rounded-xl border border-[#e2e8f0] bg-white overflow-hidden flex flex-col">
+      <div className="flex-1 min-h-0 rounded-2xl border border-[#e3e9f0] bg-white overflow-hidden flex flex-col">
         <div className="overflow-x-auto flex-1 flex flex-col">
           <div className="min-w-[700px] flex-1 flex flex-col">
             {/* Header row */}
-            <div className="grid grid-cols-[36px_1fr_1fr_90px_80px_90px_60px] gap-3 px-4 py-2.5 border-b border-[#e2e8f0] bg-[#f8fafc] text-[10px] font-semibold uppercase tracking-wider text-[#94a3b8] shrink-0">
+            <div className="grid grid-cols-[36px_1fr_1fr_90px_80px_90px_60px] gap-3 px-4 py-2.5 border-b border-[#e3e9f0] bg-[#f8fafc] text-[12px] font-semibold uppercase tracking-wider text-[#718096] shrink-0">
           <span></span>
           <span>Ders</span>
           <span>Kaynak</span>
@@ -280,7 +282,7 @@ export default function History() {
         {/* Rows */}
         <div className="flex-1 overflow-y-auto">
           {sessions.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-[#94a3b8] text-[13px]">
+            <div className="flex flex-col items-center justify-center h-full text-[#718096] text-[15px]">
               <Clock className="h-8 w-8 mb-2 opacity-40" />
               Henüz çalışma kaydı yok.
             </div>
@@ -288,10 +290,10 @@ export default function History() {
             grouped.map(([date, dateSessions]) => (
               <div key={date}>
                 {/* Date group header */}
-                <div className="px-4 py-1.5 bg-[#f8fafc] border-b border-[#e2e8f0] sticky top-0 z-10">
-                  <span className="text-[10px] font-bold text-[#64748b] uppercase tracking-wider">
+                <div className="px-4 py-1.5 bg-[#f8fafc] border-b border-[#e3e9f0] sticky top-0 z-10">
+                  <span className="text-[12px] font-semibold text-[#62748b] uppercase tracking-wider">
                     {formatDate(dateSessions[0].started_at)}
-                    <span className="ml-2 text-[#94a3b8] normal-case font-normal">
+                    <span className="ml-2 text-[#718096] normal-case font-normal">
                       — {dateSessions.reduce((a, s) => a + s.duration_minutes, 0)} dk toplam
                     </span>
                   </span>
@@ -303,39 +305,39 @@ export default function History() {
                   return (
                     <div
                       key={s.id}
-                      className="grid grid-cols-[36px_1fr_1fr_90px_80px_90px_60px] gap-3 px-4 py-2.5 border-b border-[#f1f5f9] items-center hover:bg-[#f8fafc] transition-colors group text-[12px]"
+                      className="grid grid-cols-[36px_1fr_1fr_90px_80px_90px_60px] gap-3 px-4 py-2.5 border-b border-[#f1f5f9] items-center hover:bg-[#f8fafc] transition-colors group text-[14px]"
                     >
-                      <div className="flex h-7 w-7 items-center justify-center rounded-md text-white" style={{ backgroundColor: exam?.color ?? '#94a3b8' }}>
+                      <div className="flex h-7 w-7 items-center justify-center rounded-md text-white" style={{ backgroundColor: exam?.color ?? '#718096' }}>
                         <ExamIcon className="h-3.5 w-3.5" />
                       </div>
 
                       <div className="min-w-0">
-                        <p className="font-semibold text-[#0f172a] truncate">{getSubjectName(s.subject_id)}</p>
+                        <p className="font-semibold text-[#24354a] break-words">{getSubjectName(s.subject_id)}</p>
                       </div>
 
                       <div className="min-w-0">
-                        <p className="text-[#64748b] truncate">{getResourceName(s.resource_id)}</p>
+                        <p className="text-[#62748b] break-words">{getResourceName(s.resource_id)}</p>
                       </div>
 
                       <span>
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                        <span className={`px-1.5 py-0.5 rounded text-[12px] font-medium ${
                           s.session_type === 'manual' ? 'bg-amber-50 text-amber-600' : 'bg-blue-50 text-blue-600'
                         }`}>
                           {typeLabels[s.session_type] ?? s.session_type}
                         </span>
                       </span>
 
-                      <span className="font-semibold text-[#0f172a]">
+                      <span className="font-semibold text-[#24354a]">
                         {s.duration_minutes} dk
-                        {s.is_edited && <span className="text-[9px] text-orange-400 ml-1">✎</span>}
+                        {s.is_edited && <span className="text-[11px] text-orange-400 ml-1">✎</span>}
                       </span>
 
-                      <span className="text-[11px] text-[#94a3b8]">{formatTime(s.started_at)}</span>
+                      <span className="text-[13px] text-[#718096]">{formatTime(s.started_at)}</span>
 
                       <div className="flex items-center gap-1 justify-end">
                         <button
                           onClick={() => startEdit(s)}
-                          className="opacity-0 group-hover:opacity-100 h-7 w-7 flex items-center justify-center rounded-lg text-[#64748b] hover:bg-[#eff6ff] hover:text-[#2563eb] transition-all"
+                          className="opacity-0 group-hover:opacity-100 h-7 w-7 flex items-center justify-center rounded-lg text-[#62748b] hover:bg-[#edf2f8] hover:text-[#4269a8] transition-all"
                           title="Düzenle"
                         >
                           <Pencil className="h-3 w-3" />

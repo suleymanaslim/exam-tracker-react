@@ -1,3 +1,4 @@
+import './SuitePages.css'
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { Plus, Trash2, Download, Image as ImageIcon, Settings, EyeOff, SkipForward, X, Check, ChevronUp, ChevronDown } from 'lucide-react'
@@ -275,10 +276,10 @@ export default function VideoPlan() {
     
     const html = `
       <div className="flex flex-col gap-2 text-left mt-2">
-        <label className="text-xs font-bold text-slate-500 uppercase">İzlenen Video Sayısı</label>
+        <label className="text-xs font-semibold text-slate-500 uppercase">İzlenen Video Sayısı</label>
         <div className="flex items-center gap-2">
           <input type="number" id="watch-input" className="swal2-input !m-0 !w-full" value="${current}" min="0" max="${item.video_count}">
-          <span className="text-sm font-bold text-slate-400 whitespace-nowrap">/ ${item.video_count}</span>
+          <span className="text-sm font-semibold text-slate-400 whitespace-nowrap">/ ${item.video_count}</span>
         </div>
       </div>
     `
@@ -517,10 +518,11 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
   )
 
   return (
-    <div className="h-full flex flex-col gap-3 p-3 max-w-[1500px] mx-auto bg-slate-100 text-slate-900 overflow-hidden">
+    <div className="suite-page suite-videoplan h-full flex flex-col gap-3 p-3 max-w-[1500px] mx-auto bg-slate-100 text-slate-900 overflow-hidden">
       {/* HEADER */}
       <div className="flex flex-wrap items-center justify-between gap-3 shrink-0">
         <div>
+          <p className="suite-eyebrow">VİDEO PROGRAMIN</p>
           <h1 className="text-lg font-semibold tracking-tight">Video planı</h1>
           <p className="text-xs text-slate-400 mt-0.5">
             {selectedResId ? <span className="text-slate-700 font-medium">Ders seçili — takvimde bir güne tıklayıp video sayısını girin</span> : 'Soldan ders seçin, güne tıklayın. Gün kartını sürükleyerek takas edin.'}
@@ -551,10 +553,10 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
         {/* LEFT: Dersler */}
         <div className="w-full lg:w-64 flex flex-col shrink-0 lg:min-h-0 max-h-[240px] lg:max-h-none overflow-hidden rounded-xl border border-slate-200 bg-white">
           <div className="px-3 py-2.5 border-b border-slate-200 flex items-center justify-between shrink-0">
-            <span className="text-[13px] font-semibold flex items-center gap-2">Dersler
-              <span className="text-[10px] text-slate-400 bg-slate-100 rounded-full px-1.5 py-0.5 font-semibold tabular-nums">{resources.length}</span>
+            <span className="text-[14px] font-semibold flex items-center gap-2">Dersler
+              <span className="text-[11px] text-slate-400 bg-slate-100 rounded-full px-1.5 py-0.5 font-semibold tabular-nums">{resources.length}</span>
             </span>
-            <button onClick={handleAddResourceToPlan} className="h-6 px-2 rounded-md bg-slate-900 text-white flex items-center gap-1 text-[11px] font-medium hover:bg-slate-700 transition-colors">
+            <button onClick={handleAddResourceToPlan} className="h-6 px-2 rounded-md bg-slate-900 text-white flex items-center gap-1 text-[12px] font-medium hover:bg-slate-700 transition-colors">
               <Plus className="h-3 w-3" /> Ekle
             </button>
           </div>
@@ -562,7 +564,7 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
             {resources.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-10 gap-2 text-slate-400">
                 <p className="text-xs">Henüz kaynak yok</p>
-                <p className="text-[10px] text-slate-300">Üstteki Ekle ile kaynak ekleyin</p>
+                <p className="text-[11px] text-slate-300">Üstteki Ekle ile kaynak ekleyin</p>
               </div>
             ) : (
               resources.map(res => {
@@ -580,7 +582,7 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
                     className={`group px-3 py-2.5 border-b border-slate-100 last:border-b-0 cursor-pointer transition-colors ${sel ? 'bg-slate-900/5 shadow-[inset_2px_0_0_0_#0f172a]' : 'hover:bg-slate-50'}`}>
                     <div className="flex items-center gap-2">
                       <span className="w-2 h-2 rounded-full shrink-0" style={{ background: c.dot }}></span>
-                      <span className="text-[13px] font-medium truncate flex-1">{cleanName(res.name)}</span>
+                      <span className="text-[14px] font-medium truncate flex-1">{cleanName(res.name)}</span>
                       <span className="flex items-center gap-0.5 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
                         <button onClick={e => { e.stopPropagation(); handleEditResource(res) }} title="Düzenle" className="p-1 rounded text-slate-300 hover:text-slate-700 hover:bg-slate-100 transition-colors">
                           <Settings className="h-3 w-3" />
@@ -597,13 +599,13 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
                           <input type="number" min="0" value={editAvg} onChange={e => setEditAvg(e.target.value)} placeholder="Dk/vid" className="w-full h-7 px-2 text-xs border border-slate-200 rounded focus:outline-none focus:border-slate-900 tabular-nums" />
                         </div>
                         <div className="flex gap-1">
-                          <button onClick={() => setEditingRes(null)} className="flex-1 h-6 rounded border border-slate-200 text-[10px] font-medium text-slate-500 hover:bg-slate-50">İptal</button>
-                          <button onClick={saveEditResource} className="flex-1 h-6 rounded bg-slate-900 text-white text-[10px] font-medium hover:bg-slate-700">Kaydet</button>
+                          <button onClick={() => setEditingRes(null)} className="flex-1 h-6 rounded border border-slate-200 text-[11px] font-medium text-slate-500 hover:bg-slate-50">İptal</button>
+                          <button onClick={saveEditResource} className="flex-1 h-6 rounded bg-slate-900 text-white text-[11px] font-medium hover:bg-slate-700">Kaydet</button>
                         </div>
                       </div>
                     ) : (
                       <>
-                        <div className="flex items-center justify-between text-[11px] text-slate-400 mt-1.5 ml-4">
+                        <div className="flex items-center justify-between text-[12px] text-slate-400 mt-1.5 ml-4">
                           <span><span className="text-slate-600 font-medium tabular-nums">{watched}</span>/{total} video</span>
                           {done ? <span className="text-emerald-600 font-medium">tamamlandı</span> : <span>kalan <span className="text-slate-600 font-medium tabular-nums">{remaining}</span> · {fmtMinutes(remaining * (res.avg_video_duration || 0))}</span>}
                         </div>
@@ -634,9 +636,9 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
                 })
                 return (
                   <div key={ds} className={`px-1.5 py-2 text-center border-r border-slate-100 last:border-r-0 ${isT ? 'bg-slate-50' : ''}`} style={isT ? { boxShadow: 'inset 0 -2px 0 0 #0f172a' } : {}}>
-                    <div className={`text-[10px] font-semibold uppercase ${isT ? 'text-slate-900' : 'text-slate-400'}`}>{DOW[(d.getDay() + 6) % 7]}</div>
+                    <div className={`text-[11px] font-semibold uppercase ${isT ? 'text-slate-900' : 'text-slate-400'}`}>{DOW[(d.getDay() + 6) % 7]}</div>
                     <div className={`text-sm font-semibold tabular-nums leading-tight ${isT ? 'text-slate-900' : 'text-slate-700'}`}>{d.getDate()}</div>
-                    <div className="text-[9px] text-slate-400 tabular-nums mt-0.5">{tVid > 0 ? `${tVid}v · ${fmtMinutes(tMin)}` : '—'}</div>
+                    <div className="text-[11px] text-slate-400 tabular-nums mt-0.5">{tVid > 0 ? `${tVid}v · ${fmtMinutes(tMin)}` : '—'}</div>
                   </div>
                 )
               })}
@@ -687,14 +689,14 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
                                 {idx > 0 && <button onClick={e => handleReorderItem(e, it, -1)} className="hover:text-slate-900"><ChevronUp className="h-3 w-3" /></button>}
                                 {idx < items.length - 1 && <button onClick={e => handleReorderItem(e, it, 1)} className="hover:text-slate-900"><ChevronDown className="h-3 w-3" /></button>}
                               </div>
-                              <span className="text-[9px] font-semibold px-1.5 py-px rounded-full truncate" style={{ background: c.card, color: c.text }}>{cleanName(r?.subject_name || '')}</span>
+                              <span className="text-[11px] font-semibold px-1.5 py-px rounded-full truncate" style={{ background: c.card, color: c.text }}>{cleanName(r?.subject_name || '')}</span>
                               <button onClick={e => { e.stopPropagation(); handleProgressClick(it, r) }} title={done ? 'Tamamlandı' : `${w}/${it.video_count} izlendi — güncellemek için tıkla`}
                                 className={`ml-auto h-[18px] w-[18px] rounded-[5px] shrink-0 flex items-center justify-center transition-colors ${done ? 'bg-emerald-500 text-white' : 'border border-slate-200 text-slate-300 hover:border-emerald-400 hover:text-emerald-400'}`}>
                                 <Check className="h-2.5 w-2.5" strokeWidth={3} />
                               </button>
                             </div>
-                            <div className={`text-[11px] font-medium truncate mt-1 ${done ? 'line-through text-slate-400' : 'text-slate-800'}`}>{cleanName(r?.name || '?')} · {it.video_count}v</div>
-                            <div className="text-[10px] text-slate-400 tabular-nums">{fmtMinutes(itemMin)}{done ? ' · izlendi' : partial ? ` · ${w}/${it.video_count}` : ''}</div>
+                            <div className={`text-[12px] font-medium truncate mt-1 ${done ? 'line-through text-slate-400' : 'text-slate-800'}`}>{cleanName(r?.name || '?')} · {it.video_count}v</div>
+                            <div className="text-[11px] text-slate-400 tabular-nums">{fmtMinutes(itemMin)}{done ? ' · izlendi' : partial ? ` · ${w}/${it.video_count}` : ''}</div>
                             {partial && (
                               <div className="h-[2px] rounded-full bg-slate-100 mt-1 overflow-hidden">
                                 <div className="h-full bg-emerald-400 rounded-full" style={{ width: `${(w / it.video_count) * 100}%` }}></div>
@@ -708,7 +710,7 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
                       })}
                     </div>
                     {items.length > 0 && hasUnwatched && (
-                      <button onClick={e => handleMarkDayWatched(e, items)} className="mt-1 w-full py-1 rounded-md text-[10px] font-semibold text-emerald-600 hover:bg-emerald-50 opacity-0 group-hover/day:opacity-100 transition-all flex items-center justify-center gap-1">
+                      <button onClick={e => handleMarkDayWatched(e, items)} className="mt-1 w-full py-1 rounded-md text-[11px] font-semibold text-emerald-600 hover:bg-emerald-50 opacity-0 group-hover/day:opacity-100 transition-all flex items-center justify-center gap-1">
                         <Check className="h-2.5 w-2.5" strokeWidth={3} /> Tümünü izlendi say
                       </button>
                     )}
@@ -726,7 +728,7 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
           </div>
           <div className="px-3 py-2 border-t border-slate-200 flex items-center justify-between gap-3 shrink-0 text-xs text-slate-500">
             <span>Haftalık toplam: <span className="font-semibold text-slate-900 tabular-nums">{tVidAll} video</span> · <span className="font-semibold text-slate-900 tabular-nums">{fmtMinutes(tMinAll)}</span> — izlenen <span className="font-semibold text-slate-900 tabular-nums">{tWatchedAll}</span></span>
-            <span className="hidden sm:flex items-center gap-3 text-[11px] text-slate-400">
+            <span className="hidden sm:flex items-center gap-3 text-[12px] text-slate-400">
               <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> tamamlandı</span>
               <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-300"></span> kısmi</span>
               <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-slate-300"></span> planlandı</span>

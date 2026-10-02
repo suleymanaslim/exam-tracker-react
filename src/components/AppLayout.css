@@ -1,5 +1,5 @@
 .app-shell{font-family:'Source Sans 3',Arial,sans-serif;font-size:15px;line-height:1.5;font-synthesis:none}
-.app-sidebar{display:flex;flex-direction:column;flex-shrink:0;width:218px;background:#fff;border-right:1px solid #e3e9f0;color:#52647b;transition:width .18s ease;overflow:hidden}
+.app-sidebar{display:flex;flex-direction:column;flex-shrink:0;width:218px;background:#fff;border-right:1px solid #e3e9f0;color:#52647b;transition:width .38s cubic-bezier(.22,.61,.36,1);overflow:hidden}
 .app-brand{display:flex;align-items:center;gap:11px;min-height:95px;padding:20px 18px;border-bottom:1px solid #edf0f4;flex-shrink:0}
 .app-brand-icon{display:flex;align-items:center;justify-content:center;width:36px;height:36px;flex-shrink:0;border-radius:11px;background:#edf2f8;color:#4269a8}
 .app-brand strong{display:block;font-size:18px;font-weight:600;color:#24354a;line-height:1.2}.app-brand span:not(.app-brand-icon){display:block;font-size:12px;color:#718096;margin-top:4px}
@@ -14,3 +14,5 @@
 .app-sidebar-control{width:auto;margin:10px 12px 0;color:#4269a8;background:#f5f7fa;min-height:38px;flex-shrink:0}.app-sidebar-control:hover{background:#edf2f8}.app-sidebar.is-collapsed .app-sidebar-control{margin:10px 12px 0}
 
 .app-brand-image{width:36px;height:36px;flex-shrink:0;border-radius:10px;object-fit:contain}
+
+.app-sidebar.is-expanded .app-nav-label{animation:sidebar-label-in .28s ease .12s both}@keyframes sidebar-label-in{from{opacity:0;transform:translateX(-5px)}to{opacity:1;transform:translateX(0)}}@media(prefers-reduced-motion:reduce){.app-sidebar.is-expanded .app-nav-label{animation:none}}

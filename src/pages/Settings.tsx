@@ -1,3 +1,4 @@
+import './SuitePages.css'
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { seedAllData } from '../lib/seed'
@@ -109,8 +110,8 @@ export default function Settings() {
       text: 'Mevcut ders, kaynak ve planlarınız silinip yerlerine İndeks Akademi AGS, YDS, vb. kaynakları eklenecek. Emin misiniz?',
       icon: 'info',
       showCancelButton: true,
-      confirmButtonColor: '#2563eb',
-      cancelButtonColor: '#94a3b8',
+      confirmButtonColor: '#4269a8',
+      cancelButtonColor: '#718096',
       confirmButtonText: 'Evet, Yükle',
       cancelButtonText: 'İptal'
     })
@@ -127,7 +128,7 @@ export default function Settings() {
   // Exam CRUD
   const addExam = async () => {
     if (!userId || !addExamName.trim()) return
-    const colors = ['#2563eb', '#0891b2', '#7c3aed', '#059669', '#ea580c', '#db2777', '#ca8a04']
+    const colors = ['#4269a8', '#0891b2', '#7c3aed', '#059669', '#ea580c', '#db2777', '#ca8a04']
     const color = colors[Math.floor(Math.random() * colors.length)]
     const { data } = await supabase.from('exams').insert({
       user_id: userId,
@@ -145,7 +146,7 @@ export default function Settings() {
       icon: 'warning',
       showCancelButton: true,
       confirmButtonColor: '#ef4444',
-      cancelButtonColor: '#94a3b8',
+      cancelButtonColor: '#718096',
       confirmButtonText: 'Evet, Sil',
       cancelButtonText: 'İptal'
     })
@@ -176,7 +177,7 @@ export default function Settings() {
       icon: 'warning',
       showCancelButton: true,
       confirmButtonColor: '#ef4444',
-      cancelButtonColor: '#94a3b8',
+      cancelButtonColor: '#718096',
       confirmButtonText: 'Evet, Sil',
       cancelButtonText: 'İptal'
     })
@@ -207,7 +208,7 @@ export default function Settings() {
       icon: 'warning',
       showCancelButton: true,
       confirmButtonColor: '#ef4444',
-      cancelButtonColor: '#94a3b8',
+      cancelButtonColor: '#718096',
       confirmButtonText: 'Evet, Sil',
       cancelButtonText: 'İptal'
     })
@@ -456,20 +457,21 @@ export default function Settings() {
   }
 
   return (
-    <div className="flex flex-col h-full gap-3">
+    <div className="suite-page suite-settings flex flex-col h-full gap-3">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between shrink-0 gap-3">
         <div>
-          <h1 className="text-lg font-bold text-[#0f172a] flex items-center gap-2">
-            <SettingsIcon className="h-5 w-5 text-[#2563eb]" /> Ayarlar
+          <p className="suite-eyebrow">ÇALIŞMA ALANINI DÜZENLE</p>
+          <h1 className="text-lg font-semibold text-[#24354a] flex items-center gap-2">
+            <SettingsIcon className="h-5 w-5 text-[#4269a8]" /> Ayarlar
           </h1>
-          <p className="text-[12px] text-[#64748b]">Kaynakları yönet, Pomodoro ayarla, rapor indir.</p>
+          <p className="text-[14px] text-[#62748b]">Kaynakları yönet, Pomodoro ayarla, rapor indir.</p>
         </div>
         <div className="flex items-center gap-2 self-start md:self-auto">
           <button onClick={handleSeed} disabled={seeding}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] font-medium text-emerald-700 hover:bg-emerald-100 transition-all disabled:opacity-50">
+            className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[14px] font-medium text-emerald-700 hover:bg-emerald-100 transition-all disabled:opacity-50">
             <Database className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate">{seeding ? 'Yükleniyor...' : seedDone ? '✓ Tamamlandı!' : 'İndeks Akademi Kaynakları Yükle'}</span>
+            <span className="break-words">{seeding ? 'Yükleniyor...' : seedDone ? '✓ Tamamlandı!' : 'İndeks Akademi Kaynakları Yükle'}</span>
           </button>
         </div>
       </div>
@@ -485,7 +487,7 @@ export default function Settings() {
           ...(isAdmin ? [{ key: 'vocabulary' as Tab, label: 'YKS Kelimeleri' }] : [])
         ].map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
-            className={`whitespace-nowrap px-4 py-2 rounded-lg text-[12px] font-medium transition-all ${tab === t.key ? 'bg-[#0a1628] text-white' : 'bg-white border border-[#e2e8f0] text-[#64748b] hover:text-[#0f172a]'}`}>
+            className={`whitespace-nowrap px-4 py-2 rounded-lg text-[14px] font-medium transition-all ${tab === t.key ? 'bg-[#4269a8] text-white' : 'bg-white border border-[#e3e9f0] text-[#62748b] hover:text-[#24354a]'}`}>
             {t.label}
           </button>
         ))}
@@ -502,15 +504,15 @@ export default function Settings() {
                 const isOpen = openExam === exam.id
                 const examSubjects = subjects.filter(s => s.exam_id === exam.id)
                 return (
-                  <div key={exam.id} className="rounded-xl border border-[#e2e8f0] bg-white overflow-hidden">
+                  <div key={exam.id} className="rounded-2xl border border-[#e3e9f0] bg-white overflow-hidden">
                     <button onClick={() => { setOpenExam(isOpen ? null : exam.id); setOpenSubject(null); setAddSubjectExam(exam.id) }}
                       className="w-full flex items-center gap-2.5 px-4 py-3 hover:bg-[#f8fafc] transition-all group relative">
                       <div className="flex h-8 w-8 items-center justify-center rounded-lg text-white" style={{ backgroundColor: exam.color }}>
                         <Icon className="h-4 w-4" />
                       </div>
                       <div className="flex-1 text-left">
-                        <h3 className="text-[13px] font-bold text-[#0f172a]">{exam.name}</h3>
-                        <p className="text-[10px] text-[#94a3b8]">{examSubjects.length} ders</p>
+                        <h3 className="text-[15px] font-semibold text-[#24354a]">{exam.name}</h3>
+                        <p className="text-[12px] text-[#718096]">{examSubjects.length} ders</p>
                       </div>
                       <div 
                         onClick={(e) => { e.stopPropagation(); deleteExam(exam.id); }}
@@ -518,14 +520,14 @@ export default function Settings() {
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </div>
-                      {isOpen ? <ChevronDown className="h-4 w-4 text-[#94a3b8]" /> : <ChevronRight className="h-4 w-4 text-[#94a3b8]" />}
+                      {isOpen ? <ChevronDown className="h-4 w-4 text-[#718096]" /> : <ChevronRight className="h-4 w-4 text-[#718096]" />}
                     </button>
                     {isOpen && (
-                      <div className="border-t border-[#e2e8f0] px-3 py-2 space-y-1">
+                      <div className="border-t border-[#e3e9f0] px-3 py-2 space-y-1">
                         {examSubjects.map(sub => (
                           <div key={sub.id} className="flex items-center group">
                             <button onClick={() => { setOpenSubject(sub.id); setAddResSubject(sub.id) }}
-                              className={`flex-1 text-left px-2 py-1.5 rounded-md text-[12px] font-medium transition-all ${openSubject === sub.id ? 'bg-[#eff6ff] text-[#2563eb]' : 'text-[#64748b] hover:bg-[#f8fafc] hover:text-[#0f172a]'}`}>
+                              className={`flex-1 text-left px-2 py-1.5 rounded-md text-[14px] font-medium transition-all ${openSubject === sub.id ? 'bg-[#edf2f8] text-[#4269a8]' : 'text-[#62748b] hover:bg-[#f8fafc] hover:text-[#24354a]'}`}>
                               {sub.name}
                             </button>
                             <button onClick={() => deleteSubject(sub.id)}
@@ -537,9 +539,9 @@ export default function Settings() {
                         {/* Add subject */}
                         <div className="flex gap-1.5 mt-2 pt-2 border-t border-[#f1f5f9]">
                           <input value={addSubjectName} onChange={e => setAddSubjectName(e.target.value)} placeholder="Yeni ders adı..."
-                            className="flex-1 h-7 rounded-md border border-[#e2e8f0] px-2 text-[11px] focus:outline-none focus:ring-1 focus:ring-[#2563eb]/30" />
+                            className="flex-1 h-7 rounded-md border border-[#e3e9f0] px-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#4269a8]/30" />
                           <button onClick={addSubject} disabled={!addSubjectName.trim()}
-                            className="h-7 w-7 flex items-center justify-center rounded-md bg-[#2563eb] text-white disabled:opacity-30">
+                            className="h-7 w-7 flex items-center justify-center rounded-md bg-[#4269a8] text-white disabled:opacity-30">
                             <Plus className="h-3 w-3" />
                           </button>
                         </div>
@@ -549,42 +551,42 @@ export default function Settings() {
                 )
               })}
               
-              <div className="rounded-xl border border-[#e2e8f0] bg-white p-3 flex gap-2">
+              <div className="rounded-2xl border border-[#e3e9f0] bg-white p-3 flex gap-2">
                 <input value={addExamName} onChange={e => setAddExamName(e.target.value)} placeholder="Yeni sınav ekle..."
-                  className="flex-1 h-8 rounded-lg border border-[#e2e8f0] px-3 text-[12px] focus:outline-none focus:ring-2 focus:ring-[#2563eb]/30" />
+                  className="flex-1 h-8 rounded-lg border border-[#e3e9f0] px-3 text-[14px] focus:outline-none focus:ring-2 focus:ring-[#4269a8]/30" />
                 <button onClick={addExam} disabled={!addExamName.trim()}
-                  className="h-8 px-3 rounded-lg bg-[#2563eb] text-white text-[12px] font-bold disabled:opacity-40 flex items-center justify-center gap-1">
+                  className="h-8 px-3 rounded-lg bg-[#4269a8] text-white text-[14px] font-semibold disabled:opacity-40 flex items-center justify-center gap-1">
                   <Plus className="h-3 w-3" /> Ekle
                 </button>
               </div>
             </div>
 
             {/* Sağ: Seçili dersin kaynakları */}
-            <div className="flex-1 rounded-xl border border-[#e2e8f0] bg-white flex flex-col overflow-hidden min-h-[400px] lg:min-h-0 shrink-0">
+            <div className="flex-1 rounded-2xl border border-[#e3e9f0] bg-white flex flex-col overflow-hidden min-h-[400px] lg:min-h-0 shrink-0">
               {openSubject ? (() => {
                 const sub = subjects.find(s => s.id === openSubject)
                 const subResources = resources.filter(r => r.subject_id === openSubject)
                 const exam = exams.find(e => e.id === sub?.exam_id)
                 return (
                   <>
-                    <div className="border-b border-[#e2e8f0] px-5 py-3 shrink-0 flex items-center justify-between">
+                    <div className="border-b border-[#e3e9f0] px-5 py-3 shrink-0 flex items-center justify-between">
                       <div>
-                        <h3 className="text-[13px] font-bold text-[#0f172a]">{sub?.name}</h3>
-                        <p className="text-[10px] text-[#94a3b8]">{exam?.name} · {subResources.length} kaynak</p>
+                        <h3 className="text-[15px] font-semibold text-[#24354a]">{sub?.name}</h3>
+                        <p className="text-[12px] text-[#718096]">{exam?.name} · {subResources.length} kaynak</p>
                       </div>
                     </div>
                     <div className="flex-1 overflow-y-auto p-4 space-y-2">
                       {subResources.map(r => (
-                        <div key={r.id} className="flex items-center gap-3 rounded-lg border border-[#e2e8f0] p-3 group hover:shadow-sm transition-all">
+                        <div key={r.id} className="flex items-center gap-3 rounded-lg border border-[#e3e9f0] p-3 group hover:shadow-sm transition-all">
                           <div className="flex-1 min-w-0">
                             {editId === r.id ? (
                               <input value={editName} onChange={e => setEditName(e.target.value)} autoFocus
-                                className="w-full h-7 rounded border border-[#2563eb] px-2 text-[12px] focus:outline-none" />
+                                className="w-full h-7 rounded border border-[#4269a8] px-2 text-[14px] focus:outline-none" />
                             ) : (
                               <>
-                                <p className="text-[12px] font-semibold text-[#0f172a] truncate">{r.name}</p>
-                                <p className="text-[10px] text-[#94a3b8] flex items-center gap-2">
-                                  <span className="px-1.5 py-0.5 rounded bg-[#f1f5f9] text-[9px] font-medium">{typeLabels[r.resource_type] ?? r.resource_type}</span>
+                                <p className="text-[14px] font-semibold text-[#24354a] break-words">{r.name}</p>
+                                <p className="text-[12px] text-[#718096] flex items-center gap-2">
+                                  <span className="px-1.5 py-0.5 rounded bg-[#f1f5f9] text-[11px] font-medium">{typeLabels[r.resource_type] ?? r.resource_type}</span>
                                   {r.author && <span>{r.author}</span>}
                                   {r.publisher && <span>· {r.publisher}</span>}
                                 </p>
@@ -595,11 +597,11 @@ export default function Settings() {
                             {editId === r.id ? (
                               <>
                                 <button onClick={saveEditRes} className="h-6 w-6 flex items-center justify-center rounded text-emerald-500 hover:bg-emerald-50"><Check className="h-3.5 w-3.5" /></button>
-                                <button onClick={() => setEditId(null)} className="h-6 w-6 flex items-center justify-center rounded text-[#94a3b8] hover:bg-[#f1f5f9]"><X className="h-3.5 w-3.5" /></button>
+                                <button onClick={() => setEditId(null)} className="h-6 w-6 flex items-center justify-center rounded text-[#718096] hover:bg-[#f1f5f9]"><X className="h-3.5 w-3.5" /></button>
                               </>
                             ) : (
                               <>
-                                <button onClick={() => startEditRes(r)} className="opacity-0 group-hover:opacity-100 h-6 w-6 flex items-center justify-center rounded text-[#64748b] hover:bg-[#f1f5f9] transition-all"><Pencil className="h-3 w-3" /></button>
+                                <button onClick={() => startEditRes(r)} className="opacity-0 group-hover:opacity-100 h-6 w-6 flex items-center justify-center rounded text-[#62748b] hover:bg-[#f1f5f9] transition-all"><Pencil className="h-3 w-3" /></button>
                                 <button onClick={() => deleteResource(r.id)} className="opacity-0 group-hover:opacity-100 h-6 w-6 flex items-center justify-center rounded text-red-400 hover:bg-red-50 transition-all"><Trash2 className="h-3 w-3" /></button>
                               </>
                             )}
@@ -608,36 +610,36 @@ export default function Settings() {
                       ))}
                     </div>
                     {/* Add resource form */}
-                    <div className="border-t border-[#e2e8f0] px-4 py-3 shrink-0 space-y-2">
+                    <div className="border-t border-[#e3e9f0] px-4 py-3 shrink-0 space-y-2">
                       <div className="grid grid-cols-3 gap-2">
                         <input value={addResName} onChange={e => setAddResName(e.target.value)} placeholder="Kaynak adı"
-                          className="col-span-2 h-8 rounded-lg border border-[#e2e8f0] px-2 text-[11px] focus:outline-none focus:ring-1 focus:ring-[#2563eb]/30" />
+                          className="col-span-2 h-8 rounded-lg border border-[#e3e9f0] px-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#4269a8]/30" />
                         <select value={addResType} onChange={e => setAddResType(e.target.value)}
-                          className="h-8 rounded-lg border border-[#e2e8f0] px-2 text-[11px] focus:outline-none focus:ring-1 focus:ring-[#2563eb]/30">
+                          className="h-8 rounded-lg border border-[#e3e9f0] px-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#4269a8]/30">
                           {Object.entries(typeLabels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                         </select>
                       </div>
                       <div className="grid grid-cols-3 gap-2">
                         <input value={addResAuthor} onChange={e => setAddResAuthor(e.target.value)} placeholder="Yazar (opsiyonel)"
-                          className="h-8 rounded-lg border border-[#e2e8f0] px-2 text-[11px] focus:outline-none focus:ring-1 focus:ring-[#2563eb]/30" />
+                          className="h-8 rounded-lg border border-[#e3e9f0] px-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#4269a8]/30" />
                         <input value={addResPublisher} onChange={e => setAddResPublisher(e.target.value)} placeholder="Yayınevi (opsiyonel)"
-                          className="h-8 rounded-lg border border-[#e2e8f0] px-2 text-[11px] focus:outline-none focus:ring-1 focus:ring-[#2563eb]/30" />
+                          className="h-8 rounded-lg border border-[#e3e9f0] px-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#4269a8]/30" />
                         <button onClick={addResource} disabled={!addResName.trim()}
-                          className="h-8 rounded-lg bg-[#0a1628] text-white text-[11px] font-semibold hover:bg-[#1a365d] disabled:opacity-40 flex items-center justify-center gap-1">
+                          className="h-8 rounded-lg bg-[#4269a8] text-white text-[13px] font-semibold hover:bg-[#365c96] disabled:opacity-40 flex items-center justify-center gap-1">
                           <Plus className="h-3 w-3" /> Ekle
                         </button>
                       </div>
                       {addResType === 'video_ders' && (
-                        <div className="grid grid-cols-2 gap-2 mt-2 p-2 bg-[#f8fafc] border border-[#e2e8f0] rounded-lg">
+                        <div className="grid grid-cols-2 gap-2 mt-2 p-2 bg-[#f8fafc] border border-[#e3e9f0] rounded-lg">
                           <div>
-                            <label className="text-[10px] font-semibold text-[#64748b] block mb-1">Toplam Video Sayısı</label>
+                            <label className="text-[12px] font-semibold text-[#62748b] block mb-1">Toplam Video Sayısı</label>
                             <input type="number" min="0" value={addResTotalVideos} onChange={e => setAddResTotalVideos(e.target.value)} placeholder="Örn: 50"
-                              className="w-full h-8 rounded border border-[#e2e8f0] px-2 text-[11px] focus:outline-none focus:ring-1 focus:ring-[#2563eb]/30" />
+                              className="w-full h-8 rounded border border-[#e3e9f0] px-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#4269a8]/30" />
                           </div>
                           <div>
-                            <label className="text-[10px] font-semibold text-[#64748b] block mb-1">Ortalama Süre (Dk)</label>
+                            <label className="text-[12px] font-semibold text-[#62748b] block mb-1">Ortalama Süre (Dk)</label>
                             <input type="number" min="0" value={addResAvgDuration} onChange={e => setAddResAvgDuration(e.target.value)} placeholder="Örn: 35"
-                              className="w-full h-8 rounded border border-[#e2e8f0] px-2 text-[11px] focus:outline-none focus:ring-1 focus:ring-[#2563eb]/30" />
+                              className="w-full h-8 rounded border border-[#e3e9f0] px-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#4269a8]/30" />
                           </div>
                         </div>
                       )}
@@ -645,7 +647,7 @@ export default function Settings() {
                   </>
                 )
               })() : (
-                <div className="flex-1 flex flex-col items-center justify-center text-[#94a3b8] text-[13px]">
+                <div className="flex-1 flex flex-col items-center justify-center text-[#718096] text-[15px]">
                   <BookOpen className="h-10 w-10 mb-3 opacity-30" />
                   <p>Soldaki listeden bir sınav ve ders seçin.</p>
                 </div>
@@ -657,10 +659,10 @@ export default function Settings() {
         {tab === 'exam_settings' && (
           <div className="h-full overflow-y-auto px-4">
             <div className="flex flex-col gap-4 max-w-2xl mx-auto py-4">
-              <h2 className="text-md font-bold text-[#0f172a]">Sınav Ayarları ve Soru Türleri</h2>
-              <div className="p-4 rounded-xl border border-[#e2e8f0] bg-white space-y-4">
+              <h2 className="text-md font-semibold text-[#24354a]">Sınav Ayarları ve Soru Türleri</h2>
+              <div className="p-4 rounded-2xl border border-[#e3e9f0] bg-white space-y-4">
                 <div>
-                  <label className="text-xs font-semibold text-[#64748b] uppercase">Sınav Seç</label>
+                  <label className="text-[13px] font-semibold text-[#62748b] uppercase">Sınav Seç</label>
                   <CustomSelect
                     value={selExamSettings}
                     onChange={setSelExamSettings}
@@ -672,35 +674,35 @@ export default function Settings() {
 
                 {selExamSettings && (
                   <>
-                    <div className="border-t border-[#e2e8f0] pt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="border-t border-[#e3e9f0] pt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
-                        <label className="text-xs font-semibold text-[#64748b] uppercase flex items-center gap-1">Yanlış Doğruyu Götürür Mü? <span title="Örn: 4 yanlış 1 doğru için 4 yazın. Boş bırakırsanız ceza uygulanmaz." className="cursor-help text-blue-500">(?)</span></label>
+                        <label className="text-[13px] font-semibold text-[#62748b] uppercase flex items-center gap-1">Yanlış Doğruyu Götürür Mü? <span title="Örn: 4 yanlış 1 doğru için 4 yazın. Boş bırakırsanız ceza uygulanmaz." className="cursor-help text-blue-500">(?)</span></label>
                         <input 
                           type="number" min="0" step="0.5" placeholder="Örn: 4"
                           value={editWrongPenalty} onChange={e => setEditWrongPenalty(e.target.value)}
-                          className="mt-1 w-full rounded-lg border border-[#e2e8f0] px-3 py-2 text-sm focus:border-[#2563eb] focus:ring-1 focus:ring-[#2563eb] outline-none"
+                          className="mt-1 w-full rounded-lg border border-[#e3e9f0] px-3 py-2 text-sm focus:border-[#4269a8] focus:ring-1 focus:ring-[#4269a8] outline-none"
                         />
                       </div>
                       <div>
-                        <label className="text-xs font-semibold text-[#64748b] uppercase">Net Başına Puan</label>
+                        <label className="text-[13px] font-semibold text-[#62748b] uppercase">Net Başına Puan</label>
                         <input 
                           type="number" min="0.1" step="0.05" placeholder="Örn: 1.25"
                           value={editPointPerNet} onChange={e => setEditPointPerNet(e.target.value)}
-                          className="mt-1 w-full rounded-lg border border-[#e2e8f0] px-3 py-2 text-sm focus:border-[#2563eb] focus:ring-1 focus:ring-[#2563eb] outline-none"
+                          className="mt-1 w-full rounded-lg border border-[#e3e9f0] px-3 py-2 text-sm focus:border-[#4269a8] focus:ring-1 focus:ring-[#4269a8] outline-none"
                         />
                       </div>
                     </div>
-                    <button onClick={saveExamSettings} className="w-full bg-[#2563eb] hover:bg-blue-600 text-white font-medium text-sm py-2 rounded-lg transition-all">Puanlama Ayarlarını Kaydet</button>
+                    <button onClick={saveExamSettings} className="w-full bg-[#4269a8] hover:bg-blue-600 text-white font-medium text-sm py-2 rounded-lg transition-all">Puanlama Ayarlarını Kaydet</button>
 
-                    <div className="border-t border-[#e2e8f0] pt-4 mt-4">
-                      <label className="text-xs font-semibold text-[#64748b] uppercase mb-2 block">Bu Sınavdaki Soru Türleri</label>
+                    <div className="border-t border-[#e3e9f0] pt-4 mt-4">
+                      <label className="text-[13px] font-semibold text-[#62748b] uppercase mb-2 block">Bu Sınavdaki Soru Türleri</label>
                       <div className="space-y-2 mb-3">
                         {questionTypes
                           .filter(q => q.exam_id === selExamSettings)
                           .sort((a, b) => a.sort_order - b.sort_order)
                           .map((q, idx, arr) => (
-                            <div key={q.id} className="flex items-center justify-between p-2 rounded-lg bg-[#f8fafc] border border-[#e2e8f0]">
-                              <span className="text-sm font-medium text-[#0f172a]">{q.name} {q.question_count > 0 && <span className="text-xs text-gray-400">({q.question_count} Soru)</span>}</span>
+                            <div key={q.id} className="flex items-center justify-between p-2 rounded-lg bg-[#f8fafc] border border-[#e3e9f0]">
+                              <span className="text-sm font-medium text-[#24354a]">{q.name} {q.question_count > 0 && <span className="text-[13px] text-gray-400">({q.question_count} Soru)</span>}</span>
                               <div className="flex items-center gap-1">
                                 <button 
                                   disabled={idx === 0}
@@ -723,7 +725,7 @@ export default function Settings() {
                             </div>
                           ))}
                         {questionTypes.filter(q => q.exam_id === selExamSettings).length === 0 && (
-                          <p className="text-xs text-[#94a3b8] italic">Henüz bu sınava soru türü eklenmedi.</p>
+                          <p className="text-[13px] text-[#718096] italic">Henüz bu sınava soru türü eklenmedi.</p>
                         )}
                       </div>
                       <div className="flex items-center gap-2">
@@ -731,13 +733,13 @@ export default function Settings() {
                           type="text" placeholder="Örn: Paragraf, Dilbilgisi, Matematik..."
                           value={newQuestionType} onChange={e => setNewQuestionType(e.target.value)}
                           onKeyDown={e => e.key === 'Enter' && addQuestionType()}
-                          className="flex-1 rounded-lg border border-[#e2e8f0] px-3 py-2 text-sm focus:border-[#2563eb] focus:ring-1 focus:ring-[#2563eb] outline-none"
+                          className="flex-1 rounded-lg border border-[#e3e9f0] px-3 py-2 text-sm focus:border-[#4269a8] focus:ring-1 focus:ring-[#4269a8] outline-none"
                         />
                         <input 
                           type="number" min="0" placeholder="Soru Sayısı"
                           value={newQuestionCount} onChange={e => setNewQuestionCount(e.target.value)}
                           onKeyDown={e => e.key === 'Enter' && addQuestionType()}
-                          className="w-24 rounded-lg border border-[#e2e8f0] px-3 py-2 text-sm focus:border-[#2563eb] focus:ring-1 focus:ring-[#2563eb] outline-none"
+                          className="w-24 rounded-lg border border-[#e3e9f0] px-3 py-2 text-sm focus:border-[#4269a8] focus:ring-1 focus:ring-[#4269a8] outline-none"
                         />
                         <button onClick={addQuestionType} className="bg-emerald-500 hover:bg-emerald-600 text-white font-medium text-sm px-4 py-2 rounded-lg transition-all flex items-center gap-1 shrink-0 cursor-pointer">
                           <Plus className="h-4 w-4" /> Ekle
@@ -747,14 +749,14 @@ export default function Settings() {
                   </>
                 )}
               </div>
-              <div className="mt-4 p-4 rounded-xl border border-[#e2e8f0] bg-white space-y-4">
-                <h3 className="text-sm font-bold text-[#0f172a] mb-2">Genel Ayarlar</h3>
+              <div className="mt-4 p-4 rounded-2xl border border-[#e3e9f0] bg-white space-y-4">
+                <h3 className="text-sm font-semibold text-[#24354a] mb-2">Genel Ayarlar</h3>
                 <div>
-                  <label className="text-xs font-semibold text-[#64748b] uppercase">Off Day (Dinlenme Günü)</label>
+                  <label className="text-[13px] font-semibold text-[#62748b] uppercase">Off Day (Dinlenme Günü)</label>
                   <select
                     value={offDay}
                     onChange={(e) => setOffDay(Number(e.target.value))}
-                    className="mt-1 w-full rounded-lg border border-[#e2e8f0] px-3 py-2 text-sm focus:border-[#2563eb] focus:ring-1 focus:ring-[#2563eb] outline-none"
+                    className="mt-1 w-full rounded-lg border border-[#e3e9f0] px-3 py-2 text-sm focus:border-[#4269a8] focus:ring-1 focus:ring-[#4269a8] outline-none"
                   >
                     <option value={0}>Yok (Boş gün istemiyorum)</option>
                     <option value={1}>Pazartesi</option>
@@ -773,44 +775,44 @@ export default function Settings() {
 
         {tab === 'pomodoro' && pomSettings && (
           <div className="h-full flex items-start justify-center pt-8">
-            <div className="w-full max-w-md rounded-xl border border-[#e2e8f0] bg-white p-6 space-y-5">
-              <h3 className="text-sm font-bold text-[#0f172a] flex items-center gap-2"><Clock className="h-4 w-4 text-[#2563eb]" /> Pomodoro Ayarları</h3>
+            <div className="w-full max-w-md rounded-2xl border border-[#e3e9f0] bg-white p-6 space-y-5">
+              <h3 className="text-sm font-semibold text-[#24354a] flex items-center gap-2"><Clock className="h-4 w-4 text-[#4269a8]" /> Pomodoro Ayarları</h3>
               <div className="rounded-lg bg-[#f8fafc] p-4 space-y-3">
-                <h4 className="text-[12px] font-bold text-[#0f172a]">Uzun Pomodoro</h4>
+                <h4 className="text-[14px] font-semibold text-[#24354a]">Uzun Pomodoro</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
-                    <label className="text-[10px] font-semibold text-[#94a3b8] uppercase">Odak (dk)</label>
+                    <label className="text-[12px] font-semibold text-[#718096] uppercase">Odak (dk)</label>
                     <input type="number" min={10} max={120} value={pomSettings.long_focus_minutes}
                       onChange={e => setPomSettings({ ...pomSettings, long_focus_minutes: Number(e.target.value) })}
-                      className="mt-1 w-full h-9 rounded-lg border border-[#e2e8f0] bg-white px-3 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#2563eb]/30" />
+                      className="mt-1 w-full h-9 rounded-lg border border-[#e3e9f0] bg-white px-3 text-[15px] focus:outline-none focus:ring-2 focus:ring-[#4269a8]/30" />
                   </div>
                   <div>
-                    <label className="text-[10px] font-semibold text-[#94a3b8] uppercase">Mola (dk)</label>
+                    <label className="text-[12px] font-semibold text-[#718096] uppercase">Mola (dk)</label>
                     <input type="number" min={1} max={30} value={pomSettings.long_break_minutes}
                       onChange={e => setPomSettings({ ...pomSettings, long_break_minutes: Number(e.target.value) })}
-                      className="mt-1 w-full h-9 rounded-lg border border-[#e2e8f0] bg-white px-3 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#2563eb]/30" />
+                      className="mt-1 w-full h-9 rounded-lg border border-[#e3e9f0] bg-white px-3 text-[15px] focus:outline-none focus:ring-2 focus:ring-[#4269a8]/30" />
                   </div>
                 </div>
               </div>
               <div className="rounded-lg bg-[#f8fafc] p-4 space-y-3">
-                <h4 className="text-[12px] font-bold text-[#0f172a]">Kısa Pomodoro</h4>
+                <h4 className="text-[14px] font-semibold text-[#24354a]">Kısa Pomodoro</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
-                    <label className="text-[10px] font-semibold text-[#94a3b8] uppercase">Odak (dk)</label>
+                    <label className="text-[12px] font-semibold text-[#718096] uppercase">Odak (dk)</label>
                     <input type="number" min={5} max={60} value={pomSettings.short_focus_minutes}
                       onChange={e => setPomSettings({ ...pomSettings, short_focus_minutes: Number(e.target.value) })}
-                      className="mt-1 w-full h-9 rounded-lg border border-[#e2e8f0] bg-white px-3 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#2563eb]/30" />
+                      className="mt-1 w-full h-9 rounded-lg border border-[#e3e9f0] bg-white px-3 text-[15px] focus:outline-none focus:ring-2 focus:ring-[#4269a8]/30" />
                   </div>
                   <div>
-                    <label className="text-[10px] font-semibold text-[#94a3b8] uppercase">Mola (dk)</label>
+                    <label className="text-[12px] font-semibold text-[#718096] uppercase">Mola (dk)</label>
                     <input type="number" min={1} max={15} value={pomSettings.short_break_minutes}
                       onChange={e => setPomSettings({ ...pomSettings, short_break_minutes: Number(e.target.value) })}
-                      className="mt-1 w-full h-9 rounded-lg border border-[#e2e8f0] bg-white px-3 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#2563eb]/30" />
+                      className="mt-1 w-full h-9 rounded-lg border border-[#e3e9f0] bg-white px-3 text-[15px] focus:outline-none focus:ring-2 focus:ring-[#4269a8]/30" />
                   </div>
                 </div>
               </div>
               <button onClick={handleSavePom} disabled={saving}
-                className="w-full h-9 rounded-lg bg-[#0a1628] text-white text-[12px] font-semibold hover:bg-[#1a365d] disabled:opacity-40 flex items-center justify-center gap-1.5">
+                className="w-full h-9 rounded-lg bg-[#4269a8] text-white text-[14px] font-semibold hover:bg-[#365c96] disabled:opacity-40 flex items-center justify-center gap-1.5">
                 <Save className="h-3.5 w-3.5" /> {saving ? 'Kaydediliyor...' : saved ? '✓ Kaydedildi!' : 'Kaydet'}
               </button>
             </div>
@@ -819,24 +821,24 @@ export default function Settings() {
 
         {tab === 'exam_dates' && (
           <div className="h-full flex items-start justify-center pt-8">
-            <div className="w-full max-w-md rounded-xl border border-[#e2e8f0] bg-white p-6 space-y-4">
-              <h3 className="text-sm font-bold text-[#0f172a] flex items-center gap-2"><Clock className="h-4 w-4 text-[#2563eb]" /> Sınav Tarihleri</h3>
-              <p className="text-[12px] text-[#64748b]">Her sınav için tarih girin. Dashboard'da geri sayım gösterilecek.</p>
+            <div className="w-full max-w-md rounded-2xl border border-[#e3e9f0] bg-white p-6 space-y-4">
+              <h3 className="text-sm font-semibold text-[#24354a] flex items-center gap-2"><Clock className="h-4 w-4 text-[#4269a8]" /> Sınav Tarihleri</h3>
+              <p className="text-[14px] text-[#62748b]">Her sınav için tarih girin. Dashboard'da geri sayım gösterilecek.</p>
               <div className="space-y-3">
                 {exams.map(exam => {
                   const Icon = examIcons[exam.name] ?? Target
                   return (
-                    <div key={exam.id} className="flex items-center gap-3 rounded-lg border border-[#e2e8f0] p-3">
+                    <div key={exam.id} className="flex items-center gap-3 rounded-lg border border-[#e3e9f0] p-3">
                       <div className="flex h-8 w-8 items-center justify-center rounded-lg text-white shrink-0" style={{ backgroundColor: exam.color }}>
                         <Icon className="h-4 w-4" />
                       </div>
-                      <span className="text-[13px] font-bold text-[#0f172a] flex-1">{exam.name}</span>
+                      <span className="text-[15px] font-semibold text-[#24354a] flex-1">{exam.name}</span>
                       <div className="flex items-center gap-2">
                         <input
                           type="date"
                           value={pendingDates[exam.id] !== undefined ? pendingDates[exam.id] : (exam.exam_date ?? '')}
                           onChange={(e) => setPendingDates(prev => ({ ...prev, [exam.id]: e.target.value }))}
-                          className="h-9 rounded-lg border border-[#e2e8f0] px-3 text-[12px] focus:outline-none focus:ring-2 focus:ring-[#2563eb]/30"
+                          className="h-9 rounded-lg border border-[#e3e9f0] px-3 text-[14px] focus:outline-none focus:ring-2 focus:ring-[#4269a8]/30"
                         />
                         {pendingDates[exam.id] !== undefined && pendingDates[exam.id] !== (exam.exam_date ?? '') && (
                           <button
@@ -846,7 +848,7 @@ export default function Settings() {
                               setExams(prev => prev.map(ex => ex.id === exam.id ? { ...ex, exam_date: val } : ex))
                               setPendingDates(prev => { const n = { ...prev }; delete n[exam.id]; return n })
                             }}
-                            className="h-9 px-3 rounded-lg bg-[#2563eb] text-white text-[11px] font-bold hover:bg-blue-600 transition-all flex items-center gap-1 shrink-0"
+                            className="h-9 px-3 rounded-lg bg-[#4269a8] text-white text-[13px] font-semibold hover:bg-blue-600 transition-all flex items-center gap-1 shrink-0"
                           >
                             <Save className="h-3 w-3" /> Kaydet
                           </button>
@@ -862,37 +864,37 @@ export default function Settings() {
 
         {tab === 'export' && (
           <div className="h-full flex items-start justify-center pt-8">
-            <div className="w-full max-w-sm bg-white rounded-xl border border-[#e2e8f0] p-5 md:p-6 flex flex-col items-center justify-center text-center gap-4">
-              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#eff6ff] text-[#2563eb]">
+            <div className="w-full max-w-sm bg-white rounded-2xl border border-[#e3e9f0] p-5 md:p-6 flex flex-col items-center justify-center text-center gap-4">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#edf2f8] text-[#4269a8]">
                 <Download className="h-7 w-7" />
               </div>
               <div>
-                <h4 className="text-sm font-bold text-[#0f172a] mb-1">JSON Rapor Oluştur</h4>
-                <p className="text-[12px] text-[#64748b]">Haftayı seçerek plan ve çalışma verilerini JSON formatında indir.</p>
+                <h4 className="text-sm font-semibold text-[#24354a] mb-1">JSON Rapor Oluştur</h4>
+                <p className="text-[14px] text-[#62748b]">Haftayı seçerek plan ve çalışma verilerini JSON formatında indir.</p>
               </div>
 
               {/* Week Picker */}
-              <div className="w-full flex items-center justify-between gap-2 bg-[#f8fafc] border border-[#e2e8f0] rounded-xl px-3 py-2.5">
+              <div className="w-full flex items-center justify-between gap-2 bg-[#f8fafc] border border-[#e3e9f0] rounded-xl px-3 py-2.5">
                 <button
                   onClick={() => setExportWeekOffset(o => o - 1)}
-                  className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-[#e2e8f0] text-[#64748b] transition-all cursor-pointer"
+                  className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-[#e3e9f0] text-[#62748b] transition-all cursor-pointer"
                 >
                   <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
                 </button>
-                <span className="text-[12px] font-semibold text-[#0f172a] text-center leading-tight">
+                <span className="text-[14px] font-semibold text-[#24354a] text-center leading-tight">
                   {formatWeekLabel(exportWeekOffset)}
                 </span>
                 <button
                   onClick={() => setExportWeekOffset(o => Math.min(0, o + 1))}
                   disabled={exportWeekOffset >= 0}
-                  className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-[#e2e8f0] text-[#64748b] transition-all cursor-pointer disabled:opacity-30 disabled:hover:bg-transparent"
+                  className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-[#e3e9f0] text-[#62748b] transition-all cursor-pointer disabled:opacity-30 disabled:hover:bg-transparent"
                 >
                   <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
                 </button>
               </div>
 
               <button onClick={handleExportJSON} disabled={generating}
-                className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-[#0a1628] px-5 py-2.5 text-[12px] font-semibold text-white hover:bg-[#1a365d] disabled:opacity-40 transition-all cursor-pointer">
+                className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-[#4269a8] px-5 py-2.5 text-[14px] font-semibold text-white hover:bg-[#365c96] disabled:opacity-40 transition-all cursor-pointer">
                 <Download className="h-3.5 w-3.5" /> {generating ? 'Oluşturuluyor...' : 'Raporu İndir (.json)'}
               </button>
             </div>
@@ -900,18 +902,18 @@ export default function Settings() {
         )}
 
         {tab === 'vocabulary' && isAdmin && (
-          <div className="bg-white rounded-xl border border-[#e2e8f0] p-5 flex flex-col gap-4">
+          <div className="bg-white rounded-2xl border border-[#e3e9f0] p-5 flex flex-col gap-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#f1f5f9]">
               <div>
-                <h3 className="text-sm font-bold text-[#0f172a] flex items-center gap-1.5">
+                <h3 className="text-sm font-semibold text-[#24354a] flex items-center gap-1.5">
                   <BookOpen className="h-4 w-4 text-indigo-500" /> YKS/YDT Kelime Programı Düzenleme
                 </h3>
-                <p className="text-[11px] text-[#64748b] mt-0.5">Kelime listesini güncelleyin. Her gün için "Day [Sayı]" başlığıyla başlayıp yeni güne kadar kelimeleri alt alta yazın.</p>
+                <p className="text-[13px] text-[#62748b] mt-0.5">Kelime listesini güncelleyin. Her gün için "Day [Sayı]" başlığıyla başlayıp yeni güne kadar kelimeleri alt alta yazın.</p>
               </div>
               <button 
                 onClick={handleSaveVocabulary} 
                 disabled={savingVocab}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-500 text-white font-bold text-xs px-4 py-2 hover:bg-indigo-600 transition-all cursor-pointer disabled:opacity-50 shrink-0 shadow-sm"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-500 text-white font-semibold text-[13px] px-4 py-2 hover:bg-indigo-600 transition-all cursor-pointer disabled:opacity-50 shrink-0 shadow-sm"
               >
                 <Save className="h-4 w-4" /> {savingVocab ? 'Kaydediliyor...' : 'Değişiklikleri Kaydet'}
               </button>
@@ -921,7 +923,7 @@ export default function Settings() {
               <textarea 
                 value={vocabText} 
                 onChange={e => setVocabText(e.target.value)} 
-                className="w-full h-[400px] md:h-[500px] rounded-lg border border-[#e2e8f0] p-3 text-[12px] font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/30 font-semibold"
+                className="w-full h-[400px] md:h-[500px] rounded-lg border border-[#e3e9f0] p-3 text-[14px] font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/30 font-semibold"
                 placeholder="Day 1&#10;Academic Words...&#10;1 intervention&#10;2 accomplishment&#10;..."
               />
             </div>
