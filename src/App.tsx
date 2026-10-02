@@ -24,7 +24,7 @@ function App() {
   const [loading, setLoading] = useState(true)
 
   // Global timer — sayfa değişse de çalışmaya devam eder
-  useGlobalTimer()
+  useGlobalTimer(session?.user.id || null)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {

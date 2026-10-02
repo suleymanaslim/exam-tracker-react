@@ -1,3 +1,4 @@
+import './Plan.css'
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import {
@@ -42,6 +43,11 @@ function formatDate(d: Date) {
 
 function formatDateTR(d: Date) {
   return d.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' })
+}
+
+function planDuration(minutes: number) {
+  const value=Math.max(0,Math.round(minutes))
+  return value>=60?`${Math.floor(value/60)} sa${value%60?` ${value%60} dk`:''}`:`${value} dk`
 }
 
 export default function Plan() {
@@ -318,286 +324,27 @@ export default function Plan() {
   const nextWeek = () => { const d = new Date(weekStart); d.setDate(d.getDate() + 7); setWeekStart(d) }
 
   return (
-    <div className="flex flex-col h-full gap-3">
-      {/* Header */}
-      <div className="flex items-center justify-between shrink-0">
-        <div>
-          <h1 className="text-lg font-bold text-[#0f172a] flex items-center gap-2">
-            <Calendar className="h-5 w-5 text-[#2563eb]" /> Haftalık Plan
-          </h1>
-          <p className="text-[12px] text-[#64748b]">
-            <span className="hidden md:inline">Çalışma planını gün gün oluştur ve yönet.</span>
-            <span className="md:hidden">Bu haftanın planını görüntüle.</span>
-          </p>
-        </div>
-        {/* Desktop only buttons */}
-        <div className="hidden md:flex items-center gap-2">
-          <button
-            onClick={loadExamplePlan}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-[12px] font-medium text-orange-700 hover:bg-orange-100 transition-all"
-          >
-            <Database className="h-3.5 w-3.5" /> Örnek Planı Yükle
-          </button>
-          <button
-            onClick={handleCopyLastWeek}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-[#e2e8f0] bg-white px-3 py-2 text-[12px] font-medium text-[#0f172a] hover:bg-[#f8fafc] transition-all"
-          >
-            <Copy className="h-3.5 w-3.5" /> Geçen Haftayı Kopyala
-          </button>
-        </div>
-      </div>
-
-      {/* Week nav */}
-      <div className="flex items-center justify-center gap-3 shrink-0">
-        <button onClick={prevWeek} className="h-8 w-8 flex items-center justify-center rounded-lg border border-[#e2e8f0] bg-white hover:bg-[#f8fafc]">
-          <ChevronLeft className="h-4 w-4 text-[#64748b]" />
-        </button>
-        <span className="text-[13px] font-semibold text-[#0f172a]">
-          {formatDateTR(weekStart)} — {formatDateTR(weekEnd)}
-        </span>
-        <button onClick={nextWeek} className="h-8 w-8 flex items-center justify-center rounded-lg border border-[#e2e8f0] bg-white hover:bg-[#f8fafc]">
-          <ChevronRight className="h-4 w-4 text-[#64748b]" />
-        </button>
-      </div>
-
-      {/* Day tabs */}
-      <div className="flex md:grid md:grid-cols-7 overflow-x-auto gap-1.5 shrink-0 pb-2 md:pb-0">
-        {dayShort.map((d, i) => {
-          const dayNum = i + 1
-          const count = items.filter(it => it.day_of_week === dayNum).length
-          const isOffDay = dayNum === offDay
-          const isActive = selectedDay === dayNum
-          return (
-            <button
-              key={d}
-              onClick={() => setSelectedDay(dayNum)}
-              disabled={isOffDay}
-              className={`min-w-[64px] flex-1 rounded-lg py-2 text-center transition-all font-medium flex flex-col items-center justify-center ${
-                isOffDay
-                  ? 'bg-red-50 text-red-300 cursor-not-allowed border border-red-100'
-                  : isActive
-                    ? 'bg-[#0a1628] text-white shadow-md'
-                    : 'bg-white border border-[#e2e8f0] text-[#64748b] hover:border-[#2563eb]/30 hover:text-[#0f172a]'
-              }`}
-            >
-              <div className="text-[12px]">{d}</div>
-              {isOffDay ? (
-                <div className="text-[9px] mt-0.5">OFF</div>
-              ) : (
-                <div className="text-[9px] mt-0.5 opacity-70">{count} görev</div>
-              )}
-            </button>
-          )
-        })}
-      </div>
-
-      {/* ── MOBİL: Sadece görüntüleme ─────────────────────────────── */}
-      <div className="md:hidden flex-1 overflow-y-auto">
-        <div className="rounded-lg border border-[#e2e8f0] bg-white overflow-hidden">
-          <div className="flex items-center justify-between border-b border-[#e2e8f0] px-4 py-3">
-            <h3 className="text-[13px] font-bold text-[#0f172a]">
-              {dayNames[selectedDay - 1]} {selectedDay === offDay && '(OFF)'}
-            </h3>
-            <span className="text-[11px] font-medium text-[#64748b] flex items-center gap-1">
-              <Clock className="h-3 w-3" />
-              {Math.floor(dayTotalMin / 60)} sa {dayTotalMin % 60} dk
-            </span>
-          </div>
-          <div className="p-3 space-y-2">
-            {selectedDay === offDay ? (
-              <div className="flex flex-col items-center justify-center py-10 text-[#94a3b8] text-[13px]">
-                <Calendar className="h-8 w-8 mb-2 opacity-40" />
-                {dayNames[offDay - 1]} günü dinlenme günü 😴
-              </div>
-            ) : dayItems.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-10 text-[#94a3b8] text-[13px]">
-                <Plus className="h-8 w-8 mb-2 opacity-40" />
-                Bu gün için plan eklenmemiş.
-              </div>
-            ) : (
-              dayItems.map((item) => {
-                const exam = getExamForSubject(item.subject_id)
-                const ExamIcon = (item as any).isVideo ? PlayCircle : (exam ? (examIcons[exam.name] ?? Target) : Target)
-                return (
-                  <div key={item.id} className="flex items-center gap-3 rounded-xl border border-[#e2e8f0] p-3">
-                    <div
-                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white"
-                      style={{ backgroundColor: (item as any).isVideo ? '#ef4444' : (exam?.color ?? '#64748b') }}
-                    >
-                      <ExamIcon className="h-4 w-4" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[13px] font-semibold text-[#0f172a] truncate">
-                        {item.title || getSubjectName(item.subject_id)}
-                      </p>
-                      <p className="text-[11px] text-[#94a3b8] truncate">
-                        {getResourceName(item.resource_id)} · {item.planned_minutes} dk
-                      </p>
-                    </div>
-                    <span className="text-[11px] font-bold text-[#64748b] shrink-0 bg-[#f1f5f9] px-2 py-1 rounded-lg">
-                      {item.planned_minutes}dk
-                    </span>
-                  </div>
-                )
-              })
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* ── DESKTOP: Tam düzenleme paneli ─────────────────────────── */}
-      <div className="hidden md:flex flex-1 min-h-0 flex-col-reverse lg:grid lg:grid-cols-5 gap-3 overflow-y-auto lg:overflow-hidden pb-4 lg:pb-0">
-        {/* Left: item list */}
-        <div className="lg:col-span-3 rounded-lg border border-[#e2e8f0] bg-white flex flex-col overflow-hidden min-h-[300px] lg:min-h-0">
-          <div className="flex items-center justify-between border-b border-[#e2e8f0] px-4 py-2 shrink-0">
-            <h3 className="text-[12px] font-bold text-[#0f172a]">
-              {dayNames[selectedDay - 1]} {selectedDay === offDay && '(OFF)'}
-            </h3>
-            <span className="text-[10px] font-medium text-[#64748b] flex items-center gap-1">
-              <Clock className="h-3 w-3" />
-              Toplam: {Math.floor(dayTotalMin / 60)} sa {dayTotalMin % 60} dk
-            </span>
-          </div>
-          <div className="flex-1 overflow-y-auto p-3 space-y-2">
-            {selectedDay === offDay ? (
-              <div className="flex flex-col items-center justify-center h-full text-[#94a3b8] text-[13px]">
-                <Calendar className="h-8 w-8 mb-2 opacity-40" />
-                {dayNames[offDay - 1]} günü dinlenme günü 😴
-              </div>
-            ) : dayItems.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-[#94a3b8] text-[13px]">
-                <Plus className="h-8 w-8 mb-2 opacity-40" />
-                Henüz görev eklenmemiş.
-              </div>
-            ) : (
-              dayItems.map((item) => {
-                const exam = getExamForSubject(item.subject_id)
-                const ExamIcon = (item as any).isVideo ? PlayCircle : (exam ? (examIcons[exam.name] ?? Target) : Target)
-                return (
-                  <div key={item.id} className="flex items-center gap-3 rounded-lg border border-[#e2e8f0] p-3 hover:shadow-sm transition-all group">
-                    <div
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white"
-                      style={{ backgroundColor: (item as any).isVideo ? '#ef4444' : (exam?.color ?? '#64748b') }}
-                    >
-                      <ExamIcon className="h-4 w-4" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[12px] font-semibold text-[#0f172a] truncate">
-                        {item.title || getSubjectName(item.subject_id)}
-                      </p>
-                      <p className="text-[10px] text-[#94a3b8] truncate">
-                        {getResourceName(item.resource_id)} · {item.planned_minutes} dk
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => handleDelete(item.id)}
-                      className="opacity-0 group-hover:opacity-100 h-7 w-7 flex items-center justify-center rounded-md text-red-400 hover:bg-red-50 transition-all"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                )
-              })
-            )}
-          </div>
-        </div>
-
-        {/* Right: Add form */}
-        <div className="lg:col-span-2 rounded-lg border border-[#e2e8f0] bg-white flex flex-col overflow-hidden shrink-0">
-          <div className="border-b border-[#e2e8f0] px-4 py-2 shrink-0">
-            <h3 className="text-[12px] font-bold text-[#0f172a] flex items-center gap-1.5">
-              <Plus className="h-3.5 w-3.5 text-[#2563eb]" /> Görev Ekle
-            </h3>
-          </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
-            {selectedDay === offDay ? (
-              <div className="flex items-center justify-center h-full text-[13px] text-[#94a3b8]">{dayNames[offDay - 1]} günü OFF</div>
-            ) : (
-              <>
-                {/* Sınav */}
-                <div>
-                  <label className="text-[11px] font-semibold text-[#64748b] uppercase tracking-wider">Sınav</label>
-                  <select
-                    value={selExam}
-                    onChange={e => { setSelExam(e.target.value); setSelSubject(''); setSelResource('') }}
-                    className="mt-1 w-full h-9 rounded-lg border border-[#e2e8f0] bg-[#f8fafc] px-3 text-[12px] text-[#0f172a] focus:outline-none focus:ring-2 focus:ring-[#2563eb]/30"
-                  >
-                    <option value="">Seçiniz...</option>
-                    {exams.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-                  </select>
-                </div>
-                {/* Ders */}
-                <div>
-                  <label className="text-[11px] font-semibold text-[#64748b] uppercase tracking-wider">Ders</label>
-                  <select
-                    value={selSubject}
-                    onChange={e => { setSelSubject(e.target.value); setSelResource('') }}
-                    disabled={!selExam}
-                    className="mt-1 w-full h-9 rounded-lg border border-[#e2e8f0] bg-[#f8fafc] px-3 text-[12px] text-[#0f172a] focus:outline-none focus:ring-2 focus:ring-[#2563eb]/30 disabled:opacity-50"
-                  >
-                    <option value="">Seçiniz...</option>
-                    {filteredSubjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                </div>
-                {/* Kaynak */}
-                <div>
-                  <label className="text-[11px] font-semibold text-[#64748b] uppercase tracking-wider">Kaynak</label>
-                  <select
-                    value={selResource}
-                    onChange={e => setSelResource(e.target.value)}
-                    disabled={!selSubject}
-                    className="mt-1 w-full h-9 rounded-lg border border-[#e2e8f0] bg-[#f8fafc] px-3 text-[12px] text-[#0f172a] focus:outline-none focus:ring-2 focus:ring-[#2563eb]/30 disabled:opacity-50"
-                  >
-                    <option value="">Seçiniz (opsiyonel)...</option>
-                    {filteredResources.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-                  </select>
-                </div>
-                {/* Başlık */}
-                <div>
-                  <label className="text-[11px] font-semibold text-[#64748b] uppercase tracking-wider">Not / Başlık</label>
-                  <input
-                    type="text"
-                    value={selTitle}
-                    onChange={e => setSelTitle(e.target.value)}
-                    placeholder="ör. 30 kelime çalış"
-                    className="mt-1 w-full h-9 rounded-lg border border-[#e2e8f0] bg-[#f8fafc] px-3 text-[12px] text-[#0f172a] placeholder:text-[#94a3b8] focus:outline-none focus:ring-2 focus:ring-[#2563eb]/30"
-                  />
-                </div>
-                {/* Süre */}
-                <div>
-                  <label className="text-[11px] font-semibold text-[#64748b] uppercase tracking-wider">Süre</label>
-                  <div className="flex gap-2 mt-1">
-                    <div className="flex-1 flex items-center gap-2">
-                      <input
-                        type="number" min={0} value={selHours}
-                        onChange={e => setSelHours(Number(e.target.value))}
-                        className="w-full h-9 rounded-lg border border-[#e2e8f0] bg-[#f8fafc] px-3 text-[12px] text-[#0f172a] focus:outline-none focus:ring-2 focus:ring-[#2563eb]/30"
-                      />
-                      <span className="text-[12px] text-[#64748b]">sa</span>
-                    </div>
-                    <div className="flex-1 flex items-center gap-2">
-                      <input
-                        type="number" min={0} step={5} value={selMinutes}
-                        onChange={e => setSelMinutes(Number(e.target.value))}
-                        className="w-full h-9 rounded-lg border border-[#e2e8f0] bg-[#f8fafc] px-3 text-[12px] text-[#0f172a] focus:outline-none focus:ring-2 focus:ring-[#2563eb]/30"
-                      />
-                      <span className="text-[12px] text-[#64748b]">dk</span>
-                    </div>
-                  </div>
-                </div>
-                {/* Submit */}
-                <button
-                  onClick={handleAdd}
-                  disabled={!selSubject || saving}
-                  className="w-full h-9 rounded-lg bg-[#0a1628] text-white text-[12px] font-semibold transition-all hover:bg-[#1a365d] disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  {saving ? 'Ekleniyor...' : 'Plana Ekle'}
-                </button>
-              </>
-            )}
-          </div>
-        </div>
+    <div className="weekly-plan">
+      <header className="plan-header"><div><p className="plan-eyebrow">HAFTANI DÜZENLE</p><h1>Haftalık Plan</h1><p>Çalışmalarını gün gün planla, hedeflerine yer aç.</p></div><div className="plan-actions plan-desktop"><button onClick={handleCopyLastWeek}><Copy size={16}/>Geçen haftayı kopyala</button><button onClick={loadExamplePlan}><Database size={16}/>Örnek planı yükle</button></div></header>
+      <section className="plan-week-picker" aria-label="Hafta seçimi"><button onClick={prevWeek} aria-label="Önceki hafta"><ChevronLeft size={18}/></button><div><span>SEÇİLİ HAFTA</span><strong>{formatDateTR(weekStart)} — {formatDateTR(weekEnd)}</strong></div><button onClick={nextWeek} aria-label="Sonraki hafta"><ChevronRight size={18}/></button></section>
+      <div className="plan-days" role="tablist" aria-label="Haftanın günleri">{dayShort.map((d,i)=>{
+        const dayNum=i+1;const date=new Date(weekStart);date.setDate(date.getDate()+i);const dateStr=formatDate(date);const regular=items.filter(p=>p.day_of_week===dayNum);const videos=videoItems.filter(p=>p.date===dateStr);const minutes=regular.reduce((sum,p)=>sum+p.planned_minutes,0)+videos.reduce((sum,v)=>sum+v.video_count*((resources.find(r=>r.id===v.resource_id) as any)?.avg_video_duration||0),0);const count=regular.length+videos.length;const off=dayNum===offDay;
+        return <button key={d} role="tab" id={`plan-tab-${dayNum}`} aria-selected={selectedDay===dayNum} aria-controls="plan-day-content" disabled={off} onClick={()=>setSelectedDay(dayNum)} className={`${selectedDay===dayNum?'is-active':''} ${off?'is-off':''}`}><span className="plan-day-name">{d}</span><strong>{date.getDate()}</strong><span>{off?'Dinlenme':count?`${count} çalışma`:'Plan yok'}</span><small>{off?'—':planDuration(minutes)}</small></button>
+      })}</div>
+      <div className="plan-grid">
+        <section className="plan-card plan-day-content" id="plan-day-content" role="tabpanel" aria-labelledby={`plan-tab-${selectedDay}`}>
+          <div className="plan-card-head"><div><p className="plan-eyebrow">GÜNLÜK PROGRAM</p><h2>{dayNames[selectedDay-1]}</h2></div><span className="plan-total"><Clock size={15}/>{planDuration(dayTotalMin)}</span></div>
+          <div className="plan-list">{selectedDay===offDay?<div className="plan-empty"><Calendar size={28}/><h3>Dinlenme günü</h3><p>Bugün kendine zaman ayır.</p></div>:dayItems.length===0?<div className="plan-empty"><Calendar size={28}/><h3>Günün planı henüz boş</h3><p>Eklediğin dersler ve video planların burada sıralanır.</p></div>:dayItems.map((item,index)=>{const exam=getExamForSubject(item.subject_id);const video=!!(item as any).isVideo;const Icon=video?PlayCircle:examIcons[exam?.name||'']||Target;return <div key={item.id} className="plan-row"><span className="plan-row-index">{String(index+1).padStart(2,'0')}</span><span className="plan-row-icon"><Icon size={18}/></span><div className="plan-row-copy"><strong>{item.title||getSubjectName(item.subject_id)||'Çalışma'}</strong><span>{getResourceName(item.resource_id)||exam?.name||'Genel çalışma'}</span></div><div className="plan-row-time"><small>{video?'Video':'Ders'}</small><strong>{planDuration(item.planned_minutes)}</strong></div><button className="plan-delete plan-desktop" onClick={()=>handleDelete(item.id)} aria-label={`${item.title||getSubjectName(item.subject_id)} planını sil`} title="Plan maddesini sil"><Trash2 size={16}/></button></div>})}</div>
+          <div className="plan-list-footer"><span>{dayItems.length} çalışma</span><span>Günlük hedef <b>{planDuration(dayTotalMin)}</b></span></div>
+        </section>
+        <section className="plan-card plan-form-card plan-desktop"><div className="plan-card-head"><div><p className="plan-eyebrow">PLANINA EKLE</p><h2>Yeni çalışma</h2></div><Plus size={20}/></div>{selectedDay===offDay?<div className="plan-empty"><p>Dinlenme günü için çalışma eklenemez.</p></div>:<form className="plan-form" onSubmit={e=>{e.preventDefault();handleAdd()}}>
+          <label>Sınav<select value={selExam} onChange={e=>{setSelExam(e.target.value);setSelSubject('');setSelResource('')}}><option value="">Sınav seç</option>{exams.map(ex=><option key={ex.id} value={ex.id}>{ex.name}</option>)}</select></label>
+          <label>Ders<select value={selSubject} disabled={!selExam} onChange={e=>{setSelSubject(e.target.value);setSelResource('')}}><option value="">Ders seç</option>{filteredSubjects.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+          <label>Kaynak <span>isteğe bağlı</span><select value={selResource} disabled={!selSubject} onChange={e=>setSelResource(e.target.value)}><option value="">Kaynak seç</option>{filteredResources.map(r=><option key={r.id} value={r.id}>{r.name}</option>)}</select></label>
+          <label>Not / Başlık <span>isteğe bağlı</span><input value={selTitle} onChange={e=>setSelTitle(e.target.value)} placeholder="Örn. konu tekrarı veya 30 kelime"/></label>
+          <fieldset><legend>Çalışma süresi</legend><div className="plan-duration"><label><input aria-label="Saat" type="number" min={0} value={selHours} onChange={e=>setSelHours(Number(e.target.value))}/><span>saat</span></label><label><input aria-label="Dakika" type="number" min={0} step={5} value={selMinutes} onChange={e=>setSelMinutes(Number(e.target.value))}/><span>dakika</span></label></div></fieldset>
+          <button className="plan-submit" disabled={!selSubject||saving}><Plus size={16}/>{saving?'Ekleniyor…':'Plana ekle'}</button>
+        </form>}</section>
       </div>
     </div>
   )

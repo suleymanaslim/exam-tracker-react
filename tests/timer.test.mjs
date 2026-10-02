@@ -1,0 +1,154 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { bindTimerOwner, useTimerStore } from '../src/lib/timerStore.ts'
+import { recoveryFor, readTimerSnapshot, sessionPayload } from '../src/lib/timerRecovery.ts'
+import { playlistURL, nextFocusVideo, FOCUS_VIDEO_IDS } from '../src/lib/playlist.ts'
+
+const storage = new Map()
+globalThis.localStorage = {
+  getItem: key => storage.get(key) ?? null,
+  setItem: (key, value) => storage.set(key, value),
+}
+const realNow = Date.now
+let clock = realNow()
+Date.now = () => clock
+function start(owner = 'alice') {
+  bindTimerOwner(null)
+  storage.clear()
+  bindTimerOwner(owner)
+  const timer = useTimerStore.getState()
+  timer.setSelExam('exam')
+  timer.setSelSubject('subject')
+  timer.setSelResource('resource')
+  timer.resetTimer(1500)
+  timer.startTimer()
+}
+function reopen(owner = 'alice') { bindTimerOwner(null); bindTimerOwner(owner) }
+function stored(owner = 'alice') { return JSON.parse(storage.get(`examtracker-timer-v1:${owner}`)) }
+
+test('an open tab keeps its active session without confirmation', () => {
+  start()
+  const id = useTimerStore.getState().sessionId
+  clock += 600000
+  bindTimerOwner('alice')
+  assert.equal(useTimerStore.getState().isRunning, true)
+  assert.equal(useTimerStore.getState().recovery, null)
+  assert.equal(useTimerStore.getState().sessionId, id)
+})
+test('reopening pauses for confirmation and preserves the remaining time', () => {
+  start()
+  clock += 600000
+  reopen()
+  const state = useTimerStore.getState()
+  assert.equal(state.isRunning, false)
+  assert.equal(state.secondsLeft, 900)
+  assert.equal(state.recovery.durationMinutes, 10)
+  assert.equal(state.recovery.remainingSeconds, 900)
+})
+test('late reopening caps the recorded duration and end time at the deadline', () => {
+  start()
+  const deadline = useTimerStore.getState().deadlineEpoch
+  clock += 3 * 3600000
+  reopen()
+  const recovery = useTimerStore.getState().recovery
+  assert.equal(recovery.durationMinutes, 25)
+  assert.equal(recovery.remainingSeconds, 0)
+  assert.equal(Date.parse(recovery.endedAt), deadline)
+})
+test('closing during completion preserves a stable confirmation ID for an insert retry', () => {
+  start(); clock += 1500000
+  const id = useTimerStore.getState().sessionId
+  useTimerStore.getState().pauseTimer()
+  reopen()
+  assert.equal(useTimerStore.getState().recovery.id, id)
+  assert.equal(useTimerStore.getState().recovery.durationMinutes, 25)
+})
+test('paused timers do not accumulate time while closed', () => {
+  start(); clock += 300000
+  useTimerStore.getState().pauseTimer()
+  clock += 7200000; reopen()
+  assert.equal(useTimerStore.getState().secondsLeft, 1200)
+  assert.equal(useTimerStore.getState().isRunning, false)
+  assert.equal(useTimerStore.getState().recovery, null)
+})
+test('confirmation carries fractional minutes forward without recording them twice', () => {
+  start(); clock += 620000; reopen()
+  const previous = useTimerStore.getState().recovery
+  useTimerStore.getState().resolveRecovery(true)
+  const continued = useTimerStore.getState()
+  assert.equal(previous.durationMinutes, 10)
+  assert.equal(continued.secondsLeft, 880)
+  assert.equal(continued.totalSeconds, 900)
+  assert.equal(continued.focusSeconds, 1500)
+  assert.notEqual(continued.sessionId, previous.id)
+  clock += 880000
+  const completed = recoveryFor(stored(), clock)
+  assert.equal(previous.durationMinutes + completed.durationMinutes, 25)
+})
+test('denial resets the timer without turning it into a completed session', () => {
+  start(); clock += 600000; reopen()
+  useTimerStore.getState().resolveRecovery(false)
+  const state = useTimerStore.getState()
+  assert.equal(state.recovery, null)
+  assert.equal(state.startedAt, null)
+  assert.equal(state.secondsLeft, 1500)
+  assert.equal(state.isRunning, false)
+})
+test('deferred decisions keep the same insert ID and frozen duration across reloads', () => {
+  start(); clock += 600000; reopen()
+  const first = sessionPayload(useTimerStore.getState().recovery)
+  clock += 600000; reopen()
+  assert.deepEqual(sessionPayload(useTimerStore.getState().recovery), first)
+})
+test('account switching does not reuse another user’s selections or session', () => {
+  start(); clock += 600000
+  bindTimerOwner('bob')
+  assert.equal(useTimerStore.getState().ownerId, 'bob')
+  assert.equal(useTimerStore.getState().selSubject, '')
+  assert.equal(useTimerStore.getState().sessionId, null)
+  bindTimerOwner('alice')
+  assert.equal(useTimerStore.getState().recovery.ownerId, 'alice')
+  assert.equal(useTimerStore.getState().recovery.durationMinutes, 10)
+})
+test('completed breaks reopen ready for focus without asking to record break time', () => {
+  start(); useTimerStore.getState().finishFocus()
+  clock += 700000; reopen()
+  assert.equal(useTimerStore.getState().phase, 'focus')
+  assert.equal(useTimerStore.getState().secondsLeft, 1500)
+  assert.equal(useTimerStore.getState().recovery, null)
+  assert.equal(useTimerStore.getState().isRunning, false)
+})
+test('simulated focus end only moves the timer into a break', () => {
+  start()
+  useTimerStore.getState().finishFocus()
+  const state = useTimerStore.getState()
+  assert.equal(state.phase, 'break')
+  assert.equal(state.startedAt, null)
+  assert.equal(state.sessionId, null)
+  assert.equal(state.recovery, null)
+  assert.equal(state.secondsLeft, 600)
+})
+test('invalid or foreign stored snapshots are ignored', () => {
+  start()
+  assert.equal(readTimerSnapshot(storage.get('examtracker-timer-v1:alice'), 'bob'), null)
+  assert.equal(readTimerSnapshot('{broken', 'alice'), null)
+  const invalid = { ...stored(), totalSeconds: -1 }
+  assert.equal(readTimerSnapshot(JSON.stringify(invalid), 'alice'), null)
+})
+test('playlist links only allow normal HTTP(S) URLs without credentials', () => {
+  assert.equal(playlistURL('javascript:alert(1)'), null)
+  assert.equal(playlistURL('data:text/html,test'), null)
+  assert.equal(playlistURL('https://user:pass@example.com/'), null)
+  assert.equal(playlistURL('not a URL'), null)
+  assert.equal(playlistURL('  https://youtube.com/playlist?list=123 '), 'https://youtube.com/playlist?list=123')
+})
+test('random video selection always uses the provided pool and avoids immediate repeats', () => {
+  for (const previous of FOCUS_VIDEO_IDS) {
+    for (const seed of [0, .25, .5, .75, .999]) {
+      const next = nextFocusVideo(previous, () => seed)
+      assert.ok(FOCUS_VIDEO_IDS.includes(next))
+      assert.notEqual(next, previous)
+    }
+  }
+})
+process.on('exit', () => { Date.now = realNow })

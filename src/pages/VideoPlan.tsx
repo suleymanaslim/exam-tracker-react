@@ -1,14 +1,27 @@
-import { useEffect, useState, useRef, useCallback } from 'react'
+import './SuitePages.css'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
-import { Plus, Trash2, Download, Image as ImageIcon, Settings, EyeOff, SkipForward, X, Check, ChevronUp, ChevronDown } from 'lucide-react'
+import { Plus, Trash2, Download, Printer, Settings, EyeOff, SkipForward, X, Check, ChevronUp, ChevronDown } from 'lucide-react'
 import Swal from 'sweetalert2'
-import html2canvas from 'html2canvas'
 import { useAdminStore } from '../lib/adminStore'
+import { playlistURL } from '../lib/playlist'
+import { openVideoPlanPrint } from '../lib/videoPlanPrint'
 
 /* ─────────────── Types ─────────────── */
+function showPlanError(error: { code?: string; message: string }) {
+  return Swal.fire({
+    icon: 'error',
+    title: 'Plan kaydedilemedi',
+    text: error.code === '42501'
+      ? 'Bu kullanıcının video planını düzenleme izni yok. Admin video planı izinlerinin Supabase üzerinde uygulanması gerekiyor.'
+      : error.message,
+    confirmButtonText: 'Tamam',
+  })
+}
+
 interface Resource {
   id: string; subject_id: string; name: string; resource_type: string
-  total_videos: number; avg_video_duration: number; subject_name?: string
+  total_videos: number; avg_video_duration: number; subject_name?: string; url?: string | null
 }
 interface VideoPlanItem {
   id: string; resource_id: string; date: string; video_count: number;
@@ -69,12 +82,13 @@ export default function VideoPlan() {
   const [planItems, setPlanItems] = useState<VideoPlanItem[]>([])
   const [loading, setLoading] = useState(true)
 
-  const calendarRef = useRef<HTMLDivElement>(null)
 
   /* editing */
   const [editingRes, setEditingRes] = useState<Resource | null>(null)
   const [editTotal, setEditTotal] = useState('')
   const [editAvg, setEditAvg] = useState('')
+  const [editPlaylistURL, setEditPlaylistURL] = useState('')
+  const [savingResource, setSavingResource] = useState(false)
 
   /* selection */
   const [selectedResId, setSelectedResId] = useState<string | null>(null)
@@ -169,17 +183,19 @@ export default function VideoPlan() {
     })
     if (count && count > 0) {
       const maxOrder = planItems.filter(p => p.date === dateStr).reduce((m, p) => Math.max(m, p.sort_order || 0), 0)
-      const { data } = await supabase.from('video_plan_items').insert({
+      const { data, error } = await supabase.from('video_plan_items').insert({
         user_id: userId, resource_id: selectedResId,
         date: dateStr, video_count: count, sort_order: maxOrder + 1,
       }).select().single()
+      if (error) { await showPlanError(error); return }
       if (data) setPlanItems(p => [...p, data])
     }
   }
 
   const handleDeleteItem = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation()
-    await supabase.from('video_plan_items').delete().eq('id', id)
+    const { error } = await supabase.from('video_plan_items').delete().eq('id', id)
+    if (error) { await showPlanError(error); return }
     setPlanItems(p => p.filter(i => i.id !== id))
   }
 
@@ -195,7 +211,8 @@ export default function VideoPlan() {
       confirmButtonColor: '#ef4444',
     })
     if (c.isConfirmed && userId) {
-      await supabase.from('video_plan_items').delete().in('id', dayItems.map(d => d.id))
+      const { error } = await supabase.from('video_plan_items').delete().in('id', dayItems.map(d => d.id))
+      if (error) { await showPlanError(error); return }
       setPlanItems(p => p.filter(i => i.date !== dateStr))
     }
   }
@@ -212,6 +229,7 @@ export default function VideoPlan() {
     tgtItems.forEach(i => batch.push({ id: i.id, user_id: userId, resource_id: i.resource_id, video_count: i.video_count, date: src }))
 
     const { error } = await supabase.from('video_plan_items').upsert(batch)
+    if (error) await showPlanError(error)
     if (!error) {
       setPlanItems(prev => {
         const rest = prev.filter(p => p.date !== src && p.date !== tgt)
@@ -242,6 +260,7 @@ export default function VideoPlan() {
       return { id: i.id, user_id: userId, resource_id: i.resource_id, video_count: i.video_count, date: localDateStr(d) }
     })
     const { error } = await supabase.from('video_plan_items').upsert(batch)
+    if (error) await showPlanError(error)
     if (!error) {
       setPlanItems(prev => prev.map(p => {
         const u = batch.find(b => b.id === p.id)
@@ -259,10 +278,10 @@ export default function VideoPlan() {
     
     const html = `
       <div className="flex flex-col gap-2 text-left mt-2">
-        <label className="text-xs font-bold text-slate-500 uppercase">İzlenen Video Sayısı</label>
+        <label className="text-xs font-semibold text-slate-500 uppercase">İzlenen Video Sayısı</label>
         <div className="flex items-center gap-2">
           <input type="number" id="watch-input" className="swal2-input !m-0 !w-full" value="${current}" min="0" max="${item.video_count}">
-          <span className="text-sm font-bold text-slate-400 whitespace-nowrap">/ ${item.video_count}</span>
+          <span className="text-sm font-semibold text-slate-400 whitespace-nowrap">/ ${item.video_count}</span>
         </div>
       </div>
     `
@@ -369,15 +388,23 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
     setEditingRes(r)
     setEditTotal(r.total_videos?.toString() || '0')
     setEditAvg(r.avg_video_duration?.toString() || '0')
+    setEditPlaylistURL(r.url || '')
   }
 
   const saveEditResource = async () => {
-    if (!editingRes) return
-    const t = parseInt(editTotal) || 0
-    const a = parseInt(editAvg) || 0
-    await supabase.from('resources').update({ total_videos: t, avg_video_duration: a }).eq('id', editingRes.id)
-    setResources(p => p.map(r => r.id === editingRes.id ? { ...r, total_videos: t, avg_video_duration: a } : r))
-    setAllResources(p => p.map(r => r.id === editingRes.id ? { ...r, total_videos: t, avg_video_duration: a } : r))
+    if (!editingRes || savingResource) return
+    const url = playlistURL(editPlaylistURL)
+    if (editPlaylistURL.trim() && !url) {
+      void Swal.fire('Geçersiz bağlantı', 'https:// veya http:// ile başlayan geçerli bir oynatma listesi bağlantısı girin.', 'warning')
+      return
+    }
+    const values = { total_videos: parseInt(editTotal) || 0, avg_video_duration: parseInt(editAvg) || 0, url }
+    setSavingResource(true)
+    const { error } = await supabase.from('resources').update(values).eq('id', editingRes.id)
+    setSavingResource(false)
+    if (error) { void showPlanError(error); return }
+    setResources(previous => previous.map(resource => resource.id === editingRes.id ? { ...resource, ...values } : resource))
+    setAllResources(previous => previous.map(resource => resource.id === editingRes.id ? { ...resource, ...values } : resource))
     setEditingRes(null)
   }
 
@@ -395,15 +422,22 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
 
     const { value: det } = await Swal.fire({
       title: 'Video Bilgileri',
-      html: `<input id="sw-t" className="swal2-input" placeholder="Toplam Video" type="number" min="1"><input id="sw-a" className="swal2-input" placeholder="Ort. Süre (dk)" type="number" min="1">`,
+      html: `<input id="sw-t" className="swal2-input" placeholder="Toplam Video" type="number" min="1"><input id="sw-a" className="swal2-input" placeholder="Ort. Süre (dk)" type="number" min="1"><input id="sw-url" className="swal2-input" placeholder="Oynatma listesi URL (isteğe bağlı)" type="url">`,
       focusConfirm: false, showCancelButton: true, confirmButtonText: 'Kaydet', confirmButtonColor: '#2563eb',
-      preConfirm: () => ({ tot: parseInt((document.getElementById('sw-t') as HTMLInputElement).value) || 0, avg: parseInt((document.getElementById('sw-a') as HTMLInputElement).value) || 0 }),
+      preConfirm: () => {
+        const entered = (document.getElementById('sw-url') as HTMLInputElement).value
+        const url = playlistURL(entered)
+        if (entered.trim() && !url) { Swal.showValidationMessage('Geçerli bir http:// veya https:// bağlantısı girin.'); return false }
+        return { tot: parseInt((document.getElementById('sw-t') as HTMLInputElement).value) || 0, avg: parseInt((document.getElementById('sw-a') as HTMLInputElement).value) || 0, url }
+      },
     })
-    const tot = det?.tot || 0, avg = det?.avg || 0
-    await supabase.from('resources').update({ resource_type: 'video_ders', total_videos: tot, avg_video_duration: avg }).eq('id', resId)
+    if (!det) return
+    const tot = det.tot, avg = det.avg
+    const { error } = await supabase.from('resources').update({ resource_type: 'video_ders', total_videos: tot, avg_video_duration: avg, url: det.url }).eq('id', resId)
+    if (error) { void showPlanError(error); return }
     const found = allResources.find(r => r.id === resId)
     if (found) {
-      const nr = { ...found, resource_type: 'video_ders', total_videos: tot, avg_video_duration: avg }
+      const nr = { ...found, resource_type: 'video_ders', total_videos: tot, avg_video_duration: avg, url: det.url }
       setResources(p => [...p, nr])
       setAllResources(p => p.map(r => r.id === resId ? nr : r))
     }
@@ -433,10 +467,11 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
     const otherOrder = other.sort_order || targetIdx
 
     setLoading(true)
-    await supabase.from('video_plan_items').upsert([
+    const { error } = await supabase.from('video_plan_items').upsert([
       { id: item.id, user_id: userId!, resource_id: item.resource_id, date: item.date, video_count: item.video_count, sort_order: otherOrder },
       { id: other.id, user_id: userId!, resource_id: other.resource_id, date: other.date, video_count: other.video_count, sort_order: myOrder },
     ])
+    if (error) { setLoading(false); await showPlanError(error); return }
     setPlanItems(prev => prev.map(p => {
       if (p.id === item.id) return { ...p, sort_order: otherOrder }
       if (p.id === other.id) return { ...p, sort_order: myOrder }
@@ -467,15 +502,11 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
     const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = 'video_plani.json'; a.click(); URL.revokeObjectURL(u);
   }
 
-  const exportPNG = async () => {
-    if (!calendarRef.current) return
-    try {
-      const canvas = await html2canvas(calendarRef.current, { scale: 2, backgroundColor: '#ffffff' })
-      const link = document.createElement('a')
-      link.download = 'video_plani.png'
-      link.href = canvas.toDataURL('image/png')
-      link.click()
-    } catch (e) { console.error(e); Swal.fire('Hata', 'Görsel oluşturulamadı.', 'error') }
+  const calendarRef = useRef<HTMLDivElement>(null)
+  const printPlan = () => {
+    if (calendarRef.current && !openVideoPlanPrint(calendarRef.current)) {
+      void Swal.fire('Sayfa açılamadı', 'Yazdırma görünümünü açmak için bu siteye açılır pencere izni verin.', 'info')
+    }
   }
 
   const DOW = ['Pzt','Sal','Çar','Per','Cum','Cmt','Paz']
@@ -500,10 +531,11 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
   )
 
   return (
-    <div className="h-full flex flex-col gap-3 p-3 max-w-[1500px] mx-auto bg-slate-100 text-slate-900 overflow-hidden">
+    <div className="suite-page suite-videoplan h-full flex flex-col gap-3 p-3 max-w-[1500px] mx-auto bg-slate-100 text-slate-900 overflow-hidden">
       {/* HEADER */}
       <div className="flex flex-wrap items-center justify-between gap-3 shrink-0">
         <div>
+          <p className="suite-eyebrow">VİDEO PROGRAMIN</p>
           <h1 className="text-lg font-semibold tracking-tight">Video planı</h1>
           <p className="text-xs text-slate-400 mt-0.5">
             {selectedResId ? <span className="text-slate-700 font-medium">Ders seçili — takvimde bir güne tıklayıp video sayısını girin</span> : 'Soldan ders seçin, güne tıklayın. Gün kartını sürükleyerek takas edin.'}
@@ -519,11 +551,11 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
             {days[0].toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' })} – {days[6].toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', year: 'numeric' })}
           </span>
           <div className="w-px h-5 bg-slate-200 mx-1"></div>
-          <button onClick={exportPNG} className="h-7 px-2.5 rounded-md border border-slate-200 bg-white text-xs font-medium text-slate-500 hover:text-slate-900 transition-colors inline-flex items-center gap-1.5">
-            <ImageIcon className="h-3.5 w-3.5" /> PNG
+          <button onClick={printPlan} className="h-7 px-2.5 rounded-md border border-slate-900 bg-slate-900 text-white text-xs font-medium hover:bg-slate-700 transition-colors inline-flex items-center gap-1.5">
+            <Printer className="h-3.5 w-3.5" /> Yazdır / PDF
           </button>
-          <button onClick={exportJSON} className="h-7 px-3 rounded-md bg-slate-900 text-white text-xs font-medium hover:bg-slate-700 transition-colors inline-flex items-center gap-1.5">
-            <Download className="h-3.5 w-3.5" /> JSON
+          <button onClick={exportJSON} className="h-7 px-3 rounded-md border border-slate-200 bg-white text-slate-500 text-xs font-medium hover:text-slate-900 transition-colors inline-flex items-center gap-1.5">
+            <Download className="h-3.5 w-3.5" /> Veri (JSON)
           </button>
         </div>
       </div>
@@ -534,10 +566,10 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
         {/* LEFT: Dersler */}
         <div className="w-full lg:w-64 flex flex-col shrink-0 lg:min-h-0 max-h-[240px] lg:max-h-none overflow-hidden rounded-xl border border-slate-200 bg-white">
           <div className="px-3 py-2.5 border-b border-slate-200 flex items-center justify-between shrink-0">
-            <span className="text-[13px] font-semibold flex items-center gap-2">Dersler
-              <span className="text-[10px] text-slate-400 bg-slate-100 rounded-full px-1.5 py-0.5 font-semibold tabular-nums">{resources.length}</span>
+            <span className="text-[14px] font-semibold flex items-center gap-2">Dersler
+              <span className="text-[11px] text-slate-400 bg-slate-100 rounded-full px-1.5 py-0.5 font-semibold tabular-nums">{resources.length}</span>
             </span>
-            <button onClick={handleAddResourceToPlan} className="h-6 px-2 rounded-md bg-slate-900 text-white flex items-center gap-1 text-[11px] font-medium hover:bg-slate-700 transition-colors">
+            <button onClick={handleAddResourceToPlan} className="h-6 px-2 rounded-md bg-slate-900 text-white flex items-center gap-1 text-[12px] font-medium hover:bg-slate-700 transition-colors">
               <Plus className="h-3 w-3" /> Ekle
             </button>
           </div>
@@ -545,7 +577,7 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
             {resources.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-10 gap-2 text-slate-400">
                 <p className="text-xs">Henüz kaynak yok</p>
-                <p className="text-[10px] text-slate-300">Üstteki Ekle ile kaynak ekleyin</p>
+                <p className="text-[11px] text-slate-300">Üstteki Ekle ile kaynak ekleyin</p>
               </div>
             ) : (
               resources.map(res => {
@@ -563,7 +595,7 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
                     className={`group px-3 py-2.5 border-b border-slate-100 last:border-b-0 cursor-pointer transition-colors ${sel ? 'bg-slate-900/5 shadow-[inset_2px_0_0_0_#0f172a]' : 'hover:bg-slate-50'}`}>
                     <div className="flex items-center gap-2">
                       <span className="w-2 h-2 rounded-full shrink-0" style={{ background: c.dot }}></span>
-                      <span className="text-[13px] font-medium truncate flex-1">{cleanName(res.name)}</span>
+                      <span className="text-[14px] font-medium truncate flex-1">{cleanName(res.name)}</span>
                       <span className="flex items-center gap-0.5 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
                         <button onClick={e => { e.stopPropagation(); handleEditResource(res) }} title="Düzenle" className="p-1 rounded text-slate-300 hover:text-slate-700 hover:bg-slate-100 transition-colors">
                           <Settings className="h-3 w-3" />
@@ -579,14 +611,15 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
                           <input type="number" min="0" value={editTotal} onChange={e => setEditTotal(e.target.value)} placeholder="Top. vid" className="w-full h-7 px-2 text-xs border border-slate-200 rounded focus:outline-none focus:border-slate-900 tabular-nums" />
                           <input type="number" min="0" value={editAvg} onChange={e => setEditAvg(e.target.value)} placeholder="Dk/vid" className="w-full h-7 px-2 text-xs border border-slate-200 rounded focus:outline-none focus:border-slate-900 tabular-nums" />
                         </div>
+                        <label className="block text-[12px] text-slate-600 mb-2">Oynatma listesi bağlantısı<input type="url" value={editPlaylistURL} onChange={event => setEditPlaylistURL(event.target.value)} placeholder="https://www.youtube.com/playlist?list=…" className="mt-1 w-full h-8 px-2 text-xs border border-slate-200 rounded focus:outline-none focus:border-slate-900" /></label>
                         <div className="flex gap-1">
-                          <button onClick={() => setEditingRes(null)} className="flex-1 h-6 rounded border border-slate-200 text-[10px] font-medium text-slate-500 hover:bg-slate-50">İptal</button>
-                          <button onClick={saveEditResource} className="flex-1 h-6 rounded bg-slate-900 text-white text-[10px] font-medium hover:bg-slate-700">Kaydet</button>
+                          <button disabled={savingResource} onClick={() => setEditingRes(null)} className="flex-1 h-6 rounded border border-slate-200 text-[11px] font-medium text-slate-500 hover:bg-slate-50">İptal</button>
+                          <button disabled={savingResource} onClick={saveEditResource} className="flex-1 h-6 rounded bg-slate-900 text-white text-[11px] font-medium hover:bg-slate-700">{savingResource ? 'Kaydediliyor…' : 'Kaydet'}</button>
                         </div>
                       </div>
                     ) : (
                       <>
-                        <div className="flex items-center justify-between text-[11px] text-slate-400 mt-1.5 ml-4">
+                        <div className="flex items-center justify-between text-[12px] text-slate-400 mt-1.5 ml-4">
                           <span><span className="text-slate-600 font-medium tabular-nums">{watched}</span>/{total} video</span>
                           {done ? <span className="text-emerald-600 font-medium">tamamlandı</span> : <span>kalan <span className="text-slate-600 font-medium tabular-nums">{remaining}</span> · {fmtMinutes(remaining * (res.avg_video_duration || 0))}</span>}
                         </div>
@@ -603,8 +636,8 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
         </div>
 
         {/* RIGHT: Week */}
-        <div className="flex-1 flex flex-col min-h-0 overflow-hidden rounded-xl border border-slate-200 bg-white">
-          <div ref={calendarRef} className="flex-1 flex flex-col min-h-0 overflow-auto bg-white">
+        <div ref={calendarRef} className="flex-1 flex flex-col min-h-0 overflow-hidden rounded-xl border border-slate-200 bg-white">
+          <div className="flex-1 flex flex-col min-h-0 overflow-auto bg-white">
             {/* Headers */}
             <div className="grid grid-cols-7 border-b border-slate-200 sticky top-0 bg-white z-10 shrink-0">
               {days.map(d => {
@@ -617,9 +650,9 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
                 })
                 return (
                   <div key={ds} className={`px-1.5 py-2 text-center border-r border-slate-100 last:border-r-0 ${isT ? 'bg-slate-50' : ''}`} style={isT ? { boxShadow: 'inset 0 -2px 0 0 #0f172a' } : {}}>
-                    <div className={`text-[10px] font-semibold uppercase ${isT ? 'text-slate-900' : 'text-slate-400'}`}>{DOW[(d.getDay() + 6) % 7]}</div>
+                    <div className={`text-[11px] font-semibold uppercase ${isT ? 'text-slate-900' : 'text-slate-400'}`}>{DOW[(d.getDay() + 6) % 7]}</div>
                     <div className={`text-sm font-semibold tabular-nums leading-tight ${isT ? 'text-slate-900' : 'text-slate-700'}`}>{d.getDate()}</div>
-                    <div className="text-[9px] text-slate-400 tabular-nums mt-0.5">{tVid > 0 ? `${tVid}v · ${fmtMinutes(tMin)}` : '—'}</div>
+                    <div className="text-[11px] text-slate-400 tabular-nums mt-0.5">{tVid > 0 ? `${tVid}v · ${fmtMinutes(tMin)}` : '—'}</div>
                   </div>
                 )
               })}
@@ -643,7 +676,7 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
                     onDragLeave={() => setDragOverDate(null)}
                     onDrop={e => { e.preventDefault(); setDragOverDate(null); const src = e.dataTransfer.getData('text/plain'); if (src) handleSwapDays(src, ds) }}
                   >
-                    <div className="absolute top-1 right-1 flex gap-0.5 opacity-0 group-hover/day:opacity-100 transition-opacity z-10">
+                    <div data-print-remove className="absolute top-1 right-1 flex gap-0.5 opacity-0 group-hover/day:opacity-100 transition-opacity z-10">
                       <button onClick={e => handleShiftPlan(e, ds)} title="Bundan sonrasını 1 gün kaydır" className="h-5 w-5 rounded flex items-center justify-center text-slate-300 hover:text-slate-900 hover:bg-white border border-transparent hover:border-slate-200 transition-colors bg-white/70">
                         <SkipForward className="h-2.5 w-2.5" />
                       </button>
@@ -666,18 +699,18 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
                         return (
                           <div key={it.id} onClick={e => e.stopPropagation()} className={`group/item relative rounded-lg border px-1.5 py-1 transition-colors ${done ? 'border-emerald-200 bg-emerald-50/60' : 'border-slate-200 bg-white hover:border-slate-300'}`}>
                             <div className="flex items-center gap-1">
-                              <div className="flex opacity-50 group-hover/item:opacity-100 transition-opacity gap-[1px]">
+                              <div data-print-remove className="flex opacity-50 group-hover/item:opacity-100 transition-opacity gap-[1px]">
                                 {idx > 0 && <button onClick={e => handleReorderItem(e, it, -1)} className="hover:text-slate-900"><ChevronUp className="h-3 w-3" /></button>}
                                 {idx < items.length - 1 && <button onClick={e => handleReorderItem(e, it, 1)} className="hover:text-slate-900"><ChevronDown className="h-3 w-3" /></button>}
                               </div>
-                              <span className="text-[9px] font-semibold px-1.5 py-px rounded-full truncate" style={{ background: c.card, color: c.text }}>{cleanName(r?.subject_name || '')}</span>
-                              <button onClick={e => { e.stopPropagation(); handleProgressClick(it, r) }} title={done ? 'Tamamlandı' : `${w}/${it.video_count} izlendi — güncellemek için tıkla`}
+                              <span className="text-[11px] font-semibold px-1.5 py-px rounded-full truncate" style={{ background: c.card, color: c.text }}>{cleanName(r?.subject_name || '')}</span>
+                              <button data-print-keep onClick={e => { e.stopPropagation(); handleProgressClick(it, r) }} title={done ? 'Tamamlandı' : `${w}/${it.video_count} izlendi — güncellemek için tıkla`}
                                 className={`ml-auto h-[18px] w-[18px] rounded-[5px] shrink-0 flex items-center justify-center transition-colors ${done ? 'bg-emerald-500 text-white' : 'border border-slate-200 text-slate-300 hover:border-emerald-400 hover:text-emerald-400'}`}>
                                 <Check className="h-2.5 w-2.5" strokeWidth={3} />
                               </button>
                             </div>
-                            <div className={`text-[11px] font-medium truncate mt-1 ${done ? 'line-through text-slate-400' : 'text-slate-800'}`}>{cleanName(r?.name || '?')} · {it.video_count}v</div>
-                            <div className="text-[10px] text-slate-400 tabular-nums">{fmtMinutes(itemMin)}{done ? ' · izlendi' : partial ? ` · ${w}/${it.video_count}` : ''}</div>
+                            <div className={`text-[12px] font-medium truncate mt-1 ${done ? 'line-through text-slate-400' : 'text-slate-800'}`}>{cleanName(r?.name || '?')} · {it.video_count}v</div>
+                            <div className="text-[11px] text-slate-400 tabular-nums">{fmtMinutes(itemMin)}{done ? ' · izlendi' : partial ? ` · ${w}/${it.video_count}` : ''}</div>
                             {partial && (
                               <div className="h-[2px] rounded-full bg-slate-100 mt-1 overflow-hidden">
                                 <div className="h-full bg-emerald-400 rounded-full" style={{ width: `${(w / it.video_count) * 100}%` }}></div>
@@ -691,12 +724,12 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
                       })}
                     </div>
                     {items.length > 0 && hasUnwatched && (
-                      <button onClick={e => handleMarkDayWatched(e, items)} className="mt-1 w-full py-1 rounded-md text-[10px] font-semibold text-emerald-600 hover:bg-emerald-50 opacity-0 group-hover/day:opacity-100 transition-all flex items-center justify-center gap-1">
+                      <button onClick={e => handleMarkDayWatched(e, items)} className="mt-1 w-full py-1 rounded-md text-[11px] font-semibold text-emerald-600 hover:bg-emerald-50 opacity-0 group-hover/day:opacity-100 transition-all flex items-center justify-center gap-1">
                         <Check className="h-2.5 w-2.5" strokeWidth={3} /> Tümünü izlendi say
                       </button>
                     )}
                     {items.length === 0 && (
-                      <div className="h-full min-h-[60px] flex items-center justify-center opacity-0 group-hover/day:opacity-100 transition-opacity">
+                      <div data-print-remove className="h-full min-h-[60px] flex items-center justify-center opacity-0 group-hover/day:opacity-100 transition-opacity">
                         <span className="h-5 w-5 rounded border border-dashed border-slate-300 flex items-center justify-center text-slate-300">
                           <Plus className="h-3 w-3" strokeWidth={2.5} />
                         </span>
@@ -709,7 +742,7 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
           </div>
           <div className="px-3 py-2 border-t border-slate-200 flex items-center justify-between gap-3 shrink-0 text-xs text-slate-500">
             <span>Haftalık toplam: <span className="font-semibold text-slate-900 tabular-nums">{tVidAll} video</span> · <span className="font-semibold text-slate-900 tabular-nums">{fmtMinutes(tMinAll)}</span> — izlenen <span className="font-semibold text-slate-900 tabular-nums">{tWatchedAll}</span></span>
-            <span className="hidden sm:flex items-center gap-3 text-[11px] text-slate-400">
+            <span className="hidden sm:flex items-center gap-3 text-[12px] text-slate-400">
               <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> tamamlandı</span>
               <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-300"></span> kısmi</span>
               <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-slate-300"></span> planlandı</span>

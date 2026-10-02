@@ -1,10 +1,13 @@
+import './SuitePages.css'
+import './Results.css'
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
-import { Plus, Trash2, TrendingUp, Calendar, Award, List, X, Edit3, Eye } from 'lucide-react'
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts'
+import { Plus, Trash2, Calendar, Award, List, X, Edit3, Eye } from 'lucide-react'
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ReferenceLine, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts'
 import Swal from 'sweetalert2'
 import CustomSelect from '../components/CustomSelect'
 import { useAdminStore } from '../lib/adminStore'
+import { examTrend, questionComparison } from '../lib/examAnalytics'
 
 interface Exam { id: string; name: string; color: string; wrong_penalty: number | null; point_per_net: number }
 interface QuestionType { id: string; exam_id: string; name: string; sort_order: number; question_count: number }
@@ -26,6 +29,13 @@ export default function Results() {
   const { impersonatedUserId } = useAdminStore()
 
   // Yeni Sonuç Form State
+  const [formStep, setFormStep] = useState(0)
+  const [formError, setFormError] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [metric, setMetric] = useState<'net' | 'points'>('net')
+  const [chartRange, setChartRange] = useState<'10' | 'all'>('10')
+  const [chartQuestion, setChartQuestion] = useState('')
+  const [focusedResult, setFocusedResult] = useState<string | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [formTitle, setFormTitle] = useState('')
   const [formDate, setFormDate] = useState(new Date().toISOString().split('T')[0])
@@ -57,6 +67,8 @@ export default function Results() {
   }, [impersonatedUserId])
 
   const handleExamChange = (examId: string) => {
+    setFormStep(0)
+    setFormError('')
     setFormExamId(examId)
     const types = questionTypes.filter(q => q.exam_id === examId)
     const initialScores: Record<string, { correct: number | '', incorrect: number | '' }> = {}
@@ -64,54 +76,61 @@ export default function Results() {
     setFormScores(initialScores)
   }
 
+  const formTypes = questionTypes.filter(q => q.exam_id === formExamId)
+  const currentType = formTypes[formStep - 1]
+  const validateType = (type: QuestionType) => {
+    const score = formScores[type.id]
+    if (!score || score.correct === '' || score.incorrect === '') return 'Doğru ve yanlış sayısını girin. Yoksa 0 yazın.'
+    if (![score.correct, score.incorrect].every(n => Number.isInteger(n) && n >= 0)) return 'Sayılar sıfır veya pozitif tam sayı olmalı.'
+    if (type.question_count > 0 && Number(score.correct) + Number(score.incorrect) > type.question_count) return `Toplam ${type.question_count} soruyu geçemez.`
+    return ''
+  }
+  const nextStep = () => {
+    const error = formStep === 0 ? (!formTitle.trim() || !formDate || !formExamId ? 'Deneme adını, sınavı ve tarihi girin.' : !formTypes.length ? 'Bu sınav için Ayarlar’dan soru türü ekleyin.' : '') : currentType ? validateType(currentType) : ''
+    setFormError(error)
+    if (!error) setFormStep(step => step + 1)
+  }
+
   const saveResult = async (saveAsDraft: boolean = false) => {
-    if (!userId || !formExamId || !formTitle.trim()) return
-
-    let resData: ExamResult | null = null
-
-    if (editingResultId) {
-      const { data } = await supabase.from('exam_results').update({
-        title: formTitle.trim(), date: formDate, is_draft: saveAsDraft
-      }).eq('id', editingResultId).select().single()
-      resData = data
-    } else {
-      const { data } = await supabase.from('exam_results').insert({
-        user_id: userId, exam_id: formExamId, title: formTitle.trim(), date: formDate, is_draft: saveAsDraft
-      }).select().single()
-      resData = data
-    }
-
-    if (resData) {
-      if (editingResultId) {
-        await supabase.from('exam_result_details').delete().eq('result_id', resData.id)
-        setDetails(prev => prev.filter(d => d.result_id !== resData!.id))
+    if (saving || !userId || !formExamId || !formTitle.trim() || !formDate) return
+    const errors = formTypes.map(type => {
+      const score = formScores[type.id]
+      if (saveAsDraft && (!score || score.correct === '' || score.incorrect === '')) {
+        const c = Number(score?.correct || 0), w = Number(score?.incorrect || 0)
+        return ![c, w].every(n => Number.isInteger(n) && n >= 0) || (type.question_count > 0 && c + w > type.question_count) ? 'Soru sayılarını kontrol edin.' : ''
       }
-
-      const detailsToInsert = Object.entries(formScores).map(([qtId, scores]) => ({
-        user_id: userId, result_id: resData!.id, question_type_id: qtId,
-        correct_count: scores.correct === '' ? 0 : Number(scores.correct),
-        incorrect_count: scores.incorrect === '' ? 0 : Number(scores.incorrect)
+      return validateType(type)
+    })
+    const error = errors.find(Boolean)
+    if (error) { setFormError(error); return }
+    setSaving(true); setFormError('')
+    try {
+      const resultId = editingResultId || crypto.randomUUID()
+      const response = editingResultId
+        ? await supabase.from('exam_results').update({ title: formTitle.trim(), date: formDate }).eq('id', resultId).select().single()
+        : await supabase.from('exam_results').insert({ id: resultId, user_id: userId, exam_id: formExamId, title: formTitle.trim(), date: formDate, is_draft: true }).select().single()
+      if (response.error) throw response.error
+      setEditingResultId(resultId)
+      setResults(prev => [response.data, ...prev.filter(r => r.id !== resultId)])
+      // Reuse detail IDs so edits never delete the previous answers first.
+      const rows = formTypes.map(type => ({
+        id: details.find(d => d.result_id === resultId && d.question_type_id === type.id)?.id || crypto.randomUUID(),
+        user_id: userId, result_id: resultId, question_type_id: type.id,
+        correct_count: Number(formScores[type.id]?.correct || 0), incorrect_count: Number(formScores[type.id]?.incorrect || 0),
       }))
-
-      if (detailsToInsert.length > 0) {
-        const { data: detData } = await supabase.from('exam_result_details').insert(detailsToInsert).select()
-        if (detData) setDetails(prev => [...prev, ...detData])
+      if (rows.length) {
+        const saved = await supabase.from('exam_result_details').upsert(rows, { onConflict: 'id' }).select()
+        if (saved.error) throw saved.error
+        setDetails(prev => [...prev.filter(d => !rows.some(row => row.id === d.id)), ...saved.data])
       }
-
-      if (editingResultId) {
-        const updatedRes = resData
-        setResults(prev => prev.map(r => r.id === updatedRes.id ? updatedRes : r).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()))
-      } else {
-        const insertedRes = resData
-        setResults(prev => [insertedRes, ...prev].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()))
-      }
-
-      setShowForm(false)
-      setFormTitle('')
-      setFormScores({})
-      setEditingResultId(null)
-      Swal.fire({ title: 'Başarılı!', text: saveAsDraft ? 'Taslak kaydedildi.' : 'Sınav sonucu eklendi.', icon: 'success', toast: true, position: 'top-end', showConfirmButton: false, timer: 1500 })
-    }
+      const finalized = await supabase.from('exam_results').update({ is_draft: saveAsDraft }).eq('id', resultId).select().single()
+      if (finalized.error) throw finalized.error
+      setResults(prev => [finalized.data, ...prev.filter(r => r.id !== resultId)].sort((a, b) => b.date.localeCompare(a.date)))
+      setShowForm(false); setFormTitle(''); setFormScores({}); setEditingResultId(null); setFormStep(0)
+      void Swal.fire({ title: saveAsDraft ? 'Taslak kaydedildi' : 'Deneme kaydedildi', icon: 'success', toast: true, position: 'top-end', showConfirmButton: false, timer: 1500 })
+    } catch (e) {
+      setFormError(`Kaydedilemedi: ${e && typeof e === 'object' && 'message' in e ? String(e.message) : 'Tekrar deneyin.'}`)
+    } finally { setSaving(false) }
   }
 
   const resumeDraft = (result: ExamResult) => {
@@ -132,6 +151,8 @@ export default function Results() {
       }
     })
     setFormScores(scores)
+    setFormStep(0)
+    setFormError('')
     setShowForm(true)
   }
 
@@ -160,14 +181,16 @@ export default function Results() {
     return { net: Math.max(0, parseFloat(net.toFixed(2))), points: Math.max(0, parseFloat(points.toFixed(2))), totalCorrect: correct, totalIncorrect: incorrect }
   }
 
-  const chartData = useMemo(() => {
-    if (!selectedExamId) return []
-    const examResults = results.filter(r => r.exam_id === selectedExamId && !r.is_draft).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-    return examResults.map(r => {
-      const stats = calculateScore(selectedExamId, r.id)
-      return { name: r.title, date: new Date(r.date).toLocaleDateString('tr-TR'), net: stats.net, points: stats.points }
-    })
-  }, [results, details, selectedExamId, exams])
+  const selectedExam = exams.find(e => e.id === selectedExamId)
+  const chartData = useMemo(() => examTrend(results, details, selectedExam, chartQuestion), [results, details, selectedExam, chartQuestion])
+  const displayedChart = chartRange === '10' ? chartData.slice(-10) : chartData
+  const measured = displayedChart.filter(row => row[metric] !== null)
+  const average = measured.length ? measured.reduce((sum, row) => sum + row[metric]!, 0) / measured.length : 0
+  const latest = measured.at(-1), previous = measured.at(-2)
+  const focused = displayedChart.find(row => row.id === focusedResult) || latest
+  const changes = useMemo(() => questionComparison(results, details, selectedExam, questionTypes), [results, details, selectedExam, questionTypes])
+  const formatNumber = (value: number | null | undefined) => value == null ? '—' : value.toLocaleString('tr-TR', { maximumFractionDigits: 2 })
+  const chartDate = (value: string) => new Date(`${value}T00:00:00`).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' })
 
   const activeDrafts = useMemo(() => {
     const oneDayAgo = new Date().getTime() - 24 * 60 * 60 * 1000
@@ -178,192 +201,76 @@ export default function Results() {
     return results.filter(r => !r.is_draft)
   }, [results])
 
-  const comparisonData = useMemo(() => {
-    if (!selectedExamId) return null
-    const examResults = results.filter(r => r.exam_id === selectedExamId && !r.is_draft).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-    if (examResults.length < 2) return null
 
-    const latest = examResults[0]
-    const previous = examResults[1]
-
-    const latestStats = calculateScore(selectedExamId, latest.id)
-    const previousStats = calculateScore(selectedExamId, previous.id)
-
-    const latestDetails = details.filter(d => d.result_id === latest.id)
-    const previousDetails = details.filter(d => d.result_id === previous.id)
-
-    const diffs = questionTypes.filter(q => q.exam_id === selectedExamId).map(qt => {
-      const latDet = latestDetails.find(d => d.question_type_id === qt.id)
-      const prevDet = previousDetails.find(d => d.question_type_id === qt.id)
-
-      const latC = latDet ? latDet.correct_count : 0
-      const latI = latDet ? latDet.incorrect_count : 0
-      const prevC = prevDet ? prevDet.correct_count : 0
-      const prevI = prevDet ? prevDet.incorrect_count : 0
-
-      const exam = exams.find(e => e.id === selectedExamId)
-      let latNet = latC
-      let prevNet = prevC
-      if (exam && exam.wrong_penalty && exam.wrong_penalty > 0) {
-        latNet = latC - (latI / exam.wrong_penalty)
-        prevNet = prevC - (prevI / exam.wrong_penalty)
-      }
-      const netDiff = latNet - prevNet
-
-      return {
-        name: qt.name,
-        latestCorrect: latC,
-        latestIncorrect: latI,
-        previousCorrect: prevC,
-        previousIncorrect: prevI,
-        netDiff: parseFloat(netDiff.toFixed(2)),
-      }
-    })
-
-    return {
-      latestTitle: latest.title,
-      previousTitle: previous.title,
-      latestNet: latestStats.net,
-      previousNet: previousStats.net,
-      latestPoints: latestStats.points,
-      previousPoints: previousStats.points,
-      diffs,
-    }
-  }, [results, details, selectedExamId, exams, questionTypes])
-
-  if (loading) return <div className="h-full flex items-center justify-center text-[#94a3b8]">Yükleniyor...</div>
+  if (loading) return <div className="h-full flex items-center justify-center text-[#718096]">Yükleniyor...</div>
 
   return (
-    <div className="flex flex-col h-full gap-4 pb-4">
+    <div className="suite-page suite-results flex flex-col h-full gap-4 pb-4">
       <div className="flex flex-col md:flex-row md:items-center justify-between shrink-0 gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-[#0f172a] flex items-center gap-2">
-            <Award className="h-6 w-6 text-[#2563eb]" /> Denemeler
+          <p className="suite-eyebrow">GELİŞİMİNİ TAKİP ET</p>
+          <h1 className="text-2xl font-semibold text-[#24354a] flex items-center gap-2">
+            <Award className="h-6 w-6 text-[#4269a8]" /> Denemeler
           </h1>
-          <p className="text-[13px] text-[#64748b] mt-1">Sınav ve deneme sonuçlarını kaydet, gelişimini takip et.</p>
+          <p className="text-[15px] text-[#62748b] mt-1">Sınav ve deneme sonuçlarını kaydet, gelişimini takip et.</p>
         </div>
-        <button onClick={() => setShowForm(!showForm)} className="bg-[#2563eb] hover:bg-blue-600 text-white font-medium text-sm px-4 py-2 rounded-lg transition-all flex items-center gap-2 self-start md:self-auto">
+        <button onClick={() => { setShowForm(!showForm); setFormStep(0); setFormError(''); if (!showForm) { setEditingResultId(null); setFormTitle(''); setFormExamId(''); setFormScores({}) } }} className="bg-[#4269a8] hover:bg-blue-600 text-white font-medium text-sm px-4 py-2 rounded-lg transition-all flex items-center gap-2 self-start md:self-auto">
           {showForm ? <List className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
           {showForm ? 'Listeye Dön' : 'Yeni Sonuç Ekle'}
         </button>
       </div>
 
       {!showForm && (
-        <div className="flex overflow-x-auto gap-2 shrink-0 border-b border-[#e2e8f0] pb-2">
-          <button onClick={() => setTab('list')} className={`px-4 py-2 text-sm font-medium transition-all border-b-2 ${tab === 'list' ? 'border-[#2563eb] text-[#2563eb]' : 'border-transparent text-[#64748b] hover:text-[#0f172a]'}`}>Tüm Sonuçlar</button>
-          <button onClick={() => setTab('stats')} className={`px-4 py-2 text-sm font-medium transition-all border-b-2 ${tab === 'stats' ? 'border-[#2563eb] text-[#2563eb]' : 'border-transparent text-[#64748b] hover:text-[#0f172a]'}`}>Gelişim Grafikleri</button>
+        <div className="flex overflow-x-auto gap-2 shrink-0 border-b border-[#e3e9f0] pb-2">
+          <button onClick={() => setTab('list')} className={`px-4 py-2 text-sm font-medium transition-all border-b-2 ${tab === 'list' ? 'border-[#4269a8] text-[#4269a8]' : 'border-transparent text-[#62748b] hover:text-[#24354a]'}`}>Tüm Sonuçlar</button>
+          <button onClick={() => setTab('stats')} className={`px-4 py-2 text-sm font-medium transition-all border-b-2 ${tab === 'stats' ? 'border-[#4269a8] text-[#4269a8]' : 'border-transparent text-[#62748b] hover:text-[#24354a]'}`}>Gelişim Grafikleri</button>
         </div>
       )}
 
       <div className="flex-1 min-h-0 overflow-y-auto">
         {showForm ? (
-          <div className="max-w-2xl mx-auto bg-white rounded-xl border border-[#e2e8f0] p-6 shadow-sm mt-4">
-            <h2 className="text-lg font-bold text-[#0f172a] mb-4">Yeni Deneme Ekle</h2>
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs font-semibold text-[#64748b] uppercase">Sınav</label>
-                  <CustomSelect
-                    value={formExamId}
-                    onChange={handleExamChange}
-                    options={exams.map(e => ({ value: e.id, label: e.name }))}
-                    placeholder="Sınav Seçin..."
-                    className="mt-1"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-[#64748b] uppercase">Tarih</label>
-                  <input type="date" value={formDate} onChange={e => setFormDate(e.target.value)} className="mt-1 w-full rounded-lg border border-[#e2e8f0] px-3 py-2 text-sm focus:border-[#2563eb] outline-none" />
-                </div>
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-[#64748b] uppercase">Deneme Adı / Başlığı</label>
-                <input type="text" placeholder="Örn: 2024 YDS İlkbahar, Pegem 3. Deneme" value={formTitle} onChange={e => setFormTitle(e.target.value)} className="mt-1 w-full rounded-lg border border-[#e2e8f0] px-3 py-2 text-sm focus:border-[#2563eb] outline-none" />
-              </div>
-
-              {formExamId && questionTypes.filter(q => q.exam_id === formExamId).length > 0 ? (
-                <div className="border-t border-[#e2e8f0] pt-4 mt-2">
-                  <h3 className="text-sm font-bold text-[#0f172a] mb-3">Soru Türlerine Göre Doğru/Yanlış</h3>
-                  <div className="space-y-3">
-                    {questionTypes.filter(q => q.exam_id === formExamId).map(qt => (
-                      <div key={qt.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-[#f8fafc] rounded-xl border border-[#e2e8f0]">
-                        <div className="flex flex-col text-left">
-                          <span className="text-sm font-bold text-[#0f172a]">{qt.name}</span>
-                          {qt.question_count > 0 && (
-                            <span className="text-[11px] text-gray-400">{qt.question_count} Soru</span>
-                          )}
-                        </div>
-                        <div className="grid grid-cols-2 sm:flex sm:items-center gap-3">
-                          <div className="flex flex-col items-center gap-1.5">
-                            <span className="text-[11px] font-bold text-emerald-600 uppercase tracking-wide">Doğru</span>
-                            <input type="number" min="0" value={formScores[qt.id]?.correct} onChange={e => {
-                              const val = e.target.value === '' ? '' : parseInt(e.target.value);
-                              setFormScores(p => ({...p, [qt.id]: { ...p[qt.id], correct: val }}));
-                            }} className="w-full sm:w-20 h-11 rounded-xl border-2 border-emerald-200 px-3 text-center text-lg font-bold outline-none focus:border-emerald-500 bg-white" />
-                          </div>
-                          <div className="flex flex-col items-center gap-1.5">
-                            <span className="text-[11px] font-bold text-red-500 uppercase tracking-wide">Yanlış</span>
-                            <input type="number" min="0" value={formScores[qt.id]?.incorrect} onChange={e => {
-                              const val = e.target.value === '' ? '' : parseInt(e.target.value);
-                              setFormScores(p => ({...p, [qt.id]: { ...p[qt.id], incorrect: val }}));
-                            }} className="w-full sm:w-20 h-11 rounded-xl border-2 border-red-200 px-3 text-center text-lg font-bold outline-none focus:border-red-500 bg-white" />
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : formExamId ? (
-                <div className="p-4 bg-orange-50 border border-orange-200 rounded-lg text-sm text-orange-700">
-                  Bu sınav için henüz soru türü tanımlanmamış. Önce "Ayarlar -&gt; Sınav Ayarları" menüsünden soru türlerini (Örn: Paragraf, Matematik) eklemelisiniz.
-                </div>
-              ) : null}
-
-              <div className="grid grid-cols-2 gap-3 mt-4">
-                <button 
-                  onClick={() => saveResult(true)} 
-                  disabled={!formTitle || !formExamId} 
-                  className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 rounded-xl transition-all disabled:opacity-50 cursor-pointer text-sm"
-                >
-                  Taslak Olarak Kaydet
-                </button>
-                <button 
-                  onClick={() => saveResult(false)} 
-                  disabled={!formTitle || !formExamId} 
-                  className="bg-[#2563eb] hover:bg-blue-600 text-white font-bold py-3 rounded-xl transition-all disabled:opacity-50 cursor-pointer text-sm"
-                >
-                  Kaydet ve Tamamla
-                </button>
-              </div>
-            </div>
-          </div>
+          <form className="result-wizard" onSubmit={event => { event.preventDefault(); if (formStep <= formTypes.length) nextStep(); else void saveResult(false) }}>
+            <div className="result-wizard-head"><h2>{editingResultId ? 'Denemeyi düzenle' : 'Yeni deneme'}</h2><span>{formStep === 0 ? 'Deneme bilgileri' : formStep <= formTypes.length ? `${formStep} / ${formTypes.length}` : 'Özet'}</span></div>
+            <div className="result-step-track"><span style={{ width: `${(formStep + 1) / (formTypes.length + 2) * 100}%` }} /></div>
+            {formStep === 0 ? <div className="result-fields">
+              <label>Sınav<CustomSelect disabled={!!editingResultId || saving} value={formExamId} onChange={handleExamChange} options={exams.map(e => ({ value: e.id, label: e.name }))} placeholder="Sınav seç" /></label>
+              <label>Tarih<input type="date" required value={formDate} onChange={e => setFormDate(e.target.value)} /></label>
+              <label className="result-wide">Deneme adı<input required value={formTitle} placeholder="Örn. Pegem 3. Deneme" onChange={e => setFormTitle(e.target.value)} /></label>
+            </div> : currentType ? <div key={currentType.id} className="result-question">
+              <h3>{currentType.name}</h3><p>{currentType.question_count > 0 ? `${currentType.question_count} soru` : 'Soru sayısı tanımlanmamış'}</p>
+              <div className="result-fields">{(['correct', 'incorrect'] as const).map((field, i) => <label key={field} className={i === 0 ? 'result-correct' : 'result-incorrect'}>{i === 0 ? 'Doğru' : 'Yanlış'}<input autoFocus={i === 0} type="number" inputMode="numeric" min="0" step="1" max={currentType.question_count || undefined} value={formScores[currentType.id]?.[field] ?? ''} onChange={e => { setFormError(''); setFormScores(p => ({ ...p, [currentType.id]: { correct: p[currentType.id]?.correct ?? '', incorrect: p[currentType.id]?.incorrect ?? '', [field]: e.target.value === '' ? '' : Number(e.target.value) } })) }} /></label>)}</div>
+              {currentType.question_count > 0 && <p>Boş: {Math.max(0, currentType.question_count - Number(formScores[currentType.id]?.correct || 0) - Number(formScores[currentType.id]?.incorrect || 0))}</p>}
+            </div> : <div className="result-review"><h3>{formTitle}</h3>{formTypes.map((type, i) => <button type="button" key={type.id} onClick={() => setFormStep(i + 1)}><span>{type.name}</span><strong>{formScores[type.id]?.correct || 0} D · {formScores[type.id]?.incorrect || 0} Y</strong></button>)}</div>}
+            {formError && <p className="result-error" role="alert">{formError}</p>}
+            <fieldset disabled={saving} className="result-wizard-actions"><button type="button" disabled={formStep === 0} onClick={() => { setFormStep(step => step - 1); setFormError('') }}>Geri</button><button type="button" disabled={!formTitle.trim() || !formExamId || !formDate} onClick={() => void saveResult(true)}>Taslak</button><button type="submit" className="result-primary">{saving ? 'Kaydediliyor…' : formStep > formTypes.length ? 'Kaydet' : 'Devam'}</button></fieldset>
+          </form>
         ) : tab === 'list' ? (
           <div className="space-y-6">
             {activeDrafts.length > 0 && (
               <div className="space-y-2">
-                <h3 className="text-xs font-bold text-orange-600 uppercase tracking-wider flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-orange-500 animate-pulse" />
+                <h3 className="text-[13px] font-semibold text-orange-600 uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-[#f5f7fa]0 animate-pulse" />
                   Yarım Kalan Taslaklar (Son 24 Saat)
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {activeDrafts.map(r => {
                     const exam = exams.find(e => e.id === r.exam_id)
                     return (
-                      <div key={r.id} className="bg-orange-50/40 border border-orange-100 rounded-xl p-4 flex flex-col justify-between hover:shadow-md transition-all relative group min-h-[140px]">
+                      <div key={r.id} className="bg-[#f5f7fa]/40 border border-orange-100 rounded-xl p-4 flex flex-col justify-between hover:shadow-sm transition-all relative group min-h-[140px]">
                         <div>
                           <div className="flex justify-between items-start mb-2">
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: exam?.color || '#cbd5e1' }}>
+                            <span className="text-[12px] font-semibold px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: exam?.color || '#cbd5e1' }}>
                               {exam?.name || 'Bilinmeyen Sınav'}
                             </span>
                             <button onClick={() => deleteResult(r.id)} className="opacity-0 group-hover:opacity-100 text-red-400 hover:bg-red-50 p-1.5 rounded transition-all cursor-pointer">
                               <Trash2 className="h-4 w-4" />
                             </button>
                           </div>
-                          <h3 className="text-[14px] font-bold text-[#0f172a] line-clamp-2">{r.title}</h3>
+                          <h3 className="text-[14px] font-semibold text-[#24354a] line-clamp-2">{r.title}</h3>
                         </div>
                         <button 
                           onClick={() => resumeDraft(r)}
-                          className="mt-4 w-full py-2 text-xs font-bold text-orange-700 bg-orange-100 hover:bg-orange-200 rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer"
+                          className="mt-4 w-full py-2 text-[13px] font-semibold text-[#526a87] bg-orange-100 hover:bg-orange-200 rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer"
                         >
                           <Edit3 className="h-3.5 w-3.5" /> Doldurmaya Devam Et
                         </button>
@@ -376,13 +283,13 @@ export default function Results() {
 
             <div className="space-y-2">
               {activeDrafts.length > 0 && (
-                <h3 className="text-xs font-bold text-[#64748b] uppercase tracking-wider">
+                <h3 className="text-[13px] font-semibold text-[#62748b] uppercase tracking-wider">
                   Tamamlanmış Sınavlar
                 </h3>
               )}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {finalizedResults.length === 0 ? (
-                  <div className="col-span-full py-12 text-center text-[#94a3b8] flex flex-col items-center">
+                  <div className="col-span-full py-12 text-center text-[#718096] flex flex-col items-center">
                     <Award className="h-12 w-12 opacity-20 mb-3" />
                     <p>Henüz tamamlanmış sınav sonucu bulunmuyor.</p>
                   </div>
@@ -391,12 +298,12 @@ export default function Results() {
                     const exam = exams.find(e => e.id === r.exam_id)
                     const stats = calculateScore(r.exam_id, r.id)
                     return (
-                      <div key={r.id} className="bg-white rounded-xl border border-[#e2e8f0] p-4 hover:shadow-md transition-all relative group flex flex-col justify-between min-h-[180px]">
+                      <div key={r.id} className="bg-white rounded-2xl border border-[#e3e9f0] p-4 hover:shadow-sm transition-all relative group flex flex-col justify-between min-h-[180px]">
                         <div>
                           <div className="flex justify-between items-start mb-2">
                             <div>
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: exam?.color || '#cbd5e1' }}>{exam?.name || 'Bilinmeyen Sınav'}</span>
-                              <h3 className="text-[14px] font-bold text-[#0f172a] mt-2 line-clamp-2">{r.title}</h3>
+                              <span className="text-[12px] font-semibold px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: exam?.color || '#cbd5e1' }}>{exam?.name || 'Bilinmeyen Sınav'}</span>
+                              <h3 className="text-[14px] font-semibold text-[#24354a] mt-2 line-clamp-2">{r.title}</h3>
                             </div>
                             <div className="flex items-center gap-1">
                               <button onClick={() => resumeDraft(r)} className="opacity-0 group-hover:opacity-100 text-blue-500 hover:bg-blue-50 p-1.5 rounded transition-all cursor-pointer mr-1" title="Düzenle">
@@ -407,28 +314,28 @@ export default function Results() {
                               </button>
                             </div>
                           </div>
-                          <div className="flex items-center gap-1 text-[11px] text-[#64748b] mb-4">
+                          <div className="flex items-center gap-1 text-[13px] text-[#62748b] mb-4">
                             <Calendar className="h-3 w-3" /> {new Date(r.date).toLocaleDateString('tr-TR')}
                           </div>
-                          <div className="grid grid-cols-3 gap-2 border-t border-[#e2e8f0] pt-3">
+                          <div className="grid grid-cols-3 gap-2 border-t border-[#e3e9f0] pt-3">
                             <div className="text-center">
-                              <p className="text-[10px] text-[#94a3b8] font-semibold uppercase">Doğru</p>
-                              <p className="text-lg font-bold text-emerald-600">{stats.totalCorrect}</p>
+                              <p className="text-[12px] text-[#718096] font-semibold uppercase">Doğru</p>
+                              <p className="text-lg font-semibold text-emerald-600">{stats.totalCorrect}</p>
                             </div>
                             <div className="text-center">
-                              <p className="text-[10px] text-[#94a3b8] font-semibold uppercase">Yanlış</p>
-                              <p className="text-lg font-bold text-red-500">{stats.totalIncorrect}</p>
+                              <p className="text-[12px] text-[#718096] font-semibold uppercase">Yanlış</p>
+                              <p className="text-lg font-semibold text-red-500">{stats.totalIncorrect}</p>
                             </div>
                             <div className="text-center bg-[#f8fafc] rounded-lg p-1.5 flex flex-col justify-center">
-                              <p className="text-[9px] text-[#64748b] font-bold uppercase mb-0.5">Net & Puan</p>
-                              <p className="text-xs font-semibold text-[#64748b]">{stats.net} Net</p>
-                              <p className="text-sm font-black text-[#2563eb]">{stats.points} Puan</p>
+                              <p className="text-[11px] text-[#62748b] font-semibold uppercase mb-0.5">Net & Puan</p>
+                              <p className="text-[13px] font-semibold text-[#62748b]">{stats.net} Net</p>
+                              <p className="text-sm font-semibold text-[#4269a8]">{stats.points} Puan</p>
                             </div>
                           </div>
                         </div>
                         <button 
                           onClick={() => setSelectedDetailResult(r)}
-                          className="mt-3 w-full py-1.5 text-xs font-bold text-[#2563eb] bg-blue-50 hover:bg-blue-100 rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer"
+                          className="mt-3 w-full py-1.5 text-[13px] font-semibold text-[#4269a8] bg-blue-50 hover:bg-blue-100 rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer"
                         >
                           <Eye className="h-3.5 w-3.5" /> Detayları Göster
                         </button>
@@ -440,115 +347,31 @@ export default function Results() {
             </div>
           </div>
         ) : (
-          <div className="flex flex-col gap-4 mt-2">
-            <div className="bg-white rounded-xl border border-[#e2e8f0] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <label className="text-xs font-semibold text-[#64748b] uppercase">Hangi Sınavın Gelişimini Görmek İstiyorsun?</label>
-              <CustomSelect
-                value={selectedExamId}
-                onChange={setSelectedExamId}
-                options={exams.map(e => ({ value: e.id, label: e.name }))}
-                className="w-full sm:w-[250px]"
-              />
-            </div>
-            
-            {chartData.length < 2 ? (
-              <div className="bg-white rounded-xl border border-[#e2e8f0] p-12 text-center text-[#94a3b8]">
-                <TrendingUp className="h-12 w-12 mx-auto opacity-20 mb-3" />
-                <p>Grafik çizebilmek için bu sınava ait en az 2 deneme sonucu girmelisiniz.</p>
-              </div>
-            ) : (
-              <>
-                {comparisonData && (
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {/* Sol/Orta: Karşılaştırma dairesi */}
-                    <div className="md:col-span-1 bg-white rounded-xl border border-[#e2e8f0] p-5 flex flex-col items-center justify-center relative min-h-[220px]">
-                      <h4 className="text-[11px] font-bold text-[#64748b] uppercase mb-4 tracking-wider">Son İki Deneme Kıyaslama</h4>
-                      <div className="relative flex items-center justify-center">
-                        <div className="w-28 h-28 rounded-full border-[6px] border-[#2563eb] flex flex-col items-center justify-center bg-blue-50/20 shadow-inner">
-                          <span className="text-[9px] font-bold text-[#64748b] uppercase">Son Net</span>
-                          <span className="text-2xl font-black text-[#0f172a]">{comparisonData.latestNet}</span>
-                          <span className="text-[9px] text-[#2563eb] font-bold mt-0.5">{comparisonData.latestPoints} Puan</span>
-                        </div>
-                      </div>
-                      
-                      {/* Sol Alt: Önceki Net */}
-                      <div className="mt-4 flex flex-col items-center">
-                        <span className="text-[9px] font-bold text-[#94a3b8] uppercase tracking-wider">Önceki Net</span>
-                        <div className="flex items-center gap-1.5 mt-0.5">
-                          <span className="text-sm font-bold text-[#64748b]">{comparisonData.previousNet}</span>
-                          <span className="text-[10px] text-gray-400 font-semibold">({comparisonData.previousPoints} Puan)</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Sağ: Soru Tipi Gelişimleri */}
-                    <div className="md:col-span-2 bg-white rounded-xl border border-[#e2e8f0] p-5 flex flex-col justify-between">
-                      <h4 className="text-[11px] font-bold text-[#0f172a] mb-3 uppercase tracking-wider">
-                        Konu Bazlı Net Değişimleri
-                      </h4>
-                      <div className="flex-1 overflow-y-auto space-y-2 max-h-[160px] pr-1">
-                        {comparisonData.diffs.map((diff, idx) => {
-                          const isUp = diff.netDiff > 0
-                          const isDown = diff.netDiff < 0
-                          return (
-                            <div key={idx} className="flex items-center justify-between p-2 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] text-[11px]">
-                              <span className="font-semibold text-[#0f172a]">{diff.name}</span>
-                              <div className="flex items-center gap-3">
-                                <span className="text-[#94a3b8] text-[10px]">
-                                  {diff.previousCorrect}D {diff.previousIncorrect}Y ➜ {diff.latestCorrect}D {diff.latestIncorrect}Y
-                                </span>
-                                {isUp && (
-                                  <span className="px-2 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-700 font-bold flex items-center gap-0.5">
-                                    +{diff.netDiff} Net 📈
-                                  </span>
-                                )}
-                                {isDown && (
-                                  <span className="px-2 py-0.5 rounded bg-red-50 border border-red-200 text-red-700 font-bold flex items-center gap-0.5">
-                                    {diff.netDiff} Net 📉
-                                  </span>
-                                )}
-                                {!isUp && !isDown && (
-                                  <span className="px-2 py-0.5 rounded bg-gray-50 border border-gray-200 text-gray-600 font-semibold">
-                                    Değişim yok
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                <div className="bg-white rounded-xl border border-[#e2e8f0] p-5 h-[320px] flex flex-col">
-                <h3 className="text-sm font-bold text-[#0f172a] mb-6 flex items-center gap-2">
-                  <TrendingUp className="h-4 w-4 text-[#2563eb]" /> Net / Puan Gelişimi
-                </h3>
-                <div className="flex-1 min-h-0">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="colorNet" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#2563eb" stopOpacity={0.3}/>
-                          <stop offset="95%" stopColor="#2563eb" stopOpacity={0}/>
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                      <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} dy={10} />
-                      <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-                      <RechartsTooltip 
-                        contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                        labelStyle={{ fontWeight: 'bold', color: '#0f172a', marginBottom: '4px' }}
-                      />
-                      <Area type="monotone" name="Net" dataKey="net" stroke="#2563eb" strokeWidth={3} fillOpacity={1} fill="url(#colorNet)" activeDot={{ r: 6, fill: '#2563eb', stroke: '#fff', strokeWidth: 2 }} />
-                      <Area type="monotone" name="Puan" dataKey="points" stroke="#8b5cf6" strokeWidth={3} fillOpacity={0} activeDot={{ r: 6, fill: '#8b5cf6', stroke: '#fff', strokeWidth: 2 }} />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-            </>
-          )}
+          <div className="result-analysis">
+            <div className="result-analysis-toolbar"><label>Sınav<CustomSelect value={selectedExamId} onChange={value => { setSelectedExamId(value); setChartQuestion(''); setFocusedResult(null) }} options={exams.map(e => ({ value: e.id, label: e.name }))} /></label><label>Soru türü<CustomSelect value={chartQuestion} onChange={value => { setChartQuestion(value); setFocusedResult(null) }} options={[{ value: '', label: 'Tüm soru türleri' }, ...questionTypes.filter(q => q.exam_id === selectedExamId).map(q => ({ value: q.id, label: q.name }))]} /></label><div className="result-chart-toggle" aria-label="Grafik ölçüsü">{(['net', 'points'] as const).map(value => <button key={value} aria-pressed={metric === value} onClick={() => setMetric(value)}>{value === 'net' ? 'Net' : 'Puan'}</button>)}</div></div>
+            {chartData.length === 0 ? <p className="result-empty">Bu sınav için henüz deneme sonucu yok.</p> : <>
+              <div className="result-kpis">{[
+                ['Son sonuç', formatNumber(latest?.[metric])],
+                ['Ortalama', measured.length ? formatNumber(average) : '—'],
+                ['En iyi', measured.length ? formatNumber(Math.max(...measured.map(r => r[metric]!))) : '—'],
+                ['Son değişim', latest && previous ? (latest[metric]! - previous[metric]! > 0 ? '+' : '') + formatNumber(latest[metric]! - previous[metric]!) : '—'],
+              ].map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>
+              <section className="result-chart result-history-chart">
+                <div className="result-chart-heading"><div><h3>{metric === 'net' ? 'Net gelişimi' : 'Puan gelişimi'}</h3><p>{chartQuestion ? questionTypes.find(q => q.id === chartQuestion)?.name : selectedExam?.name} · {measured.length} sonuç</p></div><div className="result-chart-toggle" aria-label="Grafik aralığı"><button aria-pressed={chartRange === '10'} onClick={() => setChartRange('10')}>Son 10</button><button aria-pressed={chartRange === 'all'} onClick={() => setChartRange('all')}>Tümü</button></div></div>
+                <div className="result-chart-legend"><span><i />{metric === 'net' ? 'Net' : 'Puan'}</span><span><i className="is-average" />Ortalama {formatNumber(average)}</span></div>
+                {measured.length === 0 ? <p className="result-empty">Bu soru türüne ait kayıt yok.</p> : <div className="result-history-canvas"><ResponsiveContainer width="100%" height="100%"><AreaChart data={displayedChart} margin={{ top: 18, right: 16, left: -14, bottom: 2 }} onClick={event => { const index = event?.activeTooltipIndex; if (index != null) { const row = displayedChart[Number(index)]; if (row) setFocusedResult(row.id) } }}>
+                  <defs><linearGradient id="exam-history-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#6a8cbf" stopOpacity={.25} /><stop offset="100%" stopColor="#6a8cbf" stopOpacity={.02} /></linearGradient></defs>
+                  <CartesianGrid vertical={false} stroke="#edf1f6" strokeDasharray="3 4" />
+                  <XAxis dataKey="order" tick={{ fontSize: 12, fill: '#62748b' }} axisLine={false} tickLine={false} minTickGap={22} tickFormatter={n => `${n}.`} />
+                  <YAxis width={48} domain={['auto', 'auto']} tick={{ fontSize: 12, fill: '#62748b' }} tickFormatter={n => formatNumber(n)} axisLine={false} tickLine={false} />
+                  <ReferenceLine y={average} stroke="#9baabd" strokeDasharray="5 5" />
+                  <RechartsTooltip cursor={{ stroke: '#c6d4e7', strokeDasharray: '3 4' }} content={({ active, payload }) => { const row = payload?.[0]?.payload; if (!active || !row) return null; return <div className="result-history-tooltip"><strong>{row.name}</strong><span>{chartDate(row.date)}</span><b>{formatNumber(row[metric])} {metric === 'net' ? 'net' : 'puan'}</b><small>{row.correct} doğru · {row.incorrect} yanlış</small></div> }} />
+                  <Area type="linear" dataKey={metric} connectNulls={false} stroke="#4269a8" fill="url(#exam-history-fill)" strokeWidth={2.5} dot={displayedChart.length <= 30 ? { r: 4, fill: '#fff', stroke: '#4269a8', strokeWidth: 2 } : false} activeDot={{ r: 6, fill: '#4269a8', stroke: '#fff', strokeWidth: 3 }} />
+                </AreaChart></ResponsiveContainer></div>}
+                {focused && <div className="result-focused" aria-live="polite"><div><strong>{focused.name}</strong><span>{chartDate(focused.date)} · {focused.order}. deneme</span></div><div><span className="result-up">{focused.correct} doğru</span><span className="result-down">{focused.incorrect} yanlış</span><strong>{formatNumber(focused[metric])} {metric === 'net' ? 'net' : 'puan'}</strong><button onClick={() => setSelectedDetailResult(results.find(r => r.id === focused.id) || null)}>Detay</button></div></div>}
+              </section>
+              {changes.length > 0 && <section className="result-question-chart"><div className="result-chart-heading"><div><h3>Son deneme · soru türleri</h3><p>{chartData.at(-1)?.name}</p></div><div className="result-answer-legend"><span className="result-up">Doğru</span><span className="result-down">Yanlış</span></div></div><div className="result-question-grid">{changes.map(row => { const answered = (row.correct || 0) + (row.incorrect || 0); return <article key={row.id}><div className="result-question-label"><strong>{row.name}</strong><span>{formatNumber(row.latestNet)} net</span></div>{row.latestNet === null ? <p className="result-no-answer">Kayıt yok</p> : <><div className="result-answer-bar"><i style={{ width: `${answered ? (row.correct || 0) / answered * 100 : 0}%` }} /><i style={{ width: `${answered ? (row.incorrect || 0) / answered * 100 : 0}%` }} /></div><div className="result-answer-counts"><span>{row.correct} D · {row.incorrect} Y</span><span className={row.change !== null && row.change < 0 ? 'result-down' : 'result-up'}>{row.change === null ? 'Önceki kayıt yok' : `${row.change > 0 ? '+' : ''}${formatNumber(row.change)} net`}</span></div><small>Önceki: {formatNumber(row.previousNet)} net</small></>}</article> })}</div></section>}
+            </>}
           </div>
         )}
       {/* Details Modal */}
@@ -559,17 +382,17 @@ export default function Results() {
         
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-            <div className="bg-white rounded-2xl border border-[#e2e8f0] shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="bg-white rounded-2xl border border-[#e3e9f0] shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
               {/* Header */}
-              <div className="p-5 border-b border-[#e2e8f0] flex justify-between items-center bg-[#f8fafc]">
+              <div className="p-5 border-b border-[#e3e9f0] flex justify-between items-center bg-[#f8fafc]">
                 <div>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: exam?.color || '#cbd5e1' }}>
+                  <span className="text-[12px] font-semibold px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: exam?.color || '#cbd5e1' }}>
                     {exam?.name}
                   </span>
-                  <h3 className="text-md font-bold text-[#0f172a] mt-1">{selectedDetailResult.title}</h3>
-                  <p className="text-xs text-[#94a3b8]">{new Date(selectedDetailResult.date).toLocaleDateString('tr-TR')}</p>
+                  <h3 className="text-md font-semibold text-[#24354a] mt-1">{selectedDetailResult.title}</h3>
+                  <p className="text-[13px] text-[#718096]">{new Date(selectedDetailResult.date).toLocaleDateString('tr-TR')}</p>
                 </div>
-                <button onClick={() => setSelectedDetailResult(null)} className="h-8 w-8 flex items-center justify-center rounded-lg border border-[#e2e8f0] hover:bg-[#f1f5f9] text-[#64748b] transition-all cursor-pointer">
+                <button onClick={() => setSelectedDetailResult(null)} className="h-8 w-8 flex items-center justify-center rounded-lg border border-[#e3e9f0] hover:bg-[#f1f5f9] text-[#62748b] transition-all cursor-pointer">
                   <X className="h-4 w-4" />
                 </button>
               </div>
@@ -577,24 +400,24 @@ export default function Results() {
               {/* Body */}
               <div className="p-5 flex-1 overflow-y-auto space-y-4">
                 {/* Stats Summary */}
-                <div className="grid grid-cols-3 gap-3 p-3 bg-[#f8fafc] rounded-xl border border-[#e2e8f0]">
+                <div className="grid grid-cols-3 gap-3 p-3 bg-[#f8fafc] rounded-2xl border border-[#e3e9f0]">
                   <div className="text-center">
-                    <p className="text-[9px] text-[#94a3b8] font-bold uppercase">Doğru</p>
-                    <p className="text-lg font-black text-emerald-600">{stats.totalCorrect}</p>
+                    <p className="text-[11px] text-[#718096] font-semibold uppercase">Doğru</p>
+                    <p className="text-lg font-semibold text-emerald-600">{stats.totalCorrect}</p>
                   </div>
                   <div className="text-center">
-                    <p className="text-[9px] text-[#94a3b8] font-bold uppercase">Yanlış</p>
-                    <p className="text-lg font-black text-red-500">{stats.totalIncorrect}</p>
+                    <p className="text-[11px] text-[#718096] font-semibold uppercase">Yanlış</p>
+                    <p className="text-lg font-semibold text-red-500">{stats.totalIncorrect}</p>
                   </div>
                   <div className="text-center">
-                    <p className="text-[9px] text-[#94a3b8] font-bold uppercase">Toplam Net</p>
-                    <p className="text-lg font-black text-[#2563eb]">{stats.net}</p>
+                    <p className="text-[11px] text-[#718096] font-semibold uppercase">Toplam Net</p>
+                    <p className="text-lg font-semibold text-[#4269a8]">{stats.net}</p>
                   </div>
                 </div>
 
                 {/* Details list */}
                 <div className="space-y-2">
-                  <h4 className="text-xs font-bold text-[#0f172a] uppercase tracking-wider">Konu Detayları</h4>
+                  <h4 className="text-[13px] font-semibold text-[#24354a] uppercase tracking-wider">Konu Detayları</h4>
                   <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
                     {questionTypes
                       .filter(q => q.exam_id === selectedDetailResult.exam_id)
@@ -610,17 +433,17 @@ export default function Results() {
                         }
                         
                         return (
-                          <div key={qt.id} className="flex justify-between items-center p-3 rounded-lg border border-[#e2e8f0] bg-white text-xs">
+                          <div key={qt.id} className="flex justify-between items-center p-3 rounded-lg border border-[#e3e9f0] bg-white text-[13px]">
                             <div className="flex flex-col text-left">
-                              <span className="font-semibold text-[#0f172a]">{qt.name}</span>
+                              <span className="font-semibold text-[#24354a]">{qt.name}</span>
                               {qt.question_count > 0 && (
-                                <span className="text-[10px] text-gray-400">Toplam Soru: {qt.question_count}</span>
+                                <span className="text-[12px] text-gray-400">Toplam Soru: {qt.question_count}</span>
                               )}
                             </div>
                             <div className="flex items-center gap-3">
-                              <span className="text-emerald-600 font-bold">{correct} D</span>
-                              <span className="text-red-500 font-bold">{incorrect} Y</span>
-                              <span className="px-2 py-0.5 rounded bg-blue-50 border border-blue-100 text-[#2563eb] font-bold">
+                              <span className="text-emerald-600 font-semibold">{correct} D</span>
+                              <span className="text-red-500 font-semibold">{incorrect} Y</span>
+                              <span className="px-2 py-0.5 rounded bg-blue-50 border border-blue-100 text-[#4269a8] font-semibold">
                                 {typeNet.toFixed(2)} Net
                               </span>
                             </div>
