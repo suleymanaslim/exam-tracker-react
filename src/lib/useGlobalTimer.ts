@@ -9,6 +9,8 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { useTimerStore } from './timerStore'
 import { supabase } from './supabase'
+import { useAdminStore } from './adminStore'
+import Swal from 'sweetalert2'
 
 const ALARM_URL = 'https://actions.google.com/sounds/v1/alarms/beep_short.ogg'
 
@@ -20,7 +22,7 @@ function playAlarm() {
 function sendNotification(title: string, body: string) {
   if ('Notification' in window && Notification.permission === 'granted') {
     try {
-      new Notification(title, { body, icon: '/favicon.jpg' })
+      new Notification(title, { body, icon: '/studytracker-favicon.png' })
     } catch (_e) { /* mobile fallback */ }
   }
 }
@@ -62,8 +64,8 @@ export function useGlobalTimer() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user || !selSubject) return
     const now = new Date()
-    await supabase.from('study_sessions').insert({
-      user_id: user.id,
+    const { error } = await supabase.from('study_sessions').insert({
+      user_id: useAdminStore.getState().impersonatedUserId || user.id,
       subject_id: selSubject || null,
       resource_id: selResource || null,
       session_type: mode,
@@ -71,6 +73,12 @@ export function useGlobalTimer() {
       ended_at: now.toISOString(),
       duration_minutes: durationMins,
     })
+    if (error) {
+      console.error('Study session save failed:', error)
+      void Swal.fire('Oturum kaydedilemedi', 'Tamamlanan çalışma kaydedilemedi. Çalışma ekle düğmesiyle bu süreyi tekrar kaydedebilirsin.', 'error')
+      return
+    }
+    window.dispatchEvent(new Event('study-session-saved'))
   }, [selSubject, selResource, mode])
 
   // ── Handle timer reaching zero ──────────────────────────────────────

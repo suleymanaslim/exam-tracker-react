@@ -1,9 +1,10 @@
 import './SuitePages.css'
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
-import { Plus, Trash2, Download, Image as ImageIcon, Settings, EyeOff, SkipForward, X, Check, ChevronUp, ChevronDown } from 'lucide-react'
+import { Plus, Trash2, Download, Printer, Settings, EyeOff, SkipForward, X, Check, ChevronUp, ChevronDown } from 'lucide-react'
 import Swal from 'sweetalert2'
 import { useAdminStore } from '../lib/adminStore'
+import { videoPlanPrintHTML } from '../lib/videoPlanPrint'
 
 /* ─────────────── Types ─────────────── */
 function showPlanError(error: { code?: string; message: string }) {
@@ -80,8 +81,6 @@ export default function VideoPlan() {
   const [planItems, setPlanItems] = useState<VideoPlanItem[]>([])
   const [loading, setLoading] = useState(true)
 
-  const calendarRef = useRef<HTMLDivElement>(null)
-  const [exportingPNG, setExportingPNG] = useState(false)
 
   /* editing */
   const [editingRes, setEditingRes] = useState<Resource | null>(null)
@@ -485,56 +484,35 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
     const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = 'video_plani.json'; a.click(); URL.revokeObjectURL(u);
   }
 
-  const exportPNG = async () => {
-    const calendar = calendarRef.current
-    if (!calendar || exportingPNG) return
-    setExportingPNG(true)
-    try {
-      const { default: html2canvas } = await import('html2canvas-pro')
-      await document.fonts.ready
-      const canvas = await html2canvas(calendar, {
-        scale: 2,
-        backgroundColor: '#ffffff',
-        logging: false,
-        windowWidth: Math.max(window.innerWidth, 1280),
-        onclone: async (doc, clonedCalendar) => {
-          await doc.fonts.ready
-          // Expand only the export copy, keeping all seven days readable on mobile.
-          Object.assign(clonedCalendar.style, {
-            width: `${Math.max(calendar.scrollWidth, 1120)}px`,
-            height: 'auto', maxHeight: 'none', minHeight: '0',
-            flex: 'none', overflow: 'visible',
-            position: 'absolute', top: '0', left: '0',
-          })
-          clonedCalendar.scrollTop = 0
-          clonedCalendar.scrollLeft = 0
-          const header = clonedCalendar.firstElementChild as HTMLElement | null
-          if (header) header.style.position = 'static'
-          let ancestor = clonedCalendar.parentElement
-          while (ancestor) {
-            ancestor.style.overflow = 'visible'
-            ancestor = ancestor.parentElement
-          }
-        },
-      })
-      const blob = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob(result => result ? resolve(result) : reject(new Error('PNG oluşturulamadı')), 'image/png')
-      })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.download = `video_plani_${localDateStr(startDate)}.png`
-      link.href = url
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      // Allow browsers time to start reading the download before releasing it.
-      window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
-    } catch (error) {
-      console.error('Video plan PNG export failed:', error)
-      void Swal.fire('Hata', 'Görsel oluşturulamadı. Lütfen tekrar deneyin.', 'error')
-    } finally {
-      setExportingPNG(false)
+  const printPlan = () => {
+    const printWindow = window.open('', '_blank')
+    if (!printWindow) {
+      void Swal.fire('Sayfa açılamadı', 'Yazdırma görünümünü açmak için bu siteye açılır pencere izni verin.', 'info')
+      return
     }
+    const printDays = days.map(day => ({
+      date: localDateStr(day),
+      items: planItems.filter(item => item.date === localDateStr(day))
+        .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
+        .map(item => {
+          const resource = allResources.find(resource => resource.id === item.resource_id)
+          return {
+            subject: cleanName(resource?.subject_name),
+            resource: cleanName(resource?.name),
+            videos: item.video_count,
+            watched: item.watched_count || 0,
+            minutes: item.video_count * (resource?.avg_video_duration || 0),
+          }
+        }),
+    }))
+    printWindow.document.open()
+    printWindow.document.write(videoPlanPrintHTML(printDays))
+    printWindow.document.close()
+    printWindow.document.getElementById('print-plan')?.addEventListener('click', () => {
+      printWindow.focus()
+      printWindow.print()
+    })
+    printWindow.opener = null
   }
 
   const DOW = ['Pzt','Sal','Çar','Per','Cum','Cmt','Paz']
@@ -579,11 +557,11 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
             {days[0].toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' })} – {days[6].toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', year: 'numeric' })}
           </span>
           <div className="w-px h-5 bg-slate-200 mx-1"></div>
-          <button onClick={exportPNG} disabled={exportingPNG} aria-busy={exportingPNG} className="disabled:opacity-50 disabled:cursor-wait h-7 px-2.5 rounded-md border border-slate-200 bg-white text-xs font-medium text-slate-500 hover:text-slate-900 transition-colors inline-flex items-center gap-1.5">
-            <ImageIcon className="h-3.5 w-3.5" /> {exportingPNG ? 'Hazırlanıyor…' : 'PNG'}
+          <button onClick={printPlan} className="h-7 px-2.5 rounded-md border border-slate-900 bg-slate-900 text-white text-xs font-medium hover:bg-slate-700 transition-colors inline-flex items-center gap-1.5">
+            <Printer className="h-3.5 w-3.5" /> Yazdır / PDF
           </button>
-          <button onClick={exportJSON} className="h-7 px-3 rounded-md bg-slate-900 text-white text-xs font-medium hover:bg-slate-700 transition-colors inline-flex items-center gap-1.5">
-            <Download className="h-3.5 w-3.5" /> JSON
+          <button onClick={exportJSON} className="h-7 px-3 rounded-md border border-slate-200 bg-white text-slate-500 text-xs font-medium hover:text-slate-900 transition-colors inline-flex items-center gap-1.5">
+            <Download className="h-3.5 w-3.5" /> Veri (JSON)
           </button>
         </div>
       </div>
@@ -664,7 +642,7 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
 
         {/* RIGHT: Week */}
         <div className="flex-1 flex flex-col min-h-0 overflow-hidden rounded-xl border border-slate-200 bg-white">
-          <div ref={calendarRef} className="flex-1 flex flex-col min-h-0 overflow-auto bg-white">
+          <div className="flex-1 flex flex-col min-h-0 overflow-auto bg-white">
             {/* Headers */}
             <div className="grid grid-cols-7 border-b border-slate-200 sticky top-0 bg-white z-10 shrink-0">
               {days.map(d => {
