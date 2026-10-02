@@ -1,7 +1,8 @@
 import './SuitePages.css'
+import './Results.css'
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
-import { Plus, Trash2, TrendingUp, Calendar, Award, List, X, Edit3, Eye } from 'lucide-react'
+import { Plus, Trash2, Calendar, Award, List, X, Edit3, Eye } from 'lucide-react'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts'
 import Swal from 'sweetalert2'
 import CustomSelect from '../components/CustomSelect'
@@ -27,6 +28,10 @@ export default function Results() {
   const { impersonatedUserId } = useAdminStore()
 
   // Yeni Sonuç Form State
+  const [formStep, setFormStep] = useState(0)
+  const [formError, setFormError] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [metric, setMetric] = useState<'net' | 'points'>('net')
   const [showForm, setShowForm] = useState(false)
   const [formTitle, setFormTitle] = useState('')
   const [formDate, setFormDate] = useState(new Date().toISOString().split('T')[0])
@@ -58,6 +63,8 @@ export default function Results() {
   }, [impersonatedUserId])
 
   const handleExamChange = (examId: string) => {
+    setFormStep(0)
+    setFormError('')
     setFormExamId(examId)
     const types = questionTypes.filter(q => q.exam_id === examId)
     const initialScores: Record<string, { correct: number | '', incorrect: number | '' }> = {}
@@ -65,54 +72,61 @@ export default function Results() {
     setFormScores(initialScores)
   }
 
+  const formTypes = questionTypes.filter(q => q.exam_id === formExamId)
+  const currentType = formTypes[formStep - 1]
+  const validateType = (type: QuestionType) => {
+    const score = formScores[type.id]
+    if (!score || score.correct === '' || score.incorrect === '') return 'Doğru ve yanlış sayısını girin. Yoksa 0 yazın.'
+    if (![score.correct, score.incorrect].every(n => Number.isInteger(n) && n >= 0)) return 'Sayılar sıfır veya pozitif tam sayı olmalı.'
+    if (type.question_count > 0 && Number(score.correct) + Number(score.incorrect) > type.question_count) return `Toplam ${type.question_count} soruyu geçemez.`
+    return ''
+  }
+  const nextStep = () => {
+    const error = formStep === 0 ? (!formTitle.trim() || !formDate || !formExamId ? 'Deneme adını, sınavı ve tarihi girin.' : !formTypes.length ? 'Bu sınav için Ayarlar’dan soru türü ekleyin.' : '') : currentType ? validateType(currentType) : ''
+    setFormError(error)
+    if (!error) setFormStep(step => step + 1)
+  }
+
   const saveResult = async (saveAsDraft: boolean = false) => {
-    if (!userId || !formExamId || !formTitle.trim()) return
-
-    let resData: ExamResult | null = null
-
-    if (editingResultId) {
-      const { data } = await supabase.from('exam_results').update({
-        title: formTitle.trim(), date: formDate, is_draft: saveAsDraft
-      }).eq('id', editingResultId).select().single()
-      resData = data
-    } else {
-      const { data } = await supabase.from('exam_results').insert({
-        user_id: userId, exam_id: formExamId, title: formTitle.trim(), date: formDate, is_draft: saveAsDraft
-      }).select().single()
-      resData = data
-    }
-
-    if (resData) {
-      if (editingResultId) {
-        await supabase.from('exam_result_details').delete().eq('result_id', resData.id)
-        setDetails(prev => prev.filter(d => d.result_id !== resData!.id))
+    if (saving || !userId || !formExamId || !formTitle.trim() || !formDate) return
+    const errors = formTypes.map(type => {
+      const score = formScores[type.id]
+      if (saveAsDraft && (!score || score.correct === '' || score.incorrect === '')) {
+        const c = Number(score?.correct || 0), w = Number(score?.incorrect || 0)
+        return ![c, w].every(n => Number.isInteger(n) && n >= 0) || (type.question_count > 0 && c + w > type.question_count) ? 'Soru sayılarını kontrol edin.' : ''
       }
-
-      const detailsToInsert = Object.entries(formScores).map(([qtId, scores]) => ({
-        user_id: userId, result_id: resData!.id, question_type_id: qtId,
-        correct_count: scores.correct === '' ? 0 : Number(scores.correct),
-        incorrect_count: scores.incorrect === '' ? 0 : Number(scores.incorrect)
+      return validateType(type)
+    })
+    const error = errors.find(Boolean)
+    if (error) { setFormError(error); return }
+    setSaving(true); setFormError('')
+    try {
+      const resultId = editingResultId || crypto.randomUUID()
+      const response = editingResultId
+        ? await supabase.from('exam_results').update({ title: formTitle.trim(), date: formDate }).eq('id', resultId).select().single()
+        : await supabase.from('exam_results').insert({ id: resultId, user_id: userId, exam_id: formExamId, title: formTitle.trim(), date: formDate, is_draft: true }).select().single()
+      if (response.error) throw response.error
+      setEditingResultId(resultId)
+      setResults(prev => [response.data, ...prev.filter(r => r.id !== resultId)])
+      // Reuse detail IDs so edits never delete the previous answers first.
+      const rows = formTypes.map(type => ({
+        id: details.find(d => d.result_id === resultId && d.question_type_id === type.id)?.id || crypto.randomUUID(),
+        user_id: userId, result_id: resultId, question_type_id: type.id,
+        correct_count: Number(formScores[type.id]?.correct || 0), incorrect_count: Number(formScores[type.id]?.incorrect || 0),
       }))
-
-      if (detailsToInsert.length > 0) {
-        const { data: detData } = await supabase.from('exam_result_details').insert(detailsToInsert).select()
-        if (detData) setDetails(prev => [...prev, ...detData])
+      if (rows.length) {
+        const saved = await supabase.from('exam_result_details').upsert(rows, { onConflict: 'id' }).select()
+        if (saved.error) throw saved.error
+        setDetails(prev => [...prev.filter(d => !rows.some(row => row.id === d.id)), ...saved.data])
       }
-
-      if (editingResultId) {
-        const updatedRes = resData
-        setResults(prev => prev.map(r => r.id === updatedRes.id ? updatedRes : r).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()))
-      } else {
-        const insertedRes = resData
-        setResults(prev => [insertedRes, ...prev].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()))
-      }
-
-      setShowForm(false)
-      setFormTitle('')
-      setFormScores({})
-      setEditingResultId(null)
-      Swal.fire({ title: 'Başarılı!', text: saveAsDraft ? 'Taslak kaydedildi.' : 'Sınav sonucu eklendi.', icon: 'success', toast: true, position: 'top-end', showConfirmButton: false, timer: 1500 })
-    }
+      const finalized = await supabase.from('exam_results').update({ is_draft: saveAsDraft }).eq('id', resultId).select().single()
+      if (finalized.error) throw finalized.error
+      setResults(prev => [finalized.data, ...prev.filter(r => r.id !== resultId)].sort((a, b) => b.date.localeCompare(a.date)))
+      setShowForm(false); setFormTitle(''); setFormScores({}); setEditingResultId(null); setFormStep(0)
+      void Swal.fire({ title: saveAsDraft ? 'Taslak kaydedildi' : 'Deneme kaydedildi', icon: 'success', toast: true, position: 'top-end', showConfirmButton: false, timer: 1500 })
+    } catch (e) {
+      setFormError(`Kaydedilemedi: ${e && typeof e === 'object' && 'message' in e ? String(e.message) : 'Tekrar deneyin.'}`)
+    } finally { setSaving(false) }
   }
 
   const resumeDraft = (result: ExamResult) => {
@@ -133,6 +147,8 @@ export default function Results() {
       }
     })
     setFormScores(scores)
+    setFormStep(0)
+    setFormError('')
     setShowForm(true)
   }
 
@@ -244,7 +260,7 @@ export default function Results() {
           </h1>
           <p className="text-[15px] text-[#62748b] mt-1">Sınav ve deneme sonuçlarını kaydet, gelişimini takip et.</p>
         </div>
-        <button onClick={() => setShowForm(!showForm)} className="bg-[#4269a8] hover:bg-blue-600 text-white font-medium text-sm px-4 py-2 rounded-lg transition-all flex items-center gap-2 self-start md:self-auto">
+        <button onClick={() => { setShowForm(!showForm); setFormStep(0); setFormError(''); if (!showForm) { setEditingResultId(null); setFormTitle(''); setFormExamId(''); setFormScores({}) } }} className="bg-[#4269a8] hover:bg-blue-600 text-white font-medium text-sm px-4 py-2 rounded-lg transition-all flex items-center gap-2 self-start md:self-auto">
           {showForm ? <List className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
           {showForm ? 'Listeye Dön' : 'Yeni Sonuç Ekle'}
         </button>
@@ -259,86 +275,21 @@ export default function Results() {
 
       <div className="flex-1 min-h-0 overflow-y-auto">
         {showForm ? (
-          <div className="max-w-2xl mx-auto bg-white rounded-2xl border border-[#e3e9f0] p-6 shadow-sm mt-4">
-            <h2 className="text-lg font-semibold text-[#24354a] mb-4">Yeni Deneme Ekle</h2>
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-[13px] font-semibold text-[#62748b] uppercase">Sınav</label>
-                  <CustomSelect
-                    value={formExamId}
-                    onChange={handleExamChange}
-                    options={exams.map(e => ({ value: e.id, label: e.name }))}
-                    placeholder="Sınav Seçin..."
-                    className="mt-1"
-                  />
-                </div>
-                <div>
-                  <label className="text-[13px] font-semibold text-[#62748b] uppercase">Tarih</label>
-                  <input type="date" value={formDate} onChange={e => setFormDate(e.target.value)} className="mt-1 w-full rounded-lg border border-[#e3e9f0] px-3 py-2 text-sm focus:border-[#4269a8] outline-none" />
-                </div>
-              </div>
-              <div>
-                <label className="text-[13px] font-semibold text-[#62748b] uppercase">Deneme Adı / Başlığı</label>
-                <input type="text" placeholder="Örn: 2024 YDS İlkbahar, Pegem 3. Deneme" value={formTitle} onChange={e => setFormTitle(e.target.value)} className="mt-1 w-full rounded-lg border border-[#e3e9f0] px-3 py-2 text-sm focus:border-[#4269a8] outline-none" />
-              </div>
-
-              {formExamId && questionTypes.filter(q => q.exam_id === formExamId).length > 0 ? (
-                <div className="border-t border-[#e3e9f0] pt-4 mt-2">
-                  <h3 className="text-sm font-semibold text-[#24354a] mb-3">Soru Türlerine Göre Doğru/Yanlış</h3>
-                  <div className="space-y-3">
-                    {questionTypes.filter(q => q.exam_id === formExamId).map(qt => (
-                      <div key={qt.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-[#f8fafc] rounded-2xl border border-[#e3e9f0]">
-                        <div className="flex flex-col text-left">
-                          <span className="text-sm font-semibold text-[#24354a]">{qt.name}</span>
-                          {qt.question_count > 0 && (
-                            <span className="text-[13px] text-gray-400">{qt.question_count} Soru</span>
-                          )}
-                        </div>
-                        <div className="grid grid-cols-2 sm:flex sm:items-center gap-3">
-                          <div className="flex flex-col items-center gap-1.5">
-                            <span className="text-[13px] font-semibold text-emerald-600 uppercase tracking-wide">Doğru</span>
-                            <input type="number" min="0" value={formScores[qt.id]?.correct} onChange={e => {
-                              const val = e.target.value === '' ? '' : parseInt(e.target.value);
-                              setFormScores(p => ({...p, [qt.id]: { ...p[qt.id], correct: val }}));
-                            }} className="w-full sm:w-20 h-11 rounded-2xl border-2 border-emerald-200 px-3 text-center text-lg font-semibold outline-none focus:border-emerald-500 bg-white" />
-                          </div>
-                          <div className="flex flex-col items-center gap-1.5">
-                            <span className="text-[13px] font-semibold text-red-500 uppercase tracking-wide">Yanlış</span>
-                            <input type="number" min="0" value={formScores[qt.id]?.incorrect} onChange={e => {
-                              const val = e.target.value === '' ? '' : parseInt(e.target.value);
-                              setFormScores(p => ({...p, [qt.id]: { ...p[qt.id], incorrect: val }}));
-                            }} className="w-full sm:w-20 h-11 rounded-2xl border-2 border-red-200 px-3 text-center text-lg font-semibold outline-none focus:border-red-500 bg-white" />
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : formExamId ? (
-                <div className="p-4 bg-[#f5f7fa] border border-[#e3e9f0] rounded-lg text-sm text-[#526a87]">
-                  Bu sınav için henüz soru türü tanımlanmamış. Önce "Ayarlar -&gt; Sınav Ayarları" menüsünden soru türlerini (Örn: Paragraf, Matematik) eklemelisiniz.
-                </div>
-              ) : null}
-
-              <div className="grid grid-cols-2 gap-3 mt-4">
-                <button 
-                  onClick={() => saveResult(true)} 
-                  disabled={!formTitle || !formExamId} 
-                  className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-3 rounded-xl transition-all disabled:opacity-50 cursor-pointer text-sm"
-                >
-                  Taslak Olarak Kaydet
-                </button>
-                <button 
-                  onClick={() => saveResult(false)} 
-                  disabled={!formTitle || !formExamId} 
-                  className="bg-[#4269a8] hover:bg-blue-600 text-white font-semibold py-3 rounded-xl transition-all disabled:opacity-50 cursor-pointer text-sm"
-                >
-                  Kaydet ve Tamamla
-                </button>
-              </div>
-            </div>
-          </div>
+          <form className="result-wizard" onSubmit={event => { event.preventDefault(); if (formStep <= formTypes.length) nextStep(); else void saveResult(false) }}>
+            <div className="result-wizard-head"><h2>{editingResultId ? 'Denemeyi düzenle' : 'Yeni deneme'}</h2><span>{formStep === 0 ? 'Deneme bilgileri' : formStep <= formTypes.length ? `${formStep} / ${formTypes.length}` : 'Özet'}</span></div>
+            <div className="result-step-track"><span style={{ width: `${(formStep + 1) / (formTypes.length + 2) * 100}%` }} /></div>
+            {formStep === 0 ? <div className="result-fields">
+              <label>Sınav<CustomSelect disabled={!!editingResultId || saving} value={formExamId} onChange={handleExamChange} options={exams.map(e => ({ value: e.id, label: e.name }))} placeholder="Sınav seç" /></label>
+              <label>Tarih<input type="date" required value={formDate} onChange={e => setFormDate(e.target.value)} /></label>
+              <label className="result-wide">Deneme adı<input required value={formTitle} placeholder="Örn. Pegem 3. Deneme" onChange={e => setFormTitle(e.target.value)} /></label>
+            </div> : currentType ? <div key={currentType.id} className="result-question">
+              <h3>{currentType.name}</h3><p>{currentType.question_count > 0 ? `${currentType.question_count} soru` : 'Soru sayısı tanımlanmamış'}</p>
+              <div className="result-fields">{(['correct', 'incorrect'] as const).map((field, i) => <label key={field} className={i === 0 ? 'result-correct' : 'result-incorrect'}>{i === 0 ? 'Doğru' : 'Yanlış'}<input autoFocus={i === 0} type="number" inputMode="numeric" min="0" step="1" max={currentType.question_count || undefined} value={formScores[currentType.id]?.[field] ?? ''} onChange={e => { setFormError(''); setFormScores(p => ({ ...p, [currentType.id]: { correct: p[currentType.id]?.correct ?? '', incorrect: p[currentType.id]?.incorrect ?? '', [field]: e.target.value === '' ? '' : Number(e.target.value) } })) }} /></label>)}</div>
+              {currentType.question_count > 0 && <p>Boş: {Math.max(0, currentType.question_count - Number(formScores[currentType.id]?.correct || 0) - Number(formScores[currentType.id]?.incorrect || 0))}</p>}
+            </div> : <div className="result-review"><h3>{formTitle}</h3>{formTypes.map((type, i) => <button type="button" key={type.id} onClick={() => setFormStep(i + 1)}><span>{type.name}</span><strong>{formScores[type.id]?.correct || 0} D · {formScores[type.id]?.incorrect || 0} Y</strong></button>)}</div>}
+            {formError && <p className="result-error" role="alert">{formError}</p>}
+            <fieldset disabled={saving} className="result-wizard-actions"><button type="button" disabled={formStep === 0} onClick={() => { setFormStep(step => step - 1); setFormError('') }}>Geri</button><button type="button" disabled={!formTitle.trim() || !formExamId || !formDate} onClick={() => void saveResult(true)}>Taslak</button><button type="submit" className="result-primary">{saving ? 'Kaydediliyor…' : formStep > formTypes.length ? 'Kaydet' : 'Devam'}</button></fieldset>
+          </form>
         ) : tab === 'list' ? (
           <div className="space-y-6">
             {activeDrafts.length > 0 && (
@@ -442,115 +393,18 @@ export default function Results() {
             </div>
           </div>
         ) : (
-          <div className="flex flex-col gap-4 mt-2">
-            <div className="bg-white rounded-2xl border border-[#e3e9f0] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <label className="text-[13px] font-semibold text-[#62748b] uppercase">Hangi Sınavın Gelişimini Görmek İstiyorsun?</label>
-              <CustomSelect
-                value={selectedExamId}
-                onChange={setSelectedExamId}
-                options={exams.map(e => ({ value: e.id, label: e.name }))}
-                className="w-full sm:w-[250px]"
-              />
-            </div>
-            
-            {chartData.length < 2 ? (
-              <div className="bg-white rounded-2xl border border-[#e3e9f0] p-12 text-center text-[#718096]">
-                <TrendingUp className="h-12 w-12 mx-auto opacity-20 mb-3" />
-                <p>Grafik çizebilmek için bu sınava ait en az 2 deneme sonucu girmelisiniz.</p>
-              </div>
-            ) : (
-              <>
-                {comparisonData && (
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {/* Sol/Orta: Karşılaştırma dairesi */}
-                    <div className="md:col-span-1 bg-white rounded-2xl border border-[#e3e9f0] p-5 flex flex-col items-center justify-center relative min-h-[220px]">
-                      <h4 className="text-[13px] font-semibold text-[#62748b] uppercase mb-4 tracking-wider">Son İki Deneme Kıyaslama</h4>
-                      <div className="relative flex items-center justify-center">
-                        <div className="w-28 h-28 rounded-full border-[6px] border-[#4269a8] flex flex-col items-center justify-center bg-blue-50/20 shadow-inner">
-                          <span className="text-[11px] font-semibold text-[#62748b] uppercase">Son Net</span>
-                          <span className="text-2xl font-semibold text-[#24354a]">{comparisonData.latestNet}</span>
-                          <span className="text-[11px] text-[#4269a8] font-semibold mt-0.5">{comparisonData.latestPoints} Puan</span>
-                        </div>
-                      </div>
-                      
-                      {/* Sol Alt: Önceki Net */}
-                      <div className="mt-4 flex flex-col items-center">
-                        <span className="text-[11px] font-semibold text-[#718096] uppercase tracking-wider">Önceki Net</span>
-                        <div className="flex items-center gap-1.5 mt-0.5">
-                          <span className="text-sm font-semibold text-[#62748b]">{comparisonData.previousNet}</span>
-                          <span className="text-[12px] text-gray-400 font-semibold">({comparisonData.previousPoints} Puan)</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Sağ: Soru Tipi Gelişimleri */}
-                    <div className="md:col-span-2 bg-white rounded-2xl border border-[#e3e9f0] p-5 flex flex-col justify-between">
-                      <h4 className="text-[13px] font-semibold text-[#24354a] mb-3 uppercase tracking-wider">
-                        Konu Bazlı Net Değişimleri
-                      </h4>
-                      <div className="flex-1 overflow-y-auto space-y-2 max-h-[160px] pr-1">
-                        {comparisonData.diffs.map((diff, idx) => {
-                          const isUp = diff.netDiff > 0
-                          const isDown = diff.netDiff < 0
-                          return (
-                            <div key={idx} className="flex items-center justify-between p-2 rounded-lg bg-[#f8fafc] border border-[#e3e9f0] text-[13px]">
-                              <span className="font-semibold text-[#24354a]">{diff.name}</span>
-                              <div className="flex items-center gap-3">
-                                <span className="text-[#718096] text-[12px]">
-                                  {diff.previousCorrect}D {diff.previousIncorrect}Y ➜ {diff.latestCorrect}D {diff.latestIncorrect}Y
-                                </span>
-                                {isUp && (
-                                  <span className="px-2 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-700 font-semibold flex items-center gap-0.5">
-                                    +{diff.netDiff} Net 📈
-                                  </span>
-                                )}
-                                {isDown && (
-                                  <span className="px-2 py-0.5 rounded bg-red-50 border border-red-200 text-red-700 font-semibold flex items-center gap-0.5">
-                                    {diff.netDiff} Net 📉
-                                  </span>
-                                )}
-                                {!isUp && !isDown && (
-                                  <span className="px-2 py-0.5 rounded bg-gray-50 border border-gray-200 text-gray-600 font-semibold">
-                                    Değişim yok
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                <div className="bg-white rounded-2xl border border-[#e3e9f0] p-5 h-[320px] flex flex-col">
-                <h3 className="text-sm font-semibold text-[#24354a] mb-6 flex items-center gap-2">
-                  <TrendingUp className="h-4 w-4 text-[#4269a8]" /> Net / Puan Gelişimi
-                </h3>
-                <div className="flex-1 min-h-0">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="colorNet" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#4269a8" stopOpacity={0.3}/>
-                          <stop offset="95%" stopColor="#4269a8" stopOpacity={0}/>
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                      <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#718096' }} axisLine={false} tickLine={false} dy={10} />
-                      <YAxis tick={{ fontSize: 10, fill: '#718096' }} axisLine={false} tickLine={false} />
-                      <RechartsTooltip 
-                        contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                        labelStyle={{ fontWeight: 'bold', color: '#24354a', marginBottom: '4px' }}
-                      />
-                      <Area type="monotone" name="Net" dataKey="net" stroke="#4269a8" strokeWidth={3} fillOpacity={1} fill="url(#colorNet)" activeDot={{ r: 6, fill: '#4269a8', stroke: '#fff', strokeWidth: 2 }} />
-                      <Area type="monotone" name="Puan" dataKey="points" stroke="#8b5cf6" strokeWidth={3} fillOpacity={0} activeDot={{ r: 6, fill: '#8b5cf6', stroke: '#fff', strokeWidth: 2 }} />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-            </>
-          )}
+          <div className="result-analysis">
+            <div className="result-analysis-filter"><CustomSelect value={selectedExamId} onChange={setSelectedExamId} options={exams.map(e => ({ value: e.id, label: e.name }))} /><div>{(['net', 'points'] as const).map(value => <button key={value} aria-pressed={metric === value} onClick={() => setMetric(value)}>{value === 'net' ? 'Net' : 'Puan'}</button>)}</div></div>
+            {chartData.length === 0 ? <p className="result-empty">Bu sınav için henüz deneme sonucu yok.</p> : <>
+              <div className="result-kpis">{[
+                ['Son sonuç', chartData.at(-1)![metric].toFixed(2)],
+                ['Ortalama', (chartData.reduce((sum, r) => sum + r[metric], 0) / chartData.length).toFixed(2)],
+                ['En iyi', Math.max(...chartData.map(r => r[metric])).toFixed(2)],
+                ['Son değişim', chartData.length > 1 ? ((chartData.at(-1)![metric] - chartData.at(-2)![metric]) >= 0 ? '+' : '') + (chartData.at(-1)![metric] - chartData.at(-2)![metric]).toFixed(2) : '—'],
+              ].map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>
+              <section className="result-chart"><h3>{metric === 'net' ? 'Net gelişimi' : 'Puan gelişimi'} <span>{chartData.length} deneme</span></h3><div style={{ height: 210 }}><ResponsiveContainer width="100%" height="100%"><AreaChart data={chartData} margin={{ top: 12, right: 12, left: -16, bottom: 0 }}><CartesianGrid vertical={false} stroke="#edf1f6" /><XAxis dataKey="date" tick={{ fontSize: 12 }} axisLine={false} tickLine={false} /><YAxis tick={{ fontSize: 12 }} axisLine={false} tickLine={false} /><RechartsTooltip labelFormatter={(_, payload) => payload?.[0]?.payload?.name ?? ''} /><Area type="linear" dataKey={metric} name={metric === 'net' ? 'Net' : 'Puan'} stroke="#4269a8" fill="#eaf0fa" strokeWidth={2} /></AreaChart></ResponsiveContainer></div></section>
+              {comparisonData && <section className="result-topic-changes"><h3>Son iki deneme · soru türleri</h3><div className="result-topic-head"><span>Soru türü</span><span>Önceki → Son</span><span>Net farkı</span></div>{comparisonData.diffs.map(diff => <div key={diff.name}><span>{diff.name}</span><span>{diff.previousCorrect}D {diff.previousIncorrect}Y → {diff.latestCorrect}D {diff.latestIncorrect}Y</span><strong className={diff.netDiff < 0 ? 'result-down' : 'result-up'}>{diff.netDiff > 0 ? '+' : ''}{diff.netDiff}</strong></div>)}</section>}
+            </>}
           </div>
         )}
       {/* Details Modal */}

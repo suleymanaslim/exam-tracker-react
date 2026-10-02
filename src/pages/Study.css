@@ -26,3 +26,5 @@
 .study-test-end{font-size:12px;color:var(--study-muted);align-self:center;margin-top:12px;padding:3px 6px;cursor:pointer;border-radius:5px}.study-test-end:hover{color:var(--study-blue);background:#e6edf7}
 
 .study-plan-list{margin-top:12px}
+
+@media(min-width:761px){.study-page{padding-bottom:4px;gap:14px}.study-page>.study-header,.study-page>.study-recovery-banner,.study-page>.study-playlist-banner{flex-shrink:0}.study-grid{flex:1;min-height:530px;align-items:stretch}.study-side{min-height:0}.study-side>.study-card{flex:1;display:flex;flex-direction:column;min-height:0}.study-plan-list{flex:1;max-height:none;overflow-y:auto}.study-focus{height:100%;min-height:0}.study-timer{flex:1;min-height:260px}.study-page{max-width:none;margin:0;width:100%}}

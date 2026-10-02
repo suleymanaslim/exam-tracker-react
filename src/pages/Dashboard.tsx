@@ -26,16 +26,14 @@ const examMeta: Record<string, { icon: LucideIcon; gradient: string; accent: str
 
 // ─── Motivasyon sözleri ───────────────────────────────────────────────────────
 const QUOTES = [
-  { text: 'Başarı, her gün tekrarlanan küçük çabaların toplamıdır.', author: 'Robert Collier' },
-  { text: 'Bugün yaptığın fedakarlıklar, yarın seni ödüllendirecek.', author: 'Bilinmeyen' },
-  { text: 'Zorluk olmadan zafer olmaz.', author: 'Thomas Paine' },
-  { text: 'Bir saatlik odaklanma, bir günlük dağınıklıktan daha değerlidir.', author: 'Bilinmeyen' },
-  { text: 'Hayallerine ulaşmanın tek yolu, onları gerçekten istemektir.', author: 'Bilinmeyen' },
-  { text: 'Çalışmak zorunda değilsin; sadece ilerlemek istiyorsun.', author: 'Bilinmeyen' },
-  { text: 'Her uzman, bir zamanlar acemi biriydi.', author: 'Helen Hayes' },
+  { text: 'Dünyada her şey için, medeniyet için, hayat için, muvaffakiyet için en hakiki mürşit ilimdir, fendir.', author: 'Mustafa Kemal Atatürk', source: 'https://atam.gov.tr/wp-content/uploads/2024/03/Ataturkun-Soylev-ve-Demecleri-C2.pdf' },
+  { text: 'İyimser olabilir, var olan fırsatları değerlendirebilir ve dünyayı daha iyi bir yer yapmaya katkıda bulunabiliriz.', author: 'Noam Chomsky', source: 'https://chomsky.info/why-i-choose-optimism-over-despair/' },
+  { text: 'Eğitim, dünyayı değiştirmek için kullanabileceğiniz en güçlü silahtır.', author: 'Nelson Mandela', source: 'https://www.nelsonmandela.org/nm100-education' },
+  { text: 'Yaratamadığım şeyi anlayamam.', author: 'Richard Feynman', source: 'https://www.preskill.caltech.edu/talks/APS-April-2018-Feynman-4-3.pdf' },
 ]
+
 function getDailyQuote() {
-  const day = new Date().getDate()
+  const day = Math.floor(Date.UTC(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()) / 86400000)
   return QUOTES[day % QUOTES.length]
 }
 
@@ -579,6 +577,7 @@ export default function Dashboard() {
         </div>
       )}
 
+      <aside className="dash-quote"><p>“{quote.text}”</p><a href={quote.source} target="_blank" rel="noopener noreferrer" title="Sözün kaynağı">{quote.author}</a></aside>
       <header className="dash-header">
         <div><p className="dash-eyebrow">ÇALIŞMA ALANIN</p><h1>Merhaba, {displayName}</h1><p className="dash-date">{new Date().toLocaleDateString('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' })}</p></div>
         <DashboardSummary streak={streak} studied={totalWeekMinutes} planned={totalWeekPlannedMinutes} />
@@ -624,7 +623,7 @@ export default function Dashboard() {
         </section>
         <section className="dash-panel"><div className="dash-section-head"><div><h3>Dünü hatırla</h3><p className="dash-muted">Kısa bir tekrar, kalıcı bir adım.</p></div><RotateCcw size={18} className="dash-muted" /></div><div className="dash-review">{yesterdayReview.length === 0 ? <p className="dash-empty-note">Dün için çalışma kaydı yok.</p> : yesterdayReview.map((r, i) => <button className="dash-plan-row" key={i} onClick={() => startReview(r.subjectId, r.resourceId)}><span className="dash-row-copy"><strong>{getSubjectName(r.subjectId) || 'Çalışma'}</strong><span>{getResourceName(r.resourceId)}</span></span><b className="dash-muted">{duration(r.mins)}</b><span className="dash-play"><Play size={14} /></span></button>)}</div></section>
       </div>
-      <footer className="dash-quote"><p>“{quote.text}”</p><span>{quote.author}</span></footer>
+
       {isAdmin && <details className="dash-panel dash-admin"><summary>YKS / YDT kelime araçları</summary><p className="dash-muted">Paylaşmak istediğin günün kelimelerini kopyala.</p><div className="dash-admin-controls"><select aria-label="Kelime günü" value={selectedVocabDay} onChange={e => setSelectedVocabDay(e.target.value ? Number(e.target.value) : '')}><option value="">Gün seç</option>{availableDays.map(d => <option key={d} value={d}>Day {d}</option>)}</select><button className="dash-secondary" onClick={handleCopyVocab} disabled={!selectedVocabDay}><Copy size={15} /> Kopyala</button></div></details>}
     </motion.div>
   )

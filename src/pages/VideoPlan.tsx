@@ -1,11 +1,11 @@
 import './SuitePages.css'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { Plus, Trash2, Download, Printer, Settings, EyeOff, SkipForward, X, Check, ChevronUp, ChevronDown } from 'lucide-react'
 import Swal from 'sweetalert2'
 import { useAdminStore } from '../lib/adminStore'
 import { playlistURL } from '../lib/playlist'
-import { videoPlanPrintHTML } from '../lib/videoPlanPrint'
+import { openVideoPlanPrint } from '../lib/videoPlanPrint'
 
 /* ─────────────── Types ─────────────── */
 function showPlanError(error: { code?: string; message: string }) {
@@ -502,35 +502,11 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
     const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = 'video_plani.json'; a.click(); URL.revokeObjectURL(u);
   }
 
+  const calendarRef = useRef<HTMLDivElement>(null)
   const printPlan = () => {
-    const printWindow = window.open('', '_blank')
-    if (!printWindow) {
+    if (calendarRef.current && !openVideoPlanPrint(calendarRef.current)) {
       void Swal.fire('Sayfa açılamadı', 'Yazdırma görünümünü açmak için bu siteye açılır pencere izni verin.', 'info')
-      return
     }
-    const printDays = days.map(day => ({
-      date: localDateStr(day),
-      items: planItems.filter(item => item.date === localDateStr(day))
-        .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
-        .map(item => {
-          const resource = allResources.find(resource => resource.id === item.resource_id)
-          return {
-            subject: cleanName(resource?.subject_name),
-            resource: cleanName(resource?.name),
-            videos: item.video_count,
-            watched: item.watched_count || 0,
-            minutes: item.video_count * (resource?.avg_video_duration || 0),
-          }
-        }),
-    }))
-    printWindow.document.open()
-    printWindow.document.write(videoPlanPrintHTML(printDays))
-    printWindow.document.close()
-    printWindow.document.getElementById('print-plan')?.addEventListener('click', () => {
-      printWindow.focus()
-      printWindow.print()
-    })
-    printWindow.opener = null
   }
 
   const DOW = ['Pzt','Sal','Çar','Per','Cum','Cmt','Paz']
@@ -660,7 +636,7 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
         </div>
 
         {/* RIGHT: Week */}
-        <div className="flex-1 flex flex-col min-h-0 overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <div ref={calendarRef} className="flex-1 flex flex-col min-h-0 overflow-hidden rounded-xl border border-slate-200 bg-white">
           <div className="flex-1 flex flex-col min-h-0 overflow-auto bg-white">
             {/* Headers */}
             <div className="grid grid-cols-7 border-b border-slate-200 sticky top-0 bg-white z-10 shrink-0">
@@ -700,7 +676,7 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
                     onDragLeave={() => setDragOverDate(null)}
                     onDrop={e => { e.preventDefault(); setDragOverDate(null); const src = e.dataTransfer.getData('text/plain'); if (src) handleSwapDays(src, ds) }}
                   >
-                    <div className="absolute top-1 right-1 flex gap-0.5 opacity-0 group-hover/day:opacity-100 transition-opacity z-10">
+                    <div data-print-remove className="absolute top-1 right-1 flex gap-0.5 opacity-0 group-hover/day:opacity-100 transition-opacity z-10">
                       <button onClick={e => handleShiftPlan(e, ds)} title="Bundan sonrasını 1 gün kaydır" className="h-5 w-5 rounded flex items-center justify-center text-slate-300 hover:text-slate-900 hover:bg-white border border-transparent hover:border-slate-200 transition-colors bg-white/70">
                         <SkipForward className="h-2.5 w-2.5" />
                       </button>
@@ -723,12 +699,12 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
                         return (
                           <div key={it.id} onClick={e => e.stopPropagation()} className={`group/item relative rounded-lg border px-1.5 py-1 transition-colors ${done ? 'border-emerald-200 bg-emerald-50/60' : 'border-slate-200 bg-white hover:border-slate-300'}`}>
                             <div className="flex items-center gap-1">
-                              <div className="flex opacity-50 group-hover/item:opacity-100 transition-opacity gap-[1px]">
+                              <div data-print-remove className="flex opacity-50 group-hover/item:opacity-100 transition-opacity gap-[1px]">
                                 {idx > 0 && <button onClick={e => handleReorderItem(e, it, -1)} className="hover:text-slate-900"><ChevronUp className="h-3 w-3" /></button>}
                                 {idx < items.length - 1 && <button onClick={e => handleReorderItem(e, it, 1)} className="hover:text-slate-900"><ChevronDown className="h-3 w-3" /></button>}
                               </div>
                               <span className="text-[11px] font-semibold px-1.5 py-px rounded-full truncate" style={{ background: c.card, color: c.text }}>{cleanName(r?.subject_name || '')}</span>
-                              <button onClick={e => { e.stopPropagation(); handleProgressClick(it, r) }} title={done ? 'Tamamlandı' : `${w}/${it.video_count} izlendi — güncellemek için tıkla`}
+                              <button data-print-keep onClick={e => { e.stopPropagation(); handleProgressClick(it, r) }} title={done ? 'Tamamlandı' : `${w}/${it.video_count} izlendi — güncellemek için tıkla`}
                                 className={`ml-auto h-[18px] w-[18px] rounded-[5px] shrink-0 flex items-center justify-center transition-colors ${done ? 'bg-emerald-500 text-white' : 'border border-slate-200 text-slate-300 hover:border-emerald-400 hover:text-emerald-400'}`}>
                                 <Check className="h-2.5 w-2.5" strokeWidth={3} />
                               </button>
@@ -753,7 +729,7 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
                       </button>
                     )}
                     {items.length === 0 && (
-                      <div className="h-full min-h-[60px] flex items-center justify-center opacity-0 group-hover/day:opacity-100 transition-opacity">
+                      <div data-print-remove className="h-full min-h-[60px] flex items-center justify-center opacity-0 group-hover/day:opacity-100 transition-opacity">
                         <span className="h-5 w-5 rounded border border-dashed border-slate-300 flex items-center justify-center text-slate-300">
                           <Plus className="h-3 w-3" strokeWidth={2.5} />
                         </span>
