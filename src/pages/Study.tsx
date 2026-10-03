@@ -18,7 +18,7 @@ import { localDayKey } from '../lib/statsPeriod'
 
 interface Exam { id: string; name: string; color: string }
 interface Subject { id: string; exam_id: string; name: string }
-interface Resource { id: string; subject_id: string; name: string; resource_type: string; url: string | null }
+interface Resource { id: string; subject_id: string; name: string; resource_type: string; url: string | null; total_videos?: number | null }
 interface PomodoroSettings {
   long_focus_minutes: number
   long_break_minutes: number
@@ -27,7 +27,7 @@ interface PomodoroSettings {
 }
 interface PlanItem {
   id: string; subject_id: string | null; resource_id: string | null
-  title: string | null; planned_minutes: number
+  title: string | null; planned_minutes: number; video_count?: number
 }
 
 type SessionMode = 'pomodoro_long' | 'pomodoro_short' | 'manual'
@@ -138,6 +138,7 @@ export default function Study() {
                 subject_id: res.subject_id || null,
                 resource_id: v.resource_id,
                 title: `${cleanName} ${v.video_count}`,
+                video_count: v.video_count,
                 planned_minutes: v.video_count * (res.avg_video_duration || 0),
                 sort_order: -1,
                 isVideo: true
@@ -308,6 +309,8 @@ export default function Study() {
   const formatDuration = (value: number) => `${Math.floor(value / 60) ? `${Math.floor(value / 60)} sa ` : ''}${value % 60} dk`
   const selectedSubject = subjects.find(subject => subject.id === selSubject)
   const selectedResource = resources.find(resource => resource.id === selResource)
+  const selectedDayVideoCount = selResource ? todayPlan.filter(item => item.resource_id === selResource && item.subject_id === selSubject).reduce((sum, item) => sum + (item.video_count || 0), 0) : 0
+  const todayVideoCount = todayPlan.reduce((sum, item) => sum + (item.video_count || 0), 0)
   const activePlaylistURL = playlistURL(selectedResource?.url)
   const modeOptions: { key: SessionMode; label: string; description: string }[] = [
     { key: 'pomodoro_short', label: 'Kısa Pomodoro', description: `${settings.short_focus_minutes} dk odak · ${settings.short_break_minutes} dk mola` },
@@ -323,15 +326,15 @@ export default function Study() {
       </header>
 
       {recovery && <div className="study-recovery-banner"><span>Önceki oturumun onay bekliyor.</span><button className="study-button study-button-secondary" onClick={() => useTimerStore.setState({ recovery: { ...recovery } })}>Oturumu değerlendir</button></div>}
-      {startedAt && !recovery && phase === 'focus' && activePlaylistURL && <div className="study-playlist-banner"><div><span>{selectedSubject?.name} · oynatma listesi</span><a href={activePlaylistURL} target="_blank" rel="noopener noreferrer">{activePlaylistURL}</a></div><a className="study-button study-button-primary" href={activePlaylistURL} target="_blank" rel="noopener noreferrer"><Play size={17} /> Listeyi aç</a></div>}
+      {startedAt && !recovery && phase === 'focus' && activePlaylistURL && <div className="study-playlist-banner"><div><span>{selectedSubject?.name} · oynatma listesi{selectedDayVideoCount > 0 ? ` · Bugün ${selectedDayVideoCount} video` : selectedResource?.total_videos ? ` · ${selectedResource.total_videos} video` : ''}</span><a href={activePlaylistURL} target="_blank" rel="noopener noreferrer">{activePlaylistURL}</a></div><a className="study-button study-button-primary" href={activePlaylistURL} target="_blank" rel="noopener noreferrer"><Play size={17} /> Listeyi aç</a></div>}
 
       <div className="study-grid">
         <aside className="study-side">
-          <section className="study-card study-plan"><div className="study-card-heading"><h2><Target size={18} /> Bugünün planı</h2><span>{todayPlan.length} görev</span></div>
+          <section className="study-card study-plan"><div className="study-card-heading"><h2><Target size={18} /> Bugünün planı</h2><span>{todayPlan.length} görev{todayVideoCount > 0 ? ` · ${todayVideoCount} video` : ''}</span></div>
             <div className="study-plan-list">{todayPlan.length === 0 ? <div className="study-empty"><Target size={24} /><p>Bugün için plan bulunmuyor.</p><Link to="/plan">Haftalık planı aç</Link></div> : todayPlan.map(item => {
               const studied = todaySessions.filter(session => session.subject_id === item.subject_id && (!item.resource_id || session.resource_id === item.resource_id)).reduce((sum, session) => sum + session.duration_minutes, 0)
               const done = item.planned_minutes > 0 && studied >= item.planned_minutes
-              return <button key={item.id} onClick={() => loadPlanItem(item)} disabled={isTimerActive || !item.subject_id} className={`study-plan-item ${done ? 'is-done' : ''}`}><i style={{ backgroundColor: getExamColor(item.subject_id) }} /><div><strong>{getSubjectName(item.subject_id) || 'Çalışma'}</strong><span>{item.id.startsWith('vpi_') ? 'Video çalışması' : 'Günlük plan'}</span><div className="study-plan-metrics"><span>{formatDuration(item.planned_minutes)}</span>{done && <CheckCircle2 size={15} />}</div></div></button>
+              return <button key={item.id} onClick={() => loadPlanItem(item)} disabled={isTimerActive || !item.subject_id} className={`study-plan-item ${done ? 'is-done' : ''}`}><i style={{ backgroundColor: getExamColor(item.subject_id) }} /><div><strong>{getSubjectName(item.subject_id) || 'Çalışma'}</strong><span>{item.video_count != null ? `${item.video_count} video` : 'Günlük plan'}</span><div className="study-plan-metrics"><span>{formatDuration(item.planned_minutes)}</span>{done && <CheckCircle2 size={15} />}</div></div></button>
             })}</div>
           </section>
 
@@ -352,12 +355,13 @@ export default function Study() {
           <div className="study-selection">
             <label>Sınav<select value={selExam} disabled={isTimerActive} onChange={event => { setSelExam(event.target.value); setSelSubject(''); setSelResource('') }}><option value="">Sınav seç</option>{exams.map(exam => <option key={exam.id} value={exam.id}>{exam.name}</option>)}</select></label>
             <label>Ders<select value={selSubject} disabled={isTimerActive || !selExam} onChange={event => { setSelSubject(event.target.value); setSelResource('') }}><option value="">Ders seç</option>{filteredSubjects.map(subject => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</select></label>
-            {playlistResources.length > 0 && <label>Video oynatma listesi<select value={playlistResources.some(resource => resource.id === selResource) ? selResource : ''} disabled={isTimerActive} onChange={event => setSelResource(event.target.value)}><option value="">Liste seç (isteğe bağlı)</option>{playlistResources.map((resource, index) => <option key={resource.id} value={resource.id}>{selectedSubject?.name}{playlistResources.length > 1 ? ` · Liste ${index + 1}` : ''}</option>)}</select></label>}
+            {playlistResources.length > 0 && <label>Video oynatma listesi<select value={playlistResources.some(resource => resource.id === selResource) ? selResource : ''} disabled={isTimerActive} onChange={event => setSelResource(event.target.value)}><option value="">Liste seç (isteğe bağlı)</option>{playlistResources.map((resource, index) => <option key={resource.id} value={resource.id}>{selectedSubject?.name}{playlistResources.length > 1 ? ` · Liste ${index + 1}` : ''}{resource.total_videos ? ` · ${resource.total_videos} video` : ''}</option>)}</select></label>}
           </div>
 
 
           <div className="study-timer">
             <div className="study-timer-context">{isBreak ? <><Coffee size={17} /> Mola zamanı</> : selectedSubject?.name || 'Ders seç'}</div>
+            {!isBreak && selectedDayVideoCount > 0 && <span className="study-video-count">Bugünkü planda {selectedDayVideoCount} video</span>}
             <div className="study-clock" role="timer" aria-label="Kalan süre">{String(minutes).padStart(2, '0')}<span>:</span>{String(secs).padStart(2, '0')}</div>
             <div className="study-timer-progress" role="progressbar" aria-label="Oturum ilerlemesi" aria-valuenow={Math.round(progress)} aria-valuemin={0} aria-valuemax={100}><i style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} /></div>
             <div className="study-controls">

@@ -621,7 +621,7 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
                       <>
                         <div className="flex items-center justify-between text-[12px] text-slate-400 mt-1.5 ml-4">
                           <span><span className="text-slate-600 font-medium tabular-nums">{watched}</span>/{total} video</span>
-                          {done ? <span className="text-emerald-600 font-medium">tamamlandı</span> : <span>kalan <span className="text-slate-600 font-medium tabular-nums">{remaining}</span> · {fmtMinutes(remaining * (res.avg_video_duration || 0))}</span>}
+                          {done ? <span className="text-emerald-600 font-medium">tamamlandı</span> : <span>kalan <span className="text-slate-600 font-medium tabular-nums">{remaining}</span> video · {fmtMinutes(remaining * (res.avg_video_duration || 0))}</span>}
                         </div>
                         <div className="h-[3px] rounded-full bg-slate-100 overflow-hidden mt-1.5 ml-4">
                           <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, background: done ? '#059669' : c.dot }}></div>
@@ -652,7 +652,7 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
                   <div key={ds} className={`px-1.5 py-2 text-center border-r border-slate-100 last:border-r-0 ${isT ? 'bg-slate-50' : ''}`} style={isT ? { boxShadow: 'inset 0 -2px 0 0 #0f172a' } : {}}>
                     <div className={`text-[11px] font-semibold uppercase ${isT ? 'text-slate-900' : 'text-slate-400'}`}>{DOW[(d.getDay() + 6) % 7]}</div>
                     <div className={`text-sm font-semibold tabular-nums leading-tight ${isT ? 'text-slate-900' : 'text-slate-700'}`}>{d.getDate()}</div>
-                    <div className="text-[11px] text-slate-400 tabular-nums mt-0.5">{tVid > 0 ? `${tVid}v · ${fmtMinutes(tMin)}` : '—'}</div>
+                    <div className="text-[11px] text-slate-400 tabular-nums mt-0.5">{tVid > 0 ? `${tVid} video · ${fmtMinutes(tMin)}` : '—'}</div>
                   </div>
                 )
               })}
@@ -709,8 +709,8 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
                                 <Check className="h-2.5 w-2.5" strokeWidth={3} />
                               </button>
                             </div>
-                            <div className={`text-[12px] font-medium truncate mt-1 ${done ? 'line-through text-slate-400' : 'text-slate-800'}`}>{cleanName(r?.name || '?')} · {it.video_count}v</div>
-                            <div className="text-[11px] text-slate-400 tabular-nums">{fmtMinutes(itemMin)}{done ? ' · izlendi' : partial ? ` · ${w}/${it.video_count}` : ''}</div>
+                            <div className={`text-[12px] font-medium truncate mt-1 ${done ? 'line-through text-slate-400' : 'text-slate-800'}`}>{cleanName(r?.name || '?')}</div>
+                            <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mt-1"><span className="text-[12px] font-semibold text-slate-700 tabular-nums">{it.video_count} video</span><span className="text-[11px] text-slate-400 tabular-nums">{fmtMinutes(itemMin)}{done ? ' · izlendi' : partial ? ` · ${w}/${it.video_count} izlendi` : ''}</span></div>
                             {partial && (
                               <div className="h-[2px] rounded-full bg-slate-100 mt-1 overflow-hidden">
                                 <div className="h-full bg-emerald-400 rounded-full" style={{ width: `${(w / it.video_count) * 100}%` }}></div>
