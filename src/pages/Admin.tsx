@@ -5,6 +5,7 @@ import { createClient, FunctionsHttpError } from '@supabase/supabase-js'
 import Swal from 'sweetalert2'
 import { Users, UserPlus, LogIn, XCircle, ShieldCheck, KeyRound, X } from 'lucide-react'
 import './Admin.css'
+import { profileNameLabel } from '../lib/profileName'
 import { useNavigate } from 'react-router-dom'
 
 // Yeni kullanıcı oluşturmak için session bozmayan secondary client
@@ -223,7 +224,7 @@ export default function Admin() {
                   <div key={p.id} className={`admin-user-row flex items-center justify-between p-3 rounded-lg border transition-all ${isImpersonating ? 'border-indigo-400 bg-indigo-50/50' : 'border-[#e2e8f0] hover:border-[#cbd5e1]'}`}>
                     <div>
                       <div className="flex items-center gap-2">
-                        <p className="text-[13px] font-bold text-[#0f172a]">{p.display_name || 'İsimsiz'}</p>
+                        <p className="text-[13px] font-bold text-[#0f172a]">{profileNameLabel(p.display_name, p.email)}</p>
                         {p.role === 'admin' && <span className="bg-indigo-100 text-indigo-700 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase">Admin</span>}
                         {isImpersonating && <span className="bg-red-100 text-red-600 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase">Şu anki</span>}
                       </div>
@@ -245,7 +246,7 @@ export default function Admin() {
         </div>
       </div>
       <dialog ref={passwordDialog} className="admin-password-dialog" aria-labelledby="admin-password-title" onCancel={event => { event.preventDefault(); closePasswordDialog() }} onClick={event => { if (event.target === event.currentTarget) closePasswordDialog() }}>
-        <div className="admin-password-heading"><div><h2 id="admin-password-title">Şifre değiştir</h2><p>{passwordUser?.display_name || 'Kullanıcı'} · {passwordUser?.email}</p></div><button type="button" onClick={closePasswordDialog} disabled={changingPassword} aria-label="Kapat"><X size={19} /></button></div>
+        <div className="admin-password-heading"><div><h2 id="admin-password-title">Şifre değiştir</h2><p>{profileNameLabel(passwordUser?.display_name, passwordUser?.email)} · {passwordUser?.email}</p></div><button type="button" onClick={closePasswordDialog} disabled={changingPassword} aria-label="Kapat"><X size={19} /></button></div>
         <form onSubmit={changeUserPassword} aria-busy={changingPassword}>
           <label>Yeni şifre<input autoFocus type="password" autoComplete="new-password" required minLength={8} maxLength={128} disabled={changingPassword} value={changedPassword} onChange={event => setChangedPassword(event.target.value)} placeholder="En az 8 karakter" /></label>
           <label>Yeni şifreyi tekrar yaz<input type="password" autoComplete="new-password" required minLength={8} maxLength={128} disabled={changingPassword} value={confirmedPassword} onChange={event => setConfirmedPassword(event.target.value)} /></label>

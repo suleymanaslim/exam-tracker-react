@@ -13,6 +13,7 @@ import {
   RotateCcw, Download, FileJson, Check, Trophy, Copy
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import { actualProfileName, profileNameLabel } from '../lib/profileName'
 import { defaultVocabularyText } from '../lib/defaultVocabulary'
 import { getAvailableDays, extractDayContent } from '../lib/vocabularyHelper'
 
@@ -154,22 +155,23 @@ export default function Dashboard() {
 
       const targetUid = impersonatedUserId || user.id
 
-      // Fetch the display name of the target user
-      supabase.from('profiles').select('display_name').eq('id', targetUid).single().then(r => {
-        if (r.data?.display_name) {
-          setDisplayName(r.data.display_name)
-        } else if (!impersonatedUserId) {
-          setShowNameModal(true)
-        }
-      })
-
-      // Upsert profile and check role (only for the actual logged-in user)
+      // Ensure the profile exists before reading it; preserve existing profile names.
+      const metadataName = actualProfileName(user.user_metadata?.display_name, user.user_metadata?.full_name, user.user_metadata?.name)
       supabase.from('profiles')
-        .upsert({ id: user.id, email: user.email, display_name: user.user_metadata?.display_name || 'Kullanıcı' }, { onConflict: 'id', ignoreDuplicates: true })
-        .then(() => {
-          supabase.from('profiles').select('role').eq('id', user.id).single().then(r => {
-            setIsAdmin(r.data?.role === 'admin')
-          })
+        .upsert({ id: user.id, email: user.email, display_name: metadataName || 'Kullanıcı' }, { onConflict: 'id', ignoreDuplicates: true })
+        .then(async () => {
+          const { data: ownProfile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
+          setIsAdmin(ownProfile?.role === 'admin')
+          const { data: profile, error } = await supabase.from('profiles').select('display_name,email').eq('id', targetUid).single()
+          if (error) return
+          const profileName = actualProfileName(profile?.display_name)
+          const resolved = profileName || (!impersonatedUserId ? metadataName : null)
+          setDisplayName(resolved || profileNameLabel(null, profile?.email))
+          setShowNameModal(!impersonatedUserId && !resolved)
+          if (!impersonatedUserId && !profileName && metadataName) {
+            const { error: repairError } = await supabase.from('profiles').update({ display_name: metadataName }).eq('id', user.id)
+            if (!repairError) setLeaderboard(prev => prev.map(row => row.user_id === user.id ? { ...row, name: metadataName } : row))
+          }
         })
 
       supabase.from('exams').select('*').eq('user_id', targetUid).then(r => {
@@ -278,7 +280,7 @@ export default function Dashboard() {
       todayEnd.setHours(23, 59, 59, 999)
 
       Promise.all([
-        supabase.from('profiles').select('id, display_name, daily_message'),
+        supabase.from('profiles').select('id, display_name, email, daily_message'),
         supabase.from('study_sessions').select('user_id, duration_minutes, subject_id, resource_id')
           .gte('started_at', todayStart.toISOString())
           .lte('started_at', todayEnd.toISOString()),
@@ -301,7 +303,7 @@ export default function Dashboard() {
           profs.forEach(p => {
             userGroups[p.id] = { 
               user_id: p.id, 
-              name: p.display_name || 'Bilinmeyen', 
+              name: actualProfileName(p.display_name, p.id === user.id ? metadataName : null) || profileNameLabel(null, p.email), 
               message: p.daily_message || '', 
               total: 0, 
               details: {} 
@@ -527,9 +529,15 @@ export default function Dashboard() {
   const getResourceName = (id: string | null) => resources.find(r => r.id === id)?.name ?? ''
 
   const saveDisplayName = async () => {
-    if (!tempName.trim()) return
-    await supabase.auth.updateUser({ data: { display_name: tempName.trim() } })
-    setDisplayName(tempName.trim())
+    const name = actualProfileName(tempName)
+    if (!name || impersonatedUserId) return
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (!user || authError) { void Swal.fire('Kaydedilemedi', 'Yeniden giriş yapın.', 'error'); return }
+    const { error: profileError } = await supabase.from('profiles').update({ display_name: name }).eq('id', user.id).select('id').single()
+    if (profileError) { void Swal.fire('Ad kaydedilemedi', 'Lütfen tekrar deneyin.', 'error'); return }
+    await supabase.auth.updateUser({ data: { display_name: name } })
+    setDisplayName(name)
+    setLeaderboard(prev => prev.map(row => row.user_id === user.id ? { ...row, name } : row))
     setShowNameModal(false)
   }
 
@@ -568,7 +576,7 @@ export default function Dashboard() {
             />
             <button
               onClick={saveDisplayName}
-              disabled={!tempName.trim()}
+              disabled={!actualProfileName(tempName)}
               className="w-full h-10 rounded-xl bg-[#2563eb] text-white text-[13px] font-bold hover:bg-blue-600 transition-all disabled:opacity-50"
             >
               Kaydet ve Başla

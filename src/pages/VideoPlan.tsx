@@ -1,4 +1,5 @@
 import './SuitePages.css'
+import './VideoPlan.css'
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { Plus, Trash2, Download, Printer, Settings, EyeOff, SkipForward, X, Check, ChevronUp, ChevronDown } from 'lucide-react'
@@ -154,11 +155,7 @@ export default function VideoPlan() {
       text: `${dateObj.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' })} — kaç video?`,
       html: `
         <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin:16px 0">
-          ${[1,2,3,4,5,6].map(n => `<button className="swal-quick-btn" data-val="${n}" style="width:52px;height:44px;border-radius:10px;border:2px solid #e2e8f0;background:#f8fafc;font-size:16px;font-weight:700;color:#334155;cursor:pointer;transition:all .15s">${n}</button>`).join('')}
-        </div>
-        <div style="display:flex;align-items:center;gap:8px;justify-content:center;margin-top:8px">
-          <input id="manual-count" type="number" min="1" placeholder="veya elle yaz..." style="width:120px;text-align:center;padding:6px 12px;border:2px solid #e2e8f0;border-radius:8px;font-size:14px;font-weight:600;outline:none">
-          <button id="manual-add-btn" style="padding:6px 16px;border-radius:8px;background:#2563eb;color:white;font-size:13px;font-weight:700;border:none;cursor:pointer">Ekle</button>
+          ${[1,2,3,4,5,6].map(n => `<button class="swal-quick-btn video-number-button" type="button" data-val="${n}" style="width:52px;height:44px;border-radius:10px;border:2px solid #e2e8f0;background:#f8fafc;font-size:16px;font-weight:700;color:#334155;cursor:pointer;transition:all .15s">${n}</button>`).join('')}
         </div>
       `,
       showCancelButton: true,
@@ -173,11 +170,6 @@ export default function VideoPlan() {
           })
           btn.addEventListener('mouseover', () => { (btn as HTMLElement).style.background = '#eff6ff'; (btn as HTMLElement).style.borderColor = '#93c5fd' })
           btn.addEventListener('mouseout', () => { (btn as HTMLElement).style.background = '#f8fafc'; (btn as HTMLElement).style.borderColor = '#e2e8f0' })
-        })
-        const manualBtn = Swal.getPopup()?.querySelector('#manual-add-btn')
-        manualBtn?.addEventListener('click', () => {
-          const v = parseInt((Swal.getPopup()?.querySelector('#manual-count') as HTMLInputElement).value)
-          if (v > 0) Swal.close({ isConfirmed: true, isDenied: false, isDismissed: false, value: v })
         })
       },
     })
@@ -276,38 +268,23 @@ export default function VideoPlan() {
     if (!userId || !res) return
     const current = item.watched_count || 0
     
-    const html = `
-      <div className="flex flex-col gap-2 text-left mt-2">
-        <label className="text-xs font-semibold text-slate-500 uppercase">İzlenen Video Sayısı</label>
-        <div className="flex items-center gap-2">
-          <input type="number" id="watch-input" className="swal2-input !m-0 !w-full" value="${current}" min="0" max="${item.video_count}">
-          <span className="text-sm font-semibold text-slate-400 whitespace-nowrap">/ ${item.video_count}</span>
-        </div>
-      </div>
-    `
-
-    const c = await Swal.fire({
-      title: 'İlerleme Kaydet',
-      html,
+    const { value: newVal, isConfirmed } = await Swal.fire<number>({
+      title: 'Kaç video izlendi?',
+      text: `${current} / ${item.video_count} video izlendi`,
+      html: `<div class="video-number-grid" role="group" aria-label="İzlenen video sayısı">${Array.from({ length: item.video_count }, (_, index) => index + 1).map(number => `<button type="button" class="video-number-button" data-count="${number}" aria-label="${number} video izlendi" aria-pressed="${number === current}">${number}</button>`).join('')}</div><button type="button" class="video-number-reset" data-count="0">İzlenmedi · sıfırla</button>`,
       showCancelButton: true,
-      showDenyButton: true,
-      confirmButtonText: 'Kaydet',
-      denyButtonText: 'Tümünü İzledim',
+      showConfirmButton: false,
       cancelButtonText: 'İptal',
-      confirmButtonColor: '#2563eb',
-      denyButtonColor: '#10b981',
-      preConfirm: () => {
-        const val = parseInt((document.getElementById('watch-input') as HTMLInputElement).value)
-        return isNaN(val) ? 0 : val
-      }
+      didOpen: () => {
+        Swal.getPopup()?.querySelectorAll<HTMLButtonElement>('[data-count]').forEach(button => {
+          button.addEventListener('click', () => {
+            const value = Number(button.dataset.count)
+            if (Number.isInteger(value) && value >= 0 && value <= item.video_count) Swal.close({ isConfirmed: true, isDenied: false, isDismissed: false, value })
+          })
+        })
+      },
     })
-
-    let newVal = current
-    if (c.isConfirmed) newVal = c.value as number
-    else if (c.isDenied) newVal = item.video_count
-    else return
-
-    newVal = Math.min(item.video_count, Math.max(0, newVal))
+    if (!isConfirmed || newVal == null) return
 
     setLoading(true)
     const { error } = await supabase.from('video_plan_items').update({
@@ -538,7 +515,7 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
           <p className="suite-eyebrow">VİDEO PROGRAMIN</p>
           <h1 className="text-lg font-semibold tracking-tight">Video planı</h1>
           <p className="text-xs text-slate-400 mt-0.5">
-            {selectedResId ? <span className="text-slate-700 font-medium">Ders seçili — takvimde bir güne tıklayıp video sayısını girin</span> : 'Soldan ders seçin, güne tıklayın. Gün kartını sürükleyerek takas edin.'}
+            {selectedResId ? <span className="text-slate-700 font-medium">Ders seçili — takvimde bir güne tıklayıp video sayısını seçin</span> : 'Soldan ders seçin, güne tıklayın. Gün kartını sürükleyerek takas edin.'}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
