@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAdminStore } from '../lib/adminStore'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, FunctionsHttpError } from '@supabase/supabase-js'
 import Swal from 'sweetalert2'
-import { Users, UserPlus, LogIn, XCircle, ShieldCheck } from 'lucide-react'
+import { Users, UserPlus, LogIn, XCircle, ShieldCheck, KeyRound, X } from 'lucide-react'
+import './Admin.css'
 import { useNavigate } from 'react-router-dom'
 
 // Yeni kullanıcı oluşturmak için session bozmayan secondary client
@@ -15,11 +16,21 @@ const supabaseSecondary = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: { storageKey: 'temp_admin_create', persistSession: false, autoRefreshToken: false }
 })
 
+interface Profile { id: string; display_name: string | null; email: string | null; role: string }
+
 export default function Admin() {
   const { isAdmin, impersonatedUserId, setImpersonatedUserId } = useAdminStore()
-  const [profiles, setProfiles] = useState<any[]>([])
+  const [profiles, setProfiles] = useState<Profile[]>([])
   const [loading, setLoading] = useState(true)
   const navigate = useNavigate()
+  const passwordDialog = useRef<HTMLDialogElement>(null)
+  const passwordBusy = useRef(false)
+  const passwordTrigger = useRef<HTMLButtonElement | null>(null)
+  const [passwordUser, setPasswordUser] = useState<Profile | null>(null)
+  const [changedPassword, setChangedPassword] = useState('')
+  const [confirmedPassword, setConfirmedPassword] = useState('')
+  const [passwordError, setPasswordError] = useState('')
+  const [changingPassword, setChangingPassword] = useState(false)
 
   // New user form
   const [newEmail, setNewEmail] = useState('')
@@ -79,6 +90,48 @@ export default function Admin() {
     setCreating(false)
   }
 
+  const openPasswordDialog = (profile: Profile, trigger: HTMLButtonElement) => {
+    passwordTrigger.current = trigger
+    setPasswordUser(profile); setChangedPassword(''); setConfirmedPassword(''); setPasswordError('')
+    passwordDialog.current?.showModal()
+  }
+  const closePasswordDialog = () => {
+    if (passwordBusy.current) return
+    passwordDialog.current?.close()
+    setPasswordUser(null); setChangedPassword(''); setConfirmedPassword(''); setPasswordError('')
+    passwordTrigger.current?.focus()
+  }
+  const changeUserPassword = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!passwordUser || passwordBusy.current) return
+    if (changedPassword.length < 8 || changedPassword.length > 128 || !changedPassword.trim()) { setPasswordError('Şifre 8–128 karakter olmalı.'); return }
+    if (changedPassword !== confirmedPassword) { setPasswordError('Şifreler eşleşmiyor.'); return }
+    passwordBusy.current = true; setChangingPassword(true); setPasswordError('')
+    let success = false
+    try {
+      const { data, error } = await supabase.functions.invoke('admin-change-password', { body: { userId: passwordUser.id, password: changedPassword } })
+      if (error) {
+        let message = 'Şifre değiştirilemedi. Supabase admin-change-password fonksiyonunun dağıtıldığını kontrol edin.'
+        if (error instanceof FunctionsHttpError) {
+          if (error.context.status === 401) message = 'Oturum geçersiz. Yeniden giriş yapın.'
+          else if (error.context.status !== 404) {
+            const response = await error.context.json().catch(() => null)
+            if (typeof response?.error === 'string') message = response.error
+          }
+        }
+        throw new Error(message)
+      }
+      if (data?.success !== true) throw new Error('Şifre değişikliği doğrulanamadı.')
+      success = true
+    } catch (error) {
+      setPasswordError(error instanceof Error ? error.message : 'Şifre değiştirilemedi.')
+    } finally { passwordBusy.current = false; setChangingPassword(false) }
+    if (success) {
+      closePasswordDialog()
+      void Swal.fire({ icon: 'success', title: 'Şifre değiştirildi', toast: true, position: 'top-end', showConfirmButton: false, timer: 2200 })
+    }
+  }
+
   const handleImpersonate = (userId: string) => {
     window.open(`/?impersonate=${userId}`, '_blank')
     Swal.fire({
@@ -106,7 +159,7 @@ export default function Admin() {
   if (!isAdmin) return null
 
   return (
-    <div className="flex flex-col h-full gap-6 overflow-y-auto max-w-5xl mx-auto w-full pb-10">
+    <div className="admin-page flex flex-col h-full gap-6 overflow-y-auto max-w-5xl mx-auto w-full pb-10">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-black text-[#0f172a] flex items-center gap-2">
@@ -167,7 +220,7 @@ export default function Admin() {
               ) : profiles.map(p => {
                 const isImpersonating = impersonatedUserId === p.id
                 return (
-                  <div key={p.id} className={`flex items-center justify-between p-3 rounded-lg border transition-all ${isImpersonating ? 'border-indigo-400 bg-indigo-50/50' : 'border-[#e2e8f0] hover:border-[#cbd5e1]'}`}>
+                  <div key={p.id} className={`admin-user-row flex items-center justify-between p-3 rounded-lg border transition-all ${isImpersonating ? 'border-indigo-400 bg-indigo-50/50' : 'border-[#e2e8f0] hover:border-[#cbd5e1]'}`}>
                     <div>
                       <div className="flex items-center gap-2">
                         <p className="text-[13px] font-bold text-[#0f172a]">{p.display_name || 'İsimsiz'}</p>
@@ -176,11 +229,14 @@ export default function Admin() {
                       </div>
                       <p className="text-[11px] text-[#64748b]">{p.email}</p>
                     </div>
+                    <div className="admin-user-actions">
+                    {p.role === 'user' && <button onClick={event => openPasswordDialog(p, event.currentTarget)} className="admin-password-button" aria-label={`${p.display_name || p.email || 'Kullanıcı'} için şifre değiştir`}><KeyRound size={15} /> Şifre değiştir</button>}
                     {p.role !== 'admin' && !isImpersonating && (
                       <button onClick={() => handleImpersonate(p.id)} className="h-8 px-3 rounded-lg bg-[#f1f5f9] text-[#0f172a] text-[11px] font-bold hover:bg-[#e2e8f0] flex items-center gap-1.5 transition-all">
                         <LogIn className="h-3 w-3" /> Hesaba Gir
                       </button>
                     )}
+                    </div>
                   </div>
                 )
               })}
@@ -188,6 +244,15 @@ export default function Admin() {
           </div>
         </div>
       </div>
+      <dialog ref={passwordDialog} className="admin-password-dialog" aria-labelledby="admin-password-title" onCancel={event => { event.preventDefault(); closePasswordDialog() }} onClick={event => { if (event.target === event.currentTarget) closePasswordDialog() }}>
+        <div className="admin-password-heading"><div><h2 id="admin-password-title">Şifre değiştir</h2><p>{passwordUser?.display_name || 'Kullanıcı'} · {passwordUser?.email}</p></div><button type="button" onClick={closePasswordDialog} disabled={changingPassword} aria-label="Kapat"><X size={19} /></button></div>
+        <form onSubmit={changeUserPassword} aria-busy={changingPassword}>
+          <label>Yeni şifre<input autoFocus type="password" autoComplete="new-password" required minLength={8} maxLength={128} disabled={changingPassword} value={changedPassword} onChange={event => setChangedPassword(event.target.value)} placeholder="En az 8 karakter" /></label>
+          <label>Yeni şifreyi tekrar yaz<input type="password" autoComplete="new-password" required minLength={8} maxLength={128} disabled={changingPassword} value={confirmedPassword} onChange={event => setConfirmedPassword(event.target.value)} /></label>
+          {passwordError && <p className="admin-password-error" role="alert">{passwordError}</p>}
+          <div className="admin-password-actions"><button type="button" onClick={closePasswordDialog} disabled={changingPassword}>İptal</button><button type="submit" disabled={changingPassword}>{changingPassword ? 'Değiştiriliyor…' : 'Şifreyi değiştir'}</button></div>
+        </form>
+      </dialog>
     </div>
   )
 }

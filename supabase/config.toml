@@ -1,0 +1,6 @@
+project_id = "exam-tracker-react"
+
+[functions.admin-change-password]
+# The handler verifies every bearer token with auth.getUser, then checks the DB role.
+# This supports both legacy and asymmetric user JWT signing keys.
+verify_jwt = false
