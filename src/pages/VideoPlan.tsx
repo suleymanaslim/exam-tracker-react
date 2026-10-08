@@ -7,6 +7,7 @@ import Swal from 'sweetalert2'
 import { useAdminStore } from '../lib/adminStore'
 import { playlistURL } from '../lib/playlist'
 import { openVideoPlanPrint } from '../lib/videoPlanPrint'
+import { buildVideoPlanExport } from '../lib/videoPlanExport'
 
 /* ─────────────── Types ─────────────── */
 function showPlanError(error: { code?: string; message: string }) {
@@ -458,23 +459,7 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
   }
   /* ─── Render ─── */
   const exportJSON = () => {
-    const strs = days.map(localDateStr);
-    const data = {
-      hafta: { baslangic: strs[0], bitis: strs[6] },
-      ozet: { toplam_video: 0, toplam_dk: 0, izlenen_video: 0 },
-      gunler: strs.map(ds => {
-        const dItems = planItems.filter(p => p.date === ds).sort((a,b) => (a.sort_order||0) - (b.sort_order||0));
-        let gVid = 0, gMin = 0, gWatched = 0;
-        const plans = dItems.map(p => {
-          const r = allResources.find(x => x.id === p.resource_id);
-          const min = p.video_count * (r?.avg_video_duration || 0);
-          gVid += p.video_count; gMin += min; gWatched += (p.watched_count || 0);
-          return { ders: cleanName(r?.subject_name || ''), kaynak: cleanName(r?.name || ''), video: p.video_count, izlenen: p.watched_count||0, tamamlandi: !!p.is_completed, sure_dk: min };
-        });
-        data.ozet.toplam_video += gVid; data.ozet.toplam_dk += gMin; data.ozet.izlenen_video += gWatched;
-        return { tarih: ds, planlar: plans };
-      }),
-    };
+    const data = buildVideoPlanExport(days.map(localDateStr), planItems, allResources)
     const b = new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
     const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = 'video_plani.json'; a.click(); URL.revokeObjectURL(u);
   }
