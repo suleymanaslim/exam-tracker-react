@@ -152,3 +152,49 @@ test('random video selection always uses the provided pool and avoids immediate 
   }
 })
 process.on('exit', () => { Date.now = realNow })
+
+function startStopwatch() {
+  start()
+  useTimerStore.getState().pauseTimer()
+  useTimerStore.getState().setMode('stopwatch')
+  useTimerStore.getState().resetTimer(0)
+  useTimerStore.getState().startTimer()
+}
+test('stopwatch counts upward and saves seconds including a sub-minute session', () => {
+  startStopwatch(); clock += 37000
+  const session = recoveryFor(stored(), clock)
+  assert.equal(session.remainingSeconds, 37)
+  assert.equal(session.durationMinutes, 37 / 60)
+  assert.equal(sessionPayload(session).session_type, 'manual')
+  assert.equal(Date.parse(session.endedAt) - Date.parse(session.startedAt), 37000)
+})
+test('stopwatch pause and resume exclude paused time and keep the same session', () => {
+  startStopwatch(); clock += 65000
+  useTimerStore.getState().pauseTimer()
+  const id = useTimerStore.getState().sessionId
+  clock += 3600000
+  assert.equal(recoveryFor(stored(), clock).remainingSeconds, 65)
+  useTimerStore.getState().startTimer(); clock += 27000
+  assert.equal(recoveryFor(stored(), clock).remainingSeconds, 92)
+  assert.equal(useTimerStore.getState().sessionId, id)
+})
+test('stopwatch reopening confirms elapsed time once and finishes without a break', () => {
+  startStopwatch(); clock += 72037000; reopen()
+  const session = useTimerStore.getState().recovery
+  assert.equal(session.remainingSeconds, 72037)
+  assert.equal(useTimerStore.getState().isRunning, false)
+  clock += 3600000; reopen()
+  assert.equal(useTimerStore.getState().recovery.id, session.id)
+  assert.equal(useTimerStore.getState().recovery.remainingSeconds, 72037)
+  useTimerStore.getState().resolveRecovery(true)
+  assert.equal(useTimerStore.getState().phase, 'focus')
+  assert.equal(useTimerStore.getState().secondsLeft, 0)
+  assert.equal(useTimerStore.getState().startedAt, null)
+})
+test('paused stopwatch survives reload without including closed time', () => {
+  startStopwatch(); clock += 46000; useTimerStore.getState().pauseTimer()
+  clock += 500000; reopen()
+  assert.equal(useTimerStore.getState().secondsLeft, 46)
+  assert.equal(useTimerStore.getState().recovery, null)
+  assert.equal(useTimerStore.getState().isRunning, false)
+})

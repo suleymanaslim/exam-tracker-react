@@ -32,3 +32,4 @@
 .study-video-count{font-size:14px;font-weight:600;color:#4269a8;background:#edf3fb;border:1px solid #dce6f4;padding:4px 10px;border-radius:8px;margin-top:8px}.study-plan .study-card-heading>span{text-align:right;font-size:12px;max-width:96px;line-height:1.4}.study-plan-item>div>span{font-variant-numeric:tabular-nums}
 
 .study-plan-today{display:flex;align-items:baseline;justify-content:space-between;gap:8px;border-top:1px solid #edf1f6;padding-top:7px;margin-top:7px}.study-plan-item .study-plan-today>span{font-size:12px;margin:0;color:#62748b}.study-plan-item .study-plan-today>strong{font-size:15px;font-weight:600;color:#4269a8;white-space:nowrap;font-variant-numeric:tabular-nums}
+.study-mode-picker .study-modes{grid-template-columns:repeat(2,minmax(0,1fr))}.study-controls{flex-wrap:wrap}@media(max-width:480px){.study-mode-picker .study-modes{grid-template-columns:1fr}}

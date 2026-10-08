@@ -60,8 +60,8 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     focusSeconds, startedAt: null, sessionId: null, deadlineEpoch: null, phase: 'focus', recovery: null }),
   startTimer: () => {
     const state = get()
-    if (!state.ownerId || !state.selSubject || state.recovery || state.secondsLeft <= 0) return
-    set({ isRunning: true, deadlineEpoch: Date.now() + state.secondsLeft * 1000,
+    if (!state.ownerId || !state.selSubject || state.recovery || (state.mode !== 'stopwatch' && state.secondsLeft <= 0)) return
+    set({ isRunning: true, deadlineEpoch: state.mode === 'stopwatch' ? Date.now() - state.secondsLeft * 1000 : Date.now() + state.secondsLeft * 1000,
       ...(state.phase === 'focus' && !state.startedAt ? { startedAt: new Date(), sessionId: crypto.randomUUID() } : {}) })
   },
   pauseTimer: () => {
@@ -77,6 +77,7 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     const state = get(), recovery = state.recovery
     if (!recovery) return
     if (!saved) { get().resetTimer(state.focusSeconds); return }
+    if (state.mode === 'stopwatch') { get().resetTimer(0); return }
     if (recovery.remainingSeconds <= 0) { get().finishFocus(); return }
     // The confirmed portion has its own ID. Continue only the unrecorded remainder.
     const unrecordedTotal = state.totalSeconds - recovery.durationMinutes * 60
@@ -87,7 +88,7 @@ export const useTimerStore = create<TimerState>((set, get) => ({
   },
   finishFocus: () => {
     const state = get()
-    if (state.mode !== 'manual' && state.breakSeconds > 0) {
+    if (state.mode !== 'manual' && state.mode !== 'stopwatch' && state.breakSeconds > 0) {
       set({ recovery: null, startedAt: null, sessionId: null, phase: 'break', secondsLeft: state.breakSeconds,
         totalSeconds: state.breakSeconds, isRunning: true, deadlineEpoch: Date.now() + state.breakSeconds * 1000 })
     } else get().resetTimer(state.focusSeconds)

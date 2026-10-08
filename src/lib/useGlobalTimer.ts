@@ -15,7 +15,7 @@ function alarm(title: string, body: string) {
 }
 
 export async function saveTimerSession(session: RecoverySession) {
-  if (session.durationMinutes < 1) return true
+  if (session.durationMinutes <= 0 || (session.mode !== 'stopwatch' && session.durationMinutes < 1)) return true
   // The stable UUID prevents a retry/reload from inserting the same portion twice.
   const { error } = await supabase.from('study_sessions').upsert(sessionPayload(session), { onConflict: 'id', ignoreDuplicates: true })
   if (error) throw error
@@ -39,12 +39,13 @@ export function useGlobalTimer(authenticatedUserId: string | null) {
   useEffect(() => {
     if (!ownerId || state.ownerId !== ownerId || !state.recovery || promptingRef.current) return
     const recovery = state.recovery
+    const durationLabel = recovery.mode === 'stopwatch' ? `${Math.floor(recovery.remainingSeconds / 60)} dk ${recovery.remainingSeconds % 60} sn` : `${recovery.durationMinutes} dakika`
     promptingRef.current = true
     void (async () => {
       const result = await Swal.fire({
         title: recovery.reason === 'save-failed' ? 'Oturum kaydedilemedi' : 'Bu süre içinde çalıştınız mı?',
-        text: recovery.reason === 'save-failed' ? `${recovery.durationMinutes} dakikalık çalışma korunuyor. Kaydetmeyi tekrar deneyebilirsin.` : recovery.durationMinutes > 0
-          ? `Önceki oturumdan ${recovery.durationMinutes} dakika geçti. Çalıştıysanız bu süreyi kaydedebiliriz.`
+        text: recovery.reason === 'save-failed' ? `${durationLabel} çalışma korunuyor. Kaydetmeyi tekrar deneyebilirsin.` : recovery.durationMinutes > 0
+          ? `Önceki oturumdan ${durationLabel} geçti. Çalıştıysanız bu süreyi kaydedebiliriz.`
           : 'Önceki oturumda bir dakikadan az süre geçti. Çalışmaya devam etmek ister misiniz?',
         icon: 'question', showDenyButton: recovery.reason !== 'save-failed', showCancelButton: true,
         confirmButtonText: recovery.reason === 'save-failed' ? 'Tekrar kaydet' : recovery.durationMinutes > 0 ? 'Evet, kaydet' : 'Evet, devam et',
@@ -80,8 +81,8 @@ export function useGlobalTimer(authenticatedUserId: string | null) {
       if (current.ownerId !== ownerId || !current.isRunning || current.deadlineEpoch === null || current.recovery || savingRef.current) return
       const remaining = remainingSeconds(current, Date.now())
       current.setSecondsLeft(remaining)
-      document.title = `${current.phase === 'break' ? 'Mola' : 'Odak'} ${String(Math.floor(remaining / 60)).padStart(2, '0')}:${String(remaining % 60).padStart(2, '0')} — ExamTracker`
-      if (remaining > 0) return
+      document.title = `${current.phase === 'break' ? 'Mola' : current.mode === 'stopwatch' ? 'Kronometre' : 'Odak'} ${String(Math.floor(remaining / 60)).padStart(2, '0')}:${String(remaining % 60).padStart(2, '0')} — ExamTracker`
+      if (current.mode === 'stopwatch' || remaining > 0) return
       if (current.phase === 'break') {
         current.finishBreak()
         alarm('Mola bitti', 'Yeni bir odak oturumuna hazırsın.')

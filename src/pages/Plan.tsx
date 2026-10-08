@@ -1,4 +1,6 @@
 import './Plan.css'
+import { localDayKey } from '../lib/statsPeriod'
+import { findWeeklyPlans } from '../lib/weeklyPlanDates'
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import {
@@ -38,7 +40,7 @@ function getMonday(d: Date) {
 }
 
 function formatDate(d: Date) {
-  return d.toISOString().split('T')[0]
+  return localDayKey(d)
 }
 
 function formatDateTR(d: Date) {
@@ -57,6 +59,7 @@ export default function Plan() {
   const [exams, setExams] = useState<Exam[]>([])
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [resources, setResources] = useState<Resource[]>([])
+  const [loadedPlanIds, setLoadedPlanIds] = useState<string[]>([])
   const [planId, setPlanId] = useState<string | null>(null)
   const [items, setItems] = useState<PlanItem[]>([])
   const [videoItems, setVideoItems] = useState<any[]>([])
@@ -112,20 +115,16 @@ export default function Plan() {
 
     const loadPlan = async () => {
       // 1. Haftalık plan ve normal plan maddeleri
-      const { data } = await supabase
-        .from('weekly_plans')
-        .select('*')
-        .eq('user_id', userId)
-        .eq('week_start_date', ws)
-        .single()
-        
-      if (data) {
-        setPlanId(data.id)
-        const { data: pi } = await supabase.from('plan_items').select('*').eq('weekly_plan_id', data.id).order('sort_order')
+      const { data: plans, error } = await findWeeklyPlans(supabase, userId, weekStart)
+      if (error) { void Swal.fire('Plan yüklenemedi', 'Lütfen tekrar deneyin.', 'error'); return }
+      if (plans?.length) {
+        const ids = plans.map(plan => plan.id)
+        setPlanId(ids[0]); setLoadedPlanIds(ids)
+        const { data: pi } = await supabase.from('plan_items').select('*').in('weekly_plan_id', ids).order('sort_order')
         setItems(pi ?? [])
       } else {
         const { data: np } = await supabase.from('weekly_plans').insert({ user_id: userId, week_start_date: ws }).select().single()
-        if (np) { setPlanId(np.id); setItems([]) }
+        if (np) { setPlanId(np.id); setLoadedPlanIds([np.id]); setItems([]) }
       }
 
       // 2. Video plan maddeleri
@@ -237,9 +236,9 @@ export default function Plan() {
     if (!userId || !planId) return
     const lastMonday = new Date(weekStart)
     lastMonday.setDate(lastMonday.getDate() - 7)
-    const { data: lastPlan } = await supabase.from('weekly_plans').select('id').eq('user_id', userId).eq('week_start_date', formatDate(lastMonday)).single()
-    if (!lastPlan) { alert('Geçen hafta plan bulunamadı.'); return }
-    const { data: lastItems } = await supabase.from('plan_items').select('*').eq('weekly_plan_id', lastPlan.id)
+    const { data: lastPlans } = await findWeeklyPlans(supabase, userId, lastMonday)
+    if (!lastPlans?.length) { alert('Geçen hafta plan bulunamadı.'); return }
+    const { data: lastItems } = await supabase.from('plan_items').select('*').in('weekly_plan_id', lastPlans!.map(plan => plan.id))
     if (!lastItems || lastItems.length === 0) { alert('Geçen hafta planı boş.'); return }
     const newItems = lastItems.map(i => ({
       user_id: userId,
@@ -271,7 +270,7 @@ export default function Plan() {
     if (!res.isConfirmed) return
     
     // Clear current items
-    await supabase.from('plan_items').delete().eq('weekly_plan_id', planId)
+    await supabase.from('plan_items').delete().in('weekly_plan_id', loadedPlanIds.length ? loadedPlanIds : [planId])
     setItems([])
 
     const subjectMap: Record<string, string> = {}

@@ -13,6 +13,7 @@ import {
   RotateCcw, Download, FileJson, Check, Trophy, Copy
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import { findWeeklyPlans } from '../lib/weeklyPlanDates'
 import { actualProfileName, profileNameLabel } from '../lib/profileName'
 import { defaultVocabularyText } from '../lib/defaultVocabulary'
 import { getAvailableDays, extractDayContent } from '../lib/vocabularyHelper'
@@ -200,7 +201,6 @@ export default function Dashboard() {
         .then(r => r.data && setWeekSessions(r.data))
 
       // Haftalık plan
-      const mondayStr = localDateStr(monday)
       const weekDates = Array.from({ length: 7 }).map((_, i) => {
         const d = new Date(monday)
         d.setDate(d.getDate() + i)
@@ -208,12 +208,12 @@ export default function Dashboard() {
       })
 
       Promise.all([
-        supabase.from('weekly_plans').select('id').eq('user_id', targetUid).eq('week_start_date', mondayStr).single(),
+        findWeeklyPlans(supabase, targetUid, monday),
         supabase.from('video_plan_items').select('*, resources(name, subject_id, avg_video_duration, subjects(name))').eq('user_id', targetUid).in('date', weekDates)
       ]).then(async ([wpRes, vpiRes]) => {
         let items: any[] = []
-        if (wpRes.data) {
-          const { data: pi } = await supabase.from('plan_items').select('*').eq('weekly_plan_id', wpRes.data.id)
+        if (wpRes.data?.length) {
+          const { data: pi } = await supabase.from('plan_items').select('*').in('weekly_plan_id', wpRes.data.map(plan => plan.id))
           if (pi) items = [...items, ...pi]
         }
         if (vpiRes.data) {
@@ -448,9 +448,9 @@ export default function Dashboard() {
 
     const monday = getMonday(new Date())
     const weekStart = localDateStr(monday)
-    const { data: plan } = await supabase.from('weekly_plans').select('id').eq('user_id', user.id).eq('week_start_date', weekStart).single()
+    const { data: plans } = await findWeeklyPlans(supabase, user.id, monday)
     let planItems: any[] = []
-    if (plan) { const { data } = await supabase.from('plan_items').select('*, subjects(name), resources(name)').eq('weekly_plan_id', plan.id); planItems = data ?? [] }
+    if (plans?.length) { const { data } = await supabase.from('plan_items').select('*, subjects(name), resources(name)').in('weekly_plan_id', plans.map(plan => plan.id)); planItems = data ?? [] }
 
     const sunday = new Date(monday); sunday.setDate(sunday.getDate() + 6); sunday.setHours(23, 59, 59, 999)
     const { data: sessions } = await supabase.from('study_sessions').select('*, subjects(name), resources(name)').eq('user_id', user.id).gte('started_at', monday.toISOString()).lte('started_at', sunday.toISOString())

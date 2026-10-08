@@ -48,7 +48,7 @@ export default function AppLayout() {
     sidebarTimer.current = setTimeout(() => setExpanded(open), delay)
   }
   useEffect(() => () => { if (sidebarTimer.current) clearTimeout(sidebarTimer.current) }, [])
-  const { isRunning, secondsLeft } = useTimerStore()
+  const { isRunning, secondsLeft, mode } = useTimerStore()
   const { isAdmin, impersonatedUserId, setIsAdmin, setImpersonatedUserId } = useAdminStore()
 
   const [contextReady, setContextReady] = useState(false)
@@ -94,7 +94,7 @@ export default function AppLayout() {
       <aside className={`app-sidebar ${expanded ? 'is-expanded' : 'is-collapsed'}`} onMouseEnter={() => scheduleSidebar(true, 120)} onMouseLeave={() => scheduleSidebar(false, 320)} onFocus={() => scheduleSidebar(true, 0)} onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) scheduleSidebar(false, 320) }}>
         <div className="app-brand"><img className="app-brand-image" src="/studytracker-logo.png" alt="StudyTracker logosu" width="36" height="36" /><div className="app-nav-label"><strong>StudyTracker</strong><span>Çalışma alanın</span></div></div>
 
-        {isRunning && <Link to="/study" className="app-timer" aria-label={`Çalışmaya dön, kalan süre ${timerMM}:${timerSS}`}><span className="app-timer-dot" /><span>{timerMM}:{timerSS}</span></Link>}
+        {isRunning && <Link to="/study" className="app-timer" aria-label={`Çalışmaya dön, ${mode === 'stopwatch' ? 'çalışılan süre' : 'kalan süre'} ${timerMM}:${timerSS}`}><span className="app-timer-dot" /><span>{timerMM}:{timerSS}</span></Link>}
         <nav className="app-nav" aria-label="Ana gezinme">
           <p className="app-nav-caption app-nav-label">ÇALIŞMA ALANI</p>
           {navItems.map(item => <Link key={item.href} to={item.href} title={item.label} aria-label={item.label} aria-current={location.pathname === item.href ? 'page' : undefined} className={`app-nav-link ${location.pathname === item.href ? 'is-active' : ''}`}><item.icon size={19} /><span className="app-nav-label">{item.label}</span></Link>)}

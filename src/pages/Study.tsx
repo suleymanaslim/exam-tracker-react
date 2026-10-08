@@ -14,6 +14,7 @@ import { useAdminStore } from '../lib/adminStore'
 import FocusReset from '../components/FocusReset'
 import { playlistURL } from '../lib/playlist'
 import { unlockTimerAlarm, stopTimerAlarm, playTimerAlarm } from '../lib/timerAudio'
+import { findWeeklyPlans } from '../lib/weeklyPlanDates'
 import { localDayKey } from '../lib/statsPeriod'
 
 interface Exam { id: string; name: string; color: string }
@@ -30,16 +31,7 @@ interface PlanItem {
   title: string | null; planned_minutes: number; video_count?: number
 }
 
-type SessionMode = 'pomodoro_long' | 'pomodoro_short' | 'manual'
-
-function getMonday(d: Date) {
-  const date = new Date(d)
-  const day = date.getDay()
-  const diff = date.getDate() - day + (day === 0 ? -6 : 1)
-  date.setDate(diff)
-  date.setHours(0, 0, 0, 0)
-  return date
-}
+type SessionMode = 'pomodoro_long' | 'pomodoro_short' | 'manual' | 'stopwatch'
 
 export default function Study() {
   const { impersonatedUserId } = useAdminStore()
@@ -114,16 +106,15 @@ export default function Study() {
 
         const today = new Date()
         const dayOfWeek = today.getDay() === 0 ? 7 : today.getDay()
-        const mondayStr = localDayKey(getMonday(today))
         const todayStr = localDayKey(today)
         
         Promise.all([
-          supabase.from('weekly_plans').select('id').eq('user_id', targetUid).eq('week_start_date', mondayStr).single(),
+          findWeeklyPlans(supabase, targetUid, today),
           supabase.from('video_plan_items').select('*, resources(name, subject_id, avg_video_duration, subjects(name))').eq('user_id', targetUid).eq('date', todayStr)
         ]).then(async ([wp, vpiRes]) => {
           let items: any[] = []
-          if (wp.data) {
-            const { data: pi } = await supabase.from('plan_items').select('*').eq('weekly_plan_id', wp.data.id).eq('day_of_week', dayOfWeek).order('sort_order')
+          if (wp.data?.length) {
+            const { data: pi } = await supabase.from('plan_items').select('*').in('weekly_plan_id', wp.data.map(plan => plan.id)).eq('day_of_week', dayOfWeek).order('sort_order')
             if (pi) items = [...items, ...pi]
           }
           if (vpiRes.data) {
@@ -164,7 +155,7 @@ export default function Study() {
   let focusMinutes = settings.long_focus_minutes
   if (mode === 'pomodoro_short') focusMinutes = settings.short_focus_minutes
   else if (mode === 'manual') focusMinutes = settings.long_focus_minutes * pomodoroCount
-  const focusSeconds = focusMinutes * 60
+  const focusSeconds = mode === 'stopwatch' ? 0 : focusMinutes * 60
 
   // ── Break seconds'ı ayarlardan store'a yaz ─────────────────────────
   useEffect(() => {
@@ -193,7 +184,7 @@ export default function Study() {
       const result = await Swal.fire({ title: 'Oturumu sıfırla?', text: 'Bu oturumdaki süre kaydedilmez. Kaydetmek için bitir düğmesini kullanabilirsin.', icon: 'question', showCancelButton: true, confirmButtonText: 'Sıfırla', cancelButtonText: 'Devam et' })
       if (!result.isConfirmed) return
     }
-    resetTimer(storedFocusSeconds || focusSeconds)
+    resetTimer(mode === 'stopwatch' ? 0 : storedFocusSeconds || focusSeconds)
   }
 
   const skipBreak = () => {
@@ -211,8 +202,9 @@ export default function Study() {
     pauseTimer()
     try {
       await saveTimerSession(session)
+      if (useTimerStore.getState().ownerId !== session.ownerId || useTimerStore.getState().sessionId !== session.id) return
       resetTimer(current.focusSeconds)
-      void Swal.fire({ icon: session.durationMinutes ? 'success' : 'info', title: session.durationMinutes ? 'Kaydedildi' : 'Kaydedilmedi', text: session.durationMinutes ? `${session.durationMinutes} dakikalık oturum kaydedildi.` : 'Bir dakikadan kısa oturum kaydedilmedi.', timer: 2000, showConfirmButton: false })
+      void Swal.fire({ icon: session.durationMinutes ? 'success' : 'info', title: session.durationMinutes ? 'Kaydedildi' : 'Kaydedilmedi', text: session.durationMinutes ? session.mode === 'stopwatch' ? `${Math.floor(session.remainingSeconds / 60)} dk ${session.remainingSeconds % 60} sn kaydedildi.` : `${session.durationMinutes} dakikalık oturum kaydedildi.` : 'Bir dakikadan kısa oturum kaydedilmedi.', timer: 2000, showConfirmButton: false })
     } catch (error) {
       console.error(error)
       void Swal.fire('Kaydedilemedi', 'Çalışma süren korunuyor. Tekrar deneyebilirsin.', 'error')
@@ -313,6 +305,7 @@ export default function Study() {
   const todayVideoCount = todayPlan.reduce((sum, item) => sum + (item.video_count || 0), 0)
   const activePlaylistURL = playlistURL(selectedResource?.url)
   const modeOptions: { key: SessionMode; label: string; description: string }[] = [
+    { key: 'stopwatch', label: 'Kronometre', description: 'Başlat · duraklat · bitir ve kaydet' },
     { key: 'pomodoro_short', label: 'Kısa Pomodoro', description: `${settings.short_focus_minutes} dk odak · ${settings.short_break_minutes} dk mola` },
     { key: 'pomodoro_long', label: 'Uzun Pomodoro', description: `${settings.long_focus_minutes} dk odak · ${settings.long_break_minutes} dk mola` },
     { key: 'manual', label: 'Kesintisiz odak', description: `${settings.long_focus_minutes * pomodoroCount} dk · molasız` },
@@ -344,13 +337,13 @@ export default function Study() {
         <section className={`study-card study-focus ${isBreak ? 'study-break' : ''}`}>
           <div className="study-card-heading"><h2><Timer size={18} /> Odak oturumu</h2><span className={`study-status ${isRunning ? 'is-running' : ''}`}>{isBreak ? 'Mola' : isRunning ? 'Çalışılıyor' : startedAt ? 'Duraklatıldı' : 'Hazır'}</span></div>
           <details className="study-mode-picker">
-            <summary>{modeOptions.find(option => option.key === mode)?.label} <span>· {isTimerActive ? Math.round(storedFocusSeconds / 60) : focusMinutes} dk</span></summary>
+            <summary>{modeOptions.find(option => option.key === mode)?.label} {mode !== 'stopwatch' && <span>· {isTimerActive ? Math.round(storedFocusSeconds / 60) : focusMinutes} dk</span>}</summary>
           <div className="study-modes" role="group" aria-label="Çalışma modu">
             {modeOptions.map(option => <button key={option.key} disabled={isTimerActive} onClick={event => { setMode(option.key); event.currentTarget.closest('details')?.removeAttribute('open') }} aria-pressed={mode === option.key} className={mode === option.key ? 'selected' : ''}><strong>{option.label}</strong><span>{option.description}</span></button>)}
           </div>
           {mode === 'manual' && <label className="study-block-count">Odak süresi<select disabled={isTimerActive} value={pomodoroCount} onChange={event => setPomodoroCount(Number(event.target.value))}>{[1,2,3,4,5].map(count => <option key={count} value={count}>{count * settings.long_focus_minutes} dakika</option>)}</select></label>}
 
-          <details className="study-pomodoro-settings"><summary>Oturum süreleri</summary><div>{([{key: 'short_focus_minutes', label: 'Kısa odak'}, {key: 'short_break_minutes', label: 'Kısa mola'}, {key: 'long_focus_minutes', label: 'Uzun odak'}, {key: 'long_break_minutes', label: 'Uzun mola'}] as const).map(field => <label key={field.key}>{field.label}<input type="number" min="1" max="180" disabled={isTimerActive} value={settings[field.key]} onChange={event => { const value = Number(event.target.value); if (Number.isFinite(value) && value >= 1 && value <= 180) setSettings(current => ({ ...current, [field.key]: value })) }} /><span>dk</span></label>)}</div></details>
+          {mode !== 'stopwatch' && <details className="study-pomodoro-settings"><summary>Oturum süreleri</summary><div>{([{key: 'short_focus_minutes', label: 'Kısa odak'}, {key: 'short_break_minutes', label: 'Kısa mola'}, {key: 'long_focus_minutes', label: 'Uzun odak'}, {key: 'long_break_minutes', label: 'Uzun mola'}] as const).map(field => <label key={field.key}>{field.label}<input type="number" min="1" max="180" disabled={isTimerActive} value={settings[field.key]} onChange={event => { const value = Number(event.target.value); if (Number.isFinite(value) && value >= 1 && value <= 180) setSettings(current => ({ ...current, [field.key]: value })) }} /><span>dk</span></label>)}</div></details>}
           </details>
 
           <div className="study-selection">
@@ -363,14 +356,14 @@ export default function Study() {
           <div className="study-timer">
             <div className="study-timer-context">{isBreak ? <><Coffee size={17} /> Mola zamanı</> : selectedSubject?.name || 'Ders seç'}</div>
             {!isBreak && selectedDayVideoCount > 0 && <span className="study-video-count">Bugünkü planda {selectedDayVideoCount} video</span>}
-            <div className="study-clock" role="timer" aria-label="Kalan süre">{String(minutes).padStart(2, '0')}<span>:</span>{String(secs).padStart(2, '0')}</div>
-            <div className="study-timer-progress" role="progressbar" aria-label="Oturum ilerlemesi" aria-valuenow={Math.round(progress)} aria-valuemin={0} aria-valuemax={100}><i style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} /></div>
+            <div className="study-clock" role="timer" aria-label={mode === 'stopwatch' ? 'Çalışılan süre' : 'Kalan süre'}>{String(minutes).padStart(2, '0')}<span>:</span>{String(secs).padStart(2, '0')}</div>
+            {mode !== 'stopwatch' && <div className="study-timer-progress" role="progressbar" aria-label="Oturum ilerlemesi" aria-valuenow={Math.round(progress)} aria-valuemin={0} aria-valuemax={100}><i style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} /></div>}
             <div className="study-controls">
               <button className="study-icon-button" onClick={isBreak ? skipBreak : handleReset} aria-label={isBreak ? 'Molayı atla' : 'Sayacı sıfırla'} title={isBreak ? 'Molayı atla' : 'Sıfırla'}>{isBreak ? <SkipForward size={19} /> : <RotateCcw size={19} />}</button>
-              <button className="study-button study-button-primary study-start" onClick={toggleTimer} disabled={!selSubject || !userId || ownerId !== userId || !!recovery}>{isRunning ? <Pause size={19} /> : <Play size={19} />}{isRunning ? 'Duraklat' : startedAt || isBreak ? 'Devam et' : 'Odaklanmaya başla'}</button>
-              {!isBreak && <button className="study-icon-button" onClick={endEarly} disabled={!startedAt || !!recovery} aria-label="Çalışmayı bitir ve kaydet" title="Bitir ve kaydet"><CheckCircle2 size={19} /></button>}
+              <button className="study-button study-button-primary study-start" onClick={toggleTimer} disabled={!selSubject || !userId || ownerId !== userId || !!recovery}>{isRunning ? <Pause size={19} /> : <Play size={19} />}{isRunning ? 'Duraklat' : startedAt || isBreak ? 'Devam et' : mode === 'stopwatch' ? 'Kronometreyi başlat' : 'Odaklanmaya başla'}</button>
+              {!isBreak && <button className={mode === 'stopwatch' ? 'study-button study-button-secondary' : 'study-icon-button'} onClick={endEarly} disabled={!startedAt || !!recovery} aria-label="Çalışmayı bitir ve kaydet" title="Bitir ve kaydet"><CheckCircle2 size={19} />{mode === 'stopwatch' && <span>Bitir ve kaydet</span>}</button>}
             </div>
-            <button className="study-test-end" disabled={!!recovery} onClick={() => { const timer = useTimerStore.getState(); if (timer.phase === 'break') timer.finishBreak(); else timer.finishFocus(); playTimerAlarm() }}>Bitişi test et · kayıt yok</button>
+            {mode !== 'stopwatch' && <button className="study-test-end" disabled={!!recovery} onClick={() => { const timer = useTimerStore.getState(); if (timer.phase === 'break') timer.finishBreak(); else timer.finishFocus(); playTimerAlarm() }}>Bitişi test et · kayıt yok</button>}
           </div>
 
         </section>
