@@ -198,3 +198,62 @@ test('paused stopwatch survives reload without including closed time', () => {
   assert.equal(useTimerStore.getState().recovery, null)
   assert.equal(useTimerStore.getState().isRunning, false)
 })
+
+test('a question task starts counting up immediately and preserves task selection after reopen', () => {
+  bindTimerOwner(null); storage.clear(); bindTimerOwner('alice')
+  const planId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  useTimerStore.getState().startQuestions({ examId: 'ags', subjectId: 'verbal', resourceId: 'video', planId, date: '2026-10-09' })
+  assert.equal(useTimerStore.getState().mode, 'questions')
+  assert.equal(useTimerStore.getState().isRunning, true)
+  clock += 83000; reopen()
+  const session = useTimerStore.getState().recovery
+  assert.equal(session.questionPlanId, planId)
+  assert.equal(session.subjectId, 'verbal')
+  assert.equal(session.remainingSeconds, 83)
+  assert.equal(session.durationMinutes, 83 / 60)
+})
+test('extra questions need no video task and cannot replace an active or paused session', () => {
+  bindTimerOwner(null); storage.clear(); bindTimerOwner('alice')
+  useTimerStore.getState().startQuestions({ examId: 'yds', subjectId: 'english', date: '2026-10-09' })
+  const id = useTimerStore.getState().sessionId
+  assert.equal(useTimerStore.getState().questionPlanId, null)
+  clock += 45000; useTimerStore.getState().pauseTimer()
+  useTimerStore.getState().startQuestions({ examId: 'ags', subjectId: 'math', date: '2026-10-09' })
+  assert.equal(useTimerStore.getState().sessionId, id)
+  assert.equal(useTimerStore.getState().selSubject, 'english')
+  clock += 3600000; reopen()
+  assert.equal(useTimerStore.getState().secondsLeft, 45)
+  useTimerStore.getState().startTimer(); clock += 5000
+  assert.equal(recoveryFor(stored(), clock).remainingSeconds, 50)
+})
+test('question save failures retain frozen counts, optional answers and UUID across reloads', () => {
+  bindTimerOwner(null); storage.clear(); bindTimerOwner('alice')
+  useTimerStore.getState().startQuestions({ examId: 'ags', subjectId: 'verbal', date: '2026-10-09' })
+  clock += 90000; useTimerStore.getState().pauseTimer()
+  const session = recoveryFor(stored(), clock)
+  useTimerStore.setState({ recovery: { ...session, solvedQuestions: 30, correctQuestions: 22, wrongQuestions: 5, reason: 'save-failed' } })
+  clock += 500000; reopen()
+  const restored = useTimerStore.getState().recovery
+  assert.equal(restored.id, session.id)
+  assert.equal(restored.remainingSeconds, 90)
+  assert.equal(restored.solvedQuestions, 30)
+  assert.equal(restored.correctQuestions, 22)
+  assert.equal(restored.wrongQuestions, 5)
+  useTimerStore.getState().resolveRecovery(true)
+  assert.equal(useTimerStore.getState().isRunning, false)
+  assert.equal(useTimerStore.getState().secondsLeft, 0)
+  assert.equal(useTimerStore.getState().questionPlanId, null)
+  assert.equal(useTimerStore.getState().phase, 'focus')
+})
+test('question recovery is not blocked by a finishing dialog after changing account or reloading', () => {
+  bindTimerOwner(null); storage.clear(); bindTimerOwner('alice')
+  useTimerStore.getState().startQuestions({ examId: 'ags', subjectId: 'verbal', date: '2026-10-09' })
+  clock += 50000
+  useTimerStore.setState({ isFinishing: true })
+  bindTimerOwner('bob')
+  useTimerStore.setState({ isFinishing: true })
+  bindTimerOwner('alice')
+  assert.equal(useTimerStore.getState().isFinishing, false)
+  assert.equal(useTimerStore.getState().recovery.remainingSeconds, 50)
+  assert.equal(useTimerStore.getState().recovery.ownerId, 'alice')
+})

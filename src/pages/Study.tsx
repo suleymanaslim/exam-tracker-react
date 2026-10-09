@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useTimerStore } from '../lib/timerStore'
 import { saveTimerSession } from '../lib/useGlobalTimer'
-import { recoveryFor } from '../lib/timerRecovery'
+import { recoveryFor, isCountUp } from '../lib/timerRecovery'
 import Swal from 'sweetalert2'
 import {
   Timer, Play, Pause, RotateCcw, Plus, Clock,
@@ -13,9 +13,13 @@ import {
 import { useAdminStore } from '../lib/adminStore'
 import FocusReset from '../components/FocusReset'
 import { playlistURL } from '../lib/playlist'
-import { unlockTimerAlarm, stopTimerAlarm, playTimerAlarm } from '../lib/timerAudio'
+import { unlockTimerAlarm, stopTimerAlarm } from '../lib/timerAudio'
 import { findWeeklyPlans } from '../lib/weeklyPlanDates'
 import { localDayKey } from '../lib/statsPeriod'
+import { fetchQuestionPlans, questionPlanError } from '../lib/questionPlanData'
+import { openQuestionPlans } from '../lib/questionPlan'
+import type { QuestionPlan as QuestionTask } from '../lib/questionPlan'
+import { questionCompletionOptions, readQuestionAnswers, lockQuestionInputs } from '../lib/questionDialogs'
 
 interface Exam { id: string; name: string; color: string }
 interface Subject { id: string; exam_id: string; name: string }
@@ -31,7 +35,7 @@ interface PlanItem {
   title: string | null; planned_minutes: number; video_count?: number
 }
 
-type SessionMode = 'pomodoro_long' | 'pomodoro_short' | 'manual' | 'stopwatch'
+type SessionMode = 'pomodoro_long' | 'pomodoro_short' | 'manual' | 'stopwatch' | 'questions'
 
 export default function Study() {
   const { impersonatedUserId } = useAdminStore()
@@ -44,6 +48,8 @@ export default function Study() {
     long_focus_minutes: 50, long_break_minutes: 10,
     short_focus_minutes: 25, short_break_minutes: 5
   })
+  const [questionPlans, setQuestionPlans] = useState<QuestionTask[]>([])
+  const [questionError, setQuestionError] = useState('')
   const [todayPlan, setTodayPlan] = useState<PlanItem[]>([])
   const [pomodoroCount, setPomodoroCount] = useState(2)
   const [todaySessions, setTodaySessions] = useState<any[]>([])
@@ -70,6 +76,9 @@ export default function Study() {
     selResource,
     ownerId,
     recovery,
+    questionPlanId,
+    isFinishing,
+    startQuestions,
     startTimer,
     pauseTimer,
     focusSeconds: storedFocusSeconds,
@@ -151,11 +160,28 @@ export default function Study() {
     return () => window.removeEventListener('study-session-saved', refresh)
   }, [userId])
 
+  useEffect(() => {
+    if (!userId) return
+    let cancelled = false
+    const refresh = async () => {
+      try {
+        const tasks = await fetchQuestionPlans(userId)
+        if (!cancelled) { setQuestionPlans(openQuestionPlans(tasks, localDayKey(new Date()))); setQuestionError('') }
+      } catch (error) {
+        if (!cancelled) { setQuestionPlans([]); setQuestionError(questionPlanError(error as { code?: string })) }
+      }
+    }
+    setQuestionPlans([])
+    void refresh()
+    window.addEventListener('study-session-saved', refresh)
+    return () => { cancelled = true; window.removeEventListener('study-session-saved', refresh) }
+  }, [userId])
+
   // ── Focus minutes from settings ────────────────────────────────────
   let focusMinutes = settings.long_focus_minutes
   if (mode === 'pomodoro_short') focusMinutes = settings.short_focus_minutes
   else if (mode === 'manual') focusMinutes = settings.long_focus_minutes * pomodoroCount
-  const focusSeconds = mode === 'stopwatch' ? 0 : focusMinutes * 60
+  const focusSeconds = isCountUp(mode) ? 0 : focusMinutes * 60
 
   // ── Break seconds'ı ayarlardan store'a yaz ─────────────────────────
   useEffect(() => {
@@ -184,7 +210,7 @@ export default function Study() {
       const result = await Swal.fire({ title: 'Oturumu sıfırla?', text: 'Bu oturumdaki süre kaydedilmez. Kaydetmek için bitir düğmesini kullanabilirsin.', icon: 'question', showCancelButton: true, confirmButtonText: 'Sıfırla', cancelButtonText: 'Devam et' })
       if (!result.isConfirmed) return
     }
-    resetTimer(mode === 'stopwatch' ? 0 : storedFocusSeconds || focusSeconds)
+    resetTimer(isCountUp(mode) ? 0 : storedFocusSeconds || focusSeconds)
   }
 
   const skipBreak = () => {
@@ -192,7 +218,43 @@ export default function Study() {
   }
 
   const endEarly = async () => {
-    if (!startedAt || recovery) return
+    if (!startedAt || recovery || isFinishing) return
+    if (mode === 'questions') {
+      const timer = useTimerStore.getState()
+      const wasRunning = timer.isRunning
+      timer.pauseTimer()
+      const current = useTimerStore.getState()
+      if (!current.ownerId) return
+      const session = recoveryFor({ ...current, ownerId: current.ownerId, startedAt: current.startedAt?.toISOString() || null }, Date.now())
+      if (!session) return
+      if (session.durationMinutes <= 0) { void Swal.fire('Henüz süre yok', 'En az bir saniye çalıştıktan sonra kaydedebilirsin.', 'info'); if (wasRunning) current.startTimer(); return }
+      useTimerStore.setState({ isFinishing: true })
+      const result = await Swal.fire({
+        ...questionCompletionOptions(), title: 'Kaç soru çözdün?',
+        showCancelButton: true, confirmButtonText: 'Bitir ve kaydet', cancelButtonText: 'Devam et', confirmButtonColor: '#4269a8',
+        showLoaderOnConfirm: true, allowOutsideClick: () => !Swal.isLoading(),
+        preConfirm: async value => {
+          if (useTimerStore.getState().ownerId !== session.ownerId || useTimerStore.getState().sessionId !== session.id) return false
+          const pending = useTimerStore.getState().recovery
+          const answers = pending?.id === session.id && pending.solvedQuestions != null ? { solved_questions: pending.solvedQuestions, correct_questions: pending.correctQuestions ?? null, wrong_questions: pending.wrongQuestions ?? null } : readQuestionAnswers(value)
+          if (!answers) return false
+          const completed = { ...session, solvedQuestions: answers.solved_questions, correctQuestions: answers.correct_questions, wrongQuestions: answers.wrong_questions }
+          // Persist the frozen count and UUID before sending, including network failures/reloads.
+          useTimerStore.setState({ recovery: { ...completed, reason: 'save-failed' } })
+          lockQuestionInputs()
+          try { await saveTimerSession(completed); return completed }
+          catch { Swal.showValidationMessage('Kaydedilemedi. Süren ve soru sayın korunuyor; tekrar deneyebilirsin.'); return false }
+        },
+      })
+      const state = useTimerStore.getState()
+      if (state.ownerId !== session.ownerId || state.sessionId !== session.id) return
+      useTimerStore.setState({ isFinishing: false })
+      if (result.isConfirmed) {
+        state.resetTimer(0)
+        void Swal.fire({ icon: 'success', title: `${result.value.solvedQuestions} soru kaydedildi`, timer: 1800, showConfirmButton: false })
+      } else if (!state.recovery && wasRunning) state.startTimer()
+      return
+    }
     const result = await Swal.fire({ title: 'Çalışmayı bitir ve kaydet?', icon: 'question', showCancelButton: true, confirmButtonText: 'Bitir ve kaydet', cancelButtonText: 'Devam et', confirmButtonColor: '#4269a8' })
     if (!result.isConfirmed) return
     const current = useTimerStore.getState()
@@ -282,6 +344,7 @@ export default function Study() {
   const filteredSubjects = subjects.filter(s => s.exam_id === selExam)
   const playlistResources = resources.filter(resource => resource.subject_id === selSubject && resource.resource_type === 'video_ders' && playlistURL(resource.url))
 
+  const [todayKey] = useState(() => localDayKey(new Date()))
   const minutes = Math.floor(secondsLeft / 60)
   const secs = secondsLeft % 60
   const progress = totalSeconds > 0 ? ((totalSeconds - secondsLeft) / totalSeconds) * 100 : 0
@@ -305,6 +368,7 @@ export default function Study() {
   const todayVideoCount = todayPlan.reduce((sum, item) => sum + (item.video_count || 0), 0)
   const activePlaylistURL = playlistURL(selectedResource?.url)
   const modeOptions: { key: SessionMode; label: string; description: string }[] = [
+    { key: 'questions', label: 'Soru çöz', description: 'Ders seç · kronometreyle çöz' },
     { key: 'stopwatch', label: 'Kronometre', description: 'Başlat · duraklat · bitir ve kaydet' },
     { key: 'pomodoro_short', label: 'Kısa Pomodoro', description: `${settings.short_focus_minutes} dk odak · ${settings.short_break_minutes} dk mola` },
     { key: 'pomodoro_long', label: 'Uzun Pomodoro', description: `${settings.long_focus_minutes} dk odak · ${settings.long_break_minutes} dk mola` },
@@ -319,51 +383,58 @@ export default function Study() {
       </header>
 
       {recovery && <div className="study-recovery-banner"><span>Önceki oturumun onay bekliyor.</span><button className="study-button study-button-secondary" onClick={() => useTimerStore.setState({ recovery: { ...recovery } })}>Oturumu değerlendir</button></div>}
-      {startedAt && !recovery && phase === 'focus' && activePlaylistURL && <div className="study-playlist-banner"><div><span>{selectedSubject?.name} · oynatma listesi{selectedDayVideoCount > 0 ? ` · Bugün ${selectedDayVideoCount} video` : selectedResource?.total_videos ? ` · ${selectedResource.total_videos} video` : ''}</span><a href={activePlaylistURL} target="_blank" rel="noopener noreferrer">{activePlaylistURL}</a></div><a className="study-button study-button-primary" href={activePlaylistURL} target="_blank" rel="noopener noreferrer"><Play size={17} /> Listeyi aç</a></div>}
+      {startedAt && !recovery && phase === 'focus' && mode !== 'questions' && activePlaylistURL && <div className="study-playlist-banner"><div><span>{selectedSubject?.name} · oynatma listesi{selectedDayVideoCount > 0 ? ` · Bugün ${selectedDayVideoCount} video` : selectedResource?.total_videos ? ` · ${selectedResource.total_videos} video` : ''}</span><a href={activePlaylistURL} target="_blank" rel="noopener noreferrer">{activePlaylistURL}</a></div><a className="study-button study-button-primary" href={activePlaylistURL} target="_blank" rel="noopener noreferrer"><Play size={17} /> Listeyi aç</a></div>}
 
       <div className="study-grid">
         <aside className="study-side">
-          <section className="study-card study-plan"><div className="study-card-heading"><h2><Target size={18} /> Bugünün planı</h2><span>{todayPlan.length} görev{todayVideoCount > 0 ? ` · ${todayVideoCount} video` : ''}</span></div>
-            <div className="study-plan-list">{todayPlan.length === 0 ? <div className="study-empty"><Target size={24} /><p>Bugün için plan bulunmuyor.</p><Link to="/plan">Haftalık planı aç</Link></div> : todayPlan.map(item => {
+          <section className="study-card study-plan"><div className="study-card-heading"><h2><Target size={18} /> {mode === 'questions' ? 'Soru görevleri' : 'Bugünün planı'}</h2><span>{(mode === 'questions' ? 0 : todayPlan.length) + questionPlans.length} görev{mode !== 'questions' && todayVideoCount > 0 ? ` · ${todayVideoCount} video` : ''}</span></div>
+            <div className="study-plan-list">{mode !== 'questions' && todayPlan.length === 0 && questionPlans.length === 0 ? <div className="study-empty"><Target size={24} /><p>Bugün için plan bulunmuyor.</p><Link to="/plan">Haftalık planı aç</Link></div> : (mode === 'questions' ? [] : todayPlan).map(item => {
               const studied = todaySessions.filter(session => session.subject_id === item.subject_id && (!item.resource_id || session.resource_id === item.resource_id)).reduce((sum, session) => sum + session.duration_minutes, 0)
               const subjectStudied = item.subject_id ? todaySessions.filter(session => session.subject_id === item.subject_id).reduce((sum, session) => sum + session.duration_minutes, 0) : 0
               const done = item.planned_minutes > 0 && studied >= item.planned_minutes
               return <button key={item.id} onClick={() => loadPlanItem(item)} disabled={isTimerActive || !item.subject_id} className={`study-plan-item ${done ? 'is-done' : ''}`}><i style={{ backgroundColor: getExamColor(item.subject_id) }} /><div><strong>{getSubjectName(item.subject_id) || 'Çalışma'}</strong><span>{item.video_count != null ? `${item.video_count} video` : 'Günlük plan'}</span><div className="study-plan-metrics"><span>Plan · {formatDuration(item.planned_minutes)}</span>{done && <CheckCircle2 size={15} />}</div><div className="study-plan-today"><span>Bugün çalışılan</span><strong>{subjectStudied.toLocaleString('tr-TR', { maximumFractionDigits: 1 })} dk</strong></div></div></button>
-            })}</div>
+            })}
+            {questionPlans.map(task => <button key={`question_${task.id}`} className={`study-plan-item study-question-task ${task.target_questions != null && task.solved_questions >= task.target_questions ? 'is-done' : ''}`} disabled={isTimerActive || !task.subject_id || !task.subjects?.exam_id || ownerId !== userId} onClick={() => {
+              if (!task.subject_id || !task.subjects?.exam_id) return
+              stopTimerAlarm(); startQuestions({ examId: task.subjects.exam_id, subjectId: task.subject_id, resourceId: task.resource_id, planId: task.id, date: task.date })
+            }}><i style={{ backgroundColor: getExamColor(task.subject_id) }} /><div><strong>{task.subjects?.name || 'Ders kaldırıldı'}</strong><span>Soru çöz{task.date < todayKey ? ' · Bekleyen hedef' : ''}</span><div className="study-plan-metrics"><span>{task.solved_questions}{task.target_questions ? ` / ${task.target_questions}` : ''} soru çözüldü</span>{task.target_questions != null && task.solved_questions >= task.target_questions && <CheckCircle2 size={15} />}</div></div></button>)}
+            <Link className="study-question-link" to="/questions">Soru planını aç</Link>
+            {questionError && <p className="study-question-error" role="status">{questionError}</p>}
+            <details className="study-extra-questions" open={mode === 'questions' && !isTimerActive ? true : undefined}><summary>Ek soru çözümü</summary>{exams.map(exam => <div className="study-question-subjects" key={exam.id}><strong>{exam.name}</strong><div>{subjects.filter(subject => subject.exam_id === exam.id).map(subject => <button key={subject.id} disabled={isTimerActive || ownerId !== userId || !!questionError} onClick={() => { stopTimerAlarm(); startQuestions({ examId: exam.id, subjectId: subject.id, date: localDayKey(new Date()) }) }}>{subject.name}<Play size={12} /></button>)}</div></div>)}</details>
+            </div>
           </section>
 
         </aside>
 
         <section className={`study-card study-focus ${isBreak ? 'study-break' : ''}`}>
-          <div className="study-card-heading"><h2><Timer size={18} /> Odak oturumu</h2><span className={`study-status ${isRunning ? 'is-running' : ''}`}>{isBreak ? 'Mola' : isRunning ? 'Çalışılıyor' : startedAt ? 'Duraklatıldı' : 'Hazır'}</span></div>
+          <div className="study-card-heading"><h2><Timer size={18} /> {mode === 'questions' ? 'Soru çözümü' : 'Odak oturumu'}</h2><span className={`study-status ${isRunning ? 'is-running' : ''}`}>{isBreak ? 'Mola' : isRunning ? 'Çalışılıyor' : startedAt ? 'Duraklatıldı' : 'Hazır'}</span></div>
           <details className="study-mode-picker">
-            <summary>{modeOptions.find(option => option.key === mode)?.label} {mode !== 'stopwatch' && <span>· {isTimerActive ? Math.round(storedFocusSeconds / 60) : focusMinutes} dk</span>}</summary>
+            <summary>{modeOptions.find(option => option.key === mode)?.label} {!isCountUp(mode) && <span>· {isTimerActive ? Math.round(storedFocusSeconds / 60) : focusMinutes} dk</span>}</summary>
           <div className="study-modes" role="group" aria-label="Çalışma modu">
             {modeOptions.map(option => <button key={option.key} disabled={isTimerActive} onClick={event => { setMode(option.key); event.currentTarget.closest('details')?.removeAttribute('open') }} aria-pressed={mode === option.key} className={mode === option.key ? 'selected' : ''}><strong>{option.label}</strong><span>{option.description}</span></button>)}
           </div>
           {mode === 'manual' && <label className="study-block-count">Odak süresi<select disabled={isTimerActive} value={pomodoroCount} onChange={event => setPomodoroCount(Number(event.target.value))}>{[1,2,3,4,5].map(count => <option key={count} value={count}>{count * settings.long_focus_minutes} dakika</option>)}</select></label>}
 
-          {mode !== 'stopwatch' && <details className="study-pomodoro-settings"><summary>Oturum süreleri</summary><div>{([{key: 'short_focus_minutes', label: 'Kısa odak'}, {key: 'short_break_minutes', label: 'Kısa mola'}, {key: 'long_focus_minutes', label: 'Uzun odak'}, {key: 'long_break_minutes', label: 'Uzun mola'}] as const).map(field => <label key={field.key}>{field.label}<input type="number" min="1" max="180" disabled={isTimerActive} value={settings[field.key]} onChange={event => { const value = Number(event.target.value); if (Number.isFinite(value) && value >= 1 && value <= 180) setSettings(current => ({ ...current, [field.key]: value })) }} /><span>dk</span></label>)}</div></details>}
+          {!isCountUp(mode) && <details className="study-pomodoro-settings"><summary>Oturum süreleri</summary><div>{([{key: 'short_focus_minutes', label: 'Kısa odak'}, {key: 'short_break_minutes', label: 'Kısa mola'}, {key: 'long_focus_minutes', label: 'Uzun odak'}, {key: 'long_break_minutes', label: 'Uzun mola'}] as const).map(field => <label key={field.key}>{field.label}<input type="number" min="1" max="180" disabled={isTimerActive} value={settings[field.key]} onChange={event => { const value = Number(event.target.value); if (Number.isFinite(value) && value >= 1 && value <= 180) setSettings(current => ({ ...current, [field.key]: value })) }} /><span>dk</span></label>)}</div></details>}
           </details>
 
-          <div className="study-selection">
+          {mode !== 'questions' && <div className="study-selection">
             <label>Sınav<select value={selExam} disabled={isTimerActive} onChange={event => { setSelExam(event.target.value); setSelSubject(''); setSelResource('') }}><option value="">Sınav seç</option>{exams.map(exam => <option key={exam.id} value={exam.id}>{exam.name}</option>)}</select></label>
             <label>Ders<select value={selSubject} disabled={isTimerActive || !selExam} onChange={event => { setSelSubject(event.target.value); setSelResource('') }}><option value="">Ders seç</option>{filteredSubjects.map(subject => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</select></label>
             {playlistResources.length > 0 && <label>Video oynatma listesi<select value={playlistResources.some(resource => resource.id === selResource) ? selResource : ''} disabled={isTimerActive} onChange={event => setSelResource(event.target.value)}><option value="">Liste seç (isteğe bağlı)</option>{playlistResources.map((resource, index) => <option key={resource.id} value={resource.id}>{selectedSubject?.name}{playlistResources.length > 1 ? ` · Liste ${index + 1}` : ''}{resource.total_videos ? ` · ${resource.total_videos} video` : ''}</option>)}</select></label>}
-          </div>
-
+          </div>}
 
           <div className="study-timer">
             <div className="study-timer-context">{isBreak ? <><Coffee size={17} /> Mola zamanı</> : selectedSubject?.name || 'Ders seç'}</div>
-            {!isBreak && selectedDayVideoCount > 0 && <span className="study-video-count">Bugünkü planda {selectedDayVideoCount} video</span>}
-            <div className="study-clock" role="timer" aria-label={mode === 'stopwatch' ? 'Çalışılan süre' : 'Kalan süre'}>{String(minutes).padStart(2, '0')}<span>:</span>{String(secs).padStart(2, '0')}</div>
-            {mode !== 'stopwatch' && <div className="study-timer-progress" role="progressbar" aria-label="Oturum ilerlemesi" aria-valuenow={Math.round(progress)} aria-valuemin={0} aria-valuemax={100}><i style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} /></div>}
+            {!isBreak && mode !== 'questions' && selectedDayVideoCount > 0 && <span className="study-video-count">Bugünkü planda {selectedDayVideoCount} video</span>}
+            {mode === 'questions' && <span className="study-video-count">{questionPlanId ? (() => { const task = questionPlans.find(item => item.id === questionPlanId); return task?.target_questions ? `${task.solved_questions} / ${task.target_questions} soru` : 'Soru çözümü' })() : 'Ek soru çözümü'}</span>}
+            <div className="study-clock" role="timer" aria-label={isCountUp(mode) ? 'Çalışılan süre' : 'Kalan süre'}>{String(minutes).padStart(2, '0')}<span>:</span>{String(secs).padStart(2, '0')}</div>
+            {!isCountUp(mode) && <div className="study-timer-progress" role="progressbar" aria-label="Oturum ilerlemesi" aria-valuenow={Math.round(progress)} aria-valuemin={0} aria-valuemax={100}><i style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} /></div>}
             <div className="study-controls">
               <button className="study-icon-button" onClick={isBreak ? skipBreak : handleReset} aria-label={isBreak ? 'Molayı atla' : 'Sayacı sıfırla'} title={isBreak ? 'Molayı atla' : 'Sıfırla'}>{isBreak ? <SkipForward size={19} /> : <RotateCcw size={19} />}</button>
-              <button className="study-button study-button-primary study-start" onClick={toggleTimer} disabled={!selSubject || !userId || ownerId !== userId || !!recovery}>{isRunning ? <Pause size={19} /> : <Play size={19} />}{isRunning ? 'Duraklat' : startedAt || isBreak ? 'Devam et' : mode === 'stopwatch' ? 'Kronometreyi başlat' : 'Odaklanmaya başla'}</button>
-              {!isBreak && <button className={mode === 'stopwatch' ? 'study-button study-button-secondary' : 'study-icon-button'} onClick={endEarly} disabled={!startedAt || !!recovery} aria-label="Çalışmayı bitir ve kaydet" title="Bitir ve kaydet"><CheckCircle2 size={19} />{mode === 'stopwatch' && <span>Bitir ve kaydet</span>}</button>}
+              <button className="study-button study-button-primary study-start" onClick={toggleTimer} disabled={!selSubject || !userId || ownerId !== userId || !!recovery || isFinishing || (mode === 'questions' && !!questionError)}>{isRunning ? <Pause size={19} /> : <Play size={19} />}{isRunning ? 'Duraklat' : startedAt || isBreak ? 'Devam et' : mode === 'questions' ? 'Soru çözmeye başla' : mode === 'stopwatch' ? 'Kronometreyi başlat' : 'Odaklanmaya başla'}</button>
+              {!isBreak && <button className={isCountUp(mode) ? 'study-button study-button-secondary' : 'study-icon-button'} onClick={endEarly} disabled={!startedAt || !!recovery || isFinishing} aria-label="Çalışmayı bitir ve kaydet" title="Bitir ve kaydet"><CheckCircle2 size={19} />{isCountUp(mode) && <span>Bitir ve kaydet</span>}</button>}
             </div>
-            {mode !== 'stopwatch' && <button className="study-test-end" disabled={!!recovery} onClick={() => { const timer = useTimerStore.getState(); if (timer.phase === 'break') timer.finishBreak(); else timer.finishFocus(); playTimerAlarm() }}>Bitişi test et · kayıt yok</button>}
           </div>
 
         </section>

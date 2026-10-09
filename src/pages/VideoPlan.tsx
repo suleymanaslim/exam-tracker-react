@@ -1,5 +1,6 @@
 import './SuitePages.css'
 import './VideoPlan.css'
+import { Link } from 'react-router-dom'
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { Plus, Trash2, Download, Printer, Settings, EyeOff, SkipForward, X, Check, ChevronUp, ChevronDown } from 'lucide-react'
@@ -504,6 +505,7 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <Link to="/questions" className="h-7 px-3 rounded-md border border-blue-200 bg-blue-50 text-blue-700 text-xs font-medium inline-flex items-center">Soru planı</Link>
           <button onClick={() => setStartDate(getMonday(new Date()))} className="h-7 px-3 rounded-md border border-slate-200 bg-white text-xs font-medium text-slate-500 hover:text-slate-900 hover:border-slate-400 transition-colors">Bugün</button>
           <div className="flex items-center">
             <button onClick={() => { const d = new Date(startDate); d.setDate(d.getDate() - 7); setStartDate(d) }} className="h-7 w-7 rounded-l-md border border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:text-slate-900 transition-colors">‹</button>
@@ -715,3 +717,4 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
     </div>
   )
 }
+

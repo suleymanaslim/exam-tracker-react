@@ -1,8 +1,10 @@
 import { useEffect, useRef } from 'react'
 import { bindTimerOwner, useTimerStore } from './timerStore'
-import { recoveryFor, remainingSeconds, sessionPayload } from './timerRecovery'
+import { recoveryFor, remainingSeconds, sessionPayload, isCountUp } from './timerRecovery'
 import type { RecoverySession } from './timerRecovery'
 import { supabase } from './supabase'
+import { questionSessionPayload } from './questionSession'
+import { questionCompletionOptions, readQuestionAnswers, lockQuestionInputs } from './questionDialogs'
 import { useAdminStore } from './adminStore'
 import Swal from 'sweetalert2'
 import { playTimerAlarm, stopTimerAlarm } from './timerAudio'
@@ -15,6 +17,12 @@ function alarm(title: string, body: string) {
 }
 
 export async function saveTimerSession(session: RecoverySession) {
+  if (session.mode === 'questions') {
+    const { error } = await supabase.rpc('save_question_study_session', questionSessionPayload(session))
+    if (error) throw error
+    window.dispatchEvent(new Event('study-session-saved'))
+    return true
+  }
   if (session.durationMinutes <= 0 || (session.mode !== 'stopwatch' && session.durationMinutes < 1)) return true
   // The stable UUID prevents a retry/reload from inserting the same portion twice.
   const { error } = await supabase.from('study_sessions').upsert(sessionPayload(session), { onConflict: 'id', ignoreDuplicates: true })
@@ -37,24 +45,38 @@ export function useGlobalTimer(authenticatedUserId: string | null) {
   }, [ownerId])
 
   useEffect(() => {
-    if (!ownerId || state.ownerId !== ownerId || !state.recovery || promptingRef.current) return
+    if (!ownerId || state.ownerId !== ownerId || !state.recovery || state.isFinishing || promptingRef.current) return
     const recovery = state.recovery
-    const durationLabel = recovery.mode === 'stopwatch' ? `${Math.floor(recovery.remainingSeconds / 60)} dk ${recovery.remainingSeconds % 60} sn` : `${recovery.durationMinutes} dakika`
+    const durationLabel = isCountUp(recovery.mode) ? `${Math.floor(recovery.remainingSeconds / 60)} dk ${recovery.remainingSeconds % 60} sn` : `${recovery.durationMinutes} dakika`
+    const questionOptions = recovery.mode === 'questions'
+      ? questionCompletionOptions(recovery.solvedQuestions == null ? '' : String(recovery.solvedQuestions), recovery.correctQuestions, recovery.wrongQuestions, recovery.solvedQuestions != null)
+      : null
+    const message = recovery.reason === 'save-failed' ? `${durationLabel} çalışma korunuyor. Kaydetmeyi tekrar deneyebilirsin.` : recovery.durationMinutes > 0
+      ? `Önceki oturumdan ${durationLabel} geçti. Çalıştıysanız bu süreyi kaydedebiliriz.`
+      : 'Önceki oturumda bir dakikadan az süre geçti. Çalışmaya devam etmek ister misiniz?'
     promptingRef.current = true
     void (async () => {
       const result = await Swal.fire({
+        ...(questionOptions ? { ...questionOptions, html: `<p>${message}</p>${questionOptions.html}` } : {}),
         title: recovery.reason === 'save-failed' ? 'Oturum kaydedilemedi' : 'Bu süre içinde çalıştınız mı?',
-        text: recovery.reason === 'save-failed' ? `${durationLabel} çalışma korunuyor. Kaydetmeyi tekrar deneyebilirsin.` : recovery.durationMinutes > 0
-          ? `Önceki oturumdan ${durationLabel} geçti. Çalıştıysanız bu süreyi kaydedebiliriz.`
-          : 'Önceki oturumda bir dakikadan az süre geçti. Çalışmaya devam etmek ister misiniz?',
+        text: message,
         icon: 'question', showDenyButton: recovery.reason !== 'save-failed', showCancelButton: true,
         confirmButtonText: recovery.reason === 'save-failed' ? 'Tekrar kaydet' : recovery.durationMinutes > 0 ? 'Evet, kaydet' : 'Evet, devam et',
         denyButtonText: 'Hayır, kaydetme', cancelButtonText: 'Sonra karar ver',
         confirmButtonColor: '#4269a8', allowOutsideClick: false,
         showLoaderOnConfirm: true,
-        preConfirm: async () => {
+        preConfirm: async value => {
           if (useTimerStore.getState().ownerId !== recovery.ownerId) return false
-          try { await saveTimerSession(recovery); return true }
+          let session = recovery
+          if (recovery.mode === 'questions') {
+            const pending = useTimerStore.getState().recovery
+            const answers = pending?.solvedQuestions != null ? { solved_questions: pending.solvedQuestions, correct_questions: pending.correctQuestions ?? null, wrong_questions: pending.wrongQuestions ?? null } : readQuestionAnswers(value)
+            if (!answers) return false
+            session = { ...recovery, solvedQuestions: answers.solved_questions, correctQuestions: answers.correct_questions, wrongQuestions: answers.wrong_questions }
+            useTimerStore.setState({ recovery: session })
+            lockQuestionInputs()
+          }
+          try { await saveTimerSession(session); return true }
           catch (error) {
             console.error('Recovered timer save failed:', error)
             Swal.showValidationMessage('Kaydedilemedi. Süren korunuyor; tekrar deneyebilirsin.')
@@ -68,7 +90,7 @@ export function useGlobalTimer(authenticatedUserId: string | null) {
       }
       promptingRef.current = false
     })()
-  }, [ownerId, state.ownerId, state.recovery])
+  }, [ownerId, state.ownerId, state.recovery, state.isFinishing])
 
   // Run independently of the current route. Reopening the page is handled by hydration above.
   useEffect(() => {
@@ -81,8 +103,8 @@ export function useGlobalTimer(authenticatedUserId: string | null) {
       if (current.ownerId !== ownerId || !current.isRunning || current.deadlineEpoch === null || current.recovery || savingRef.current) return
       const remaining = remainingSeconds(current, Date.now())
       current.setSecondsLeft(remaining)
-      document.title = `${current.phase === 'break' ? 'Mola' : current.mode === 'stopwatch' ? 'Kronometre' : 'Odak'} ${String(Math.floor(remaining / 60)).padStart(2, '0')}:${String(remaining % 60).padStart(2, '0')} — ExamTracker`
-      if (current.mode === 'stopwatch' || remaining > 0) return
+      document.title = `${current.phase === 'break' ? 'Mola' : current.mode === 'questions' ? 'Soru çözümü' : current.mode === 'stopwatch' ? 'Kronometre' : 'Odak'} ${String(Math.floor(remaining / 60)).padStart(2, '0')}:${String(remaining % 60).padStart(2, '0')} — ExamTracker`
+      if (isCountUp(current.mode) || remaining > 0) return
       if (current.phase === 'break') {
         current.finishBreak()
         alarm('Mola bitti', 'Yeni bir odak oturumuna hazırsın.')

@@ -8,7 +8,7 @@ import { useState, useEffect, useRef } from 'react'
 import {
   LayoutDashboard, Calendar, Timer, History,
   BarChart3, Settings, LogOut,
-  BookMarked, Award, PlayCircle
+  BookMarked, Award, PlayCircle, BookOpenCheck
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useTimerStore } from '../lib/timerStore'
@@ -23,6 +23,7 @@ const navItems = [
   { href: '/history',   label: 'Geçmiş',        icon: History },
   { href: '/results',   label: 'Denemeler',      icon: Award },
   { href: '/videos',    label: 'Video Planı',    icon: PlayCircle },
+  { href: '/questions', label: 'Soru Planı',     icon: BookOpenCheck },
   { href: '/stats',     label: 'İstatistikler',  icon: BarChart3 },
   { href: '/settings',  label: 'Ayarlar',        icon: Settings },
 ]

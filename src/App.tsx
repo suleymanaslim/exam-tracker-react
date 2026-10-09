@@ -15,6 +15,7 @@ import Topics from './pages/Topics'
 import Admin from './pages/Admin'
 import Results from './pages/Results'
 import VideoPlan from './pages/VideoPlan'
+import QuestionPlan from './pages/QuestionPlan'
 import AppLayout from './components/AppLayout'
 
 import { useGlobalTimer } from './lib/useGlobalTimer'
@@ -64,6 +65,7 @@ function App() {
           <Route path="stats"     element={<Stats />} />
           <Route path="results"   element={<Results />} />
           <Route path="videos"    element={<VideoPlan />} />
+          <Route path="questions" element={<QuestionPlan />} />
           <Route path="topics"    element={<Topics />} />
           <Route path="settings"  element={<Settings />} />
           <Route path="admin"     element={<Admin />} />
