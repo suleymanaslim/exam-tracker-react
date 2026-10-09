@@ -73,7 +73,7 @@ export function openQuestionPlans(plans: QuestionPlan[], today: string) {
   const start = new Date(`${today}T00:00:00`)
   start.setDate(start.getDate() - (start.getDay() + 6) % 7)
   const monday = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`
-  return plans.filter(plan => !plan.archived_at && (plan.period === 'week'
+  return plans.filter(plan => !plan.archived_at && plan.target_questions != null && plan.target_questions > 0 && (plan.period === 'week'
     ? plan.date === monday
     : plan.date === today || (plan.date < today && plan.target_questions != null && plan.solved_questions < plan.target_questions)))
 }

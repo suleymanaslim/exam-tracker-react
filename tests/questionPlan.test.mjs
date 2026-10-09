@@ -35,12 +35,14 @@ test('manual and timed results accumulate per plan; extra solved questions are n
   assert.equal(progress[1].answers_recorded, true)
   assert.deepEqual(plans, before)
 })
-test('today includes completed tasks; overdue unfinished targets remain and future tasks wait', () => {
+test('study tasks contain real goals, retain completed daily goals and exclude extra solution records', () => {
   const plans = [
     { id: 'today', date: '2026-10-09', target_questions: 20, solved_questions: 25 },
     { id: 'overdue', date: '2026-10-08', target_questions: 30, solved_questions: 20 },
     { id: 'done', date: '2026-10-08', target_questions: 30, solved_questions: 30 },
     { id: 'extra', date: '2026-10-08', target_questions: null, solved_questions: 15 },
+    { id: 'today-extra', date: '2026-10-09', target_questions: null, solved_questions: 20 },
+    { id: 'week-extra', date: '2026-10-05', period: 'week', target_questions: null, solved_questions: 30 },
     { id: 'future', date: '2026-10-10', target_questions: 30, solved_questions: 0 },
   ]
   assert.deepEqual(openQuestionPlans(plans, '2026-10-09').map(plan => plan.id), ['today', 'overdue'])
