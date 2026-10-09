@@ -3,7 +3,8 @@ import { bindTimerOwner, useTimerStore } from './timerStore'
 import { recoveryFor, remainingSeconds, sessionPayload, isCountUp } from './timerRecovery'
 import type { RecoverySession } from './timerRecovery'
 import { supabase } from './supabase'
-import { questionSessionPayload } from './questionSession'
+import { persistQuestionSession } from './questionSession'
+import { timerSaveError } from './timerSaveError'
 import { questionCompletionOptions, readQuestionAnswers, lockQuestionInputs } from './questionDialogs'
 import { useAdminStore } from './adminStore'
 import Swal from 'sweetalert2'
@@ -18,8 +19,7 @@ function alarm(title: string, body: string) {
 
 export async function saveTimerSession(session: RecoverySession) {
   if (session.mode === 'questions') {
-    const { error } = await supabase.rpc('save_question_study_session', questionSessionPayload(session))
-    if (error) throw error
+    await persistQuestionSession(session, payload => supabase.rpc('save_question_study_session', payload))
     window.dispatchEvent(new Event('study-session-saved'))
     return true
   }
@@ -60,13 +60,14 @@ export function useGlobalTimer(authenticatedUserId: string | null) {
         ...(questionOptions ? { ...questionOptions, html: `<p>${message}</p>${questionOptions.html}` } : {}),
         title: recovery.reason === 'save-failed' ? 'Oturum kaydedilemedi' : 'Bu süre içinde çalıştınız mı?',
         text: message,
-        icon: 'question', showDenyButton: recovery.reason !== 'save-failed', showCancelButton: true,
+        width: recovery.mode === 'questions' ? 420 : 380, customClass: { popup: 'study-save-dialog' },
+        showDenyButton: true, showCancelButton: true,
         confirmButtonText: recovery.reason === 'save-failed' ? 'Tekrar kaydet' : recovery.durationMinutes > 0 ? 'Evet, kaydet' : 'Evet, devam et',
-        denyButtonText: 'Hayır, kaydetme', cancelButtonText: 'Sonra karar ver',
+        denyButtonText: 'Oturumu unut', cancelButtonText: 'Sonra karar ver',
         confirmButtonColor: '#4269a8', allowOutsideClick: false,
         showLoaderOnConfirm: true,
         preConfirm: async value => {
-          if (useTimerStore.getState().ownerId !== recovery.ownerId) return false
+          if (useTimerStore.getState().ownerId !== recovery.ownerId || useTimerStore.getState().recovery?.id !== recovery.id) return false
           let session = recovery
           if (recovery.mode === 'questions') {
             const pending = useTimerStore.getState().recovery
@@ -79,7 +80,7 @@ export function useGlobalTimer(authenticatedUserId: string | null) {
           try { await saveTimerSession(session); return true }
           catch (error) {
             console.error('Recovered timer save failed:', error)
-            Swal.showValidationMessage('Kaydedilemedi. Süren korunuyor; tekrar deneyebilirsin.')
+            Swal.showValidationMessage(timerSaveError(error, recovery.mode === 'questions'))
             return false
           }
         },

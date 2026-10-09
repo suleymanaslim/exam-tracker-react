@@ -21,7 +21,7 @@ function TaskButton({ task, selected, onClick }: { task: TaskRow; selected: bool
     <span className="min-w-0 flex-1">
       <span className="flex items-start justify-between gap-2"><span className="text-[13px] font-medium leading-5">{task.name}</span>{task.done && <Check size={13} className="mt-1 shrink-0 text-[var(--study-muted)]" aria-label="Hedef tamamlandı" />}</span>
       <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] leading-4 text-[var(--study-muted)]">
-        <span>{task.detail}</span><span className="font-mono text-[10px] tabular-nums" title="Bu derste bugün, tüm kaynaklarda çalışılan süre">Bugün {task.todayMinutes} dk</span>
+        <span>{task.detail}</span><span className="text-[11px] tabular-nums" title="Bu derste bugün, tüm kaynaklarda çalışılan süre">Bugün {task.todayMinutes} dk</span>
       </span>
     </span>
   </button>
@@ -36,7 +36,7 @@ export default function TaskSidebar({ tasks, questions, selectedId, todayDuratio
       </div>
       <div className="mx-5 mb-4 mt-3 flex items-center justify-between gap-3 border-b border-[var(--study-line)] pb-4">
         <span className="flex items-center gap-1.5 text-xs text-[var(--study-muted)]"><Clock3 size={13} /> Bugün çalışılan</span>
-        <strong className="whitespace-nowrap font-mono text-xs font-medium tabular-nums">{todayDuration}</strong>
+        <strong className="whitespace-nowrap text-xs font-medium tabular-nums">{todayDuration}</strong>
       </div>
       <div className="study-task-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-4">
         <TaskAccordionGroup title="Video görevleri" count={tasks.length} icon={<Video size={14} />}>

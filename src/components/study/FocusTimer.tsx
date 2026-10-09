@@ -27,7 +27,7 @@ export default function FocusTimer({ subject, playlist, seconds, countUp, isBrea
       {!active && detail && <span className="text-xs text-[var(--study-muted)]">{detail}</span>}
       {active && !running && <span className="text-xs text-[var(--study-muted)]" role="status">Duraklatıldı</span>}
     </div>
-    <div className={`study-zen-clock font-mono font-normal tabular-nums ${clock.length === 3 ? 'has-hours' : ''}`} role="timer" aria-label={isBreak ? 'Mola için kalan süre' : countUp ? 'Çalışılan süre' : 'Kalan süre'}>
+    <div className={`study-zen-clock font-normal tabular-nums ${clock.length === 3 ? 'has-hours' : ''}`} role="timer" aria-label={isBreak ? 'Mola için kalan süre' : countUp ? 'Çalışılan süre' : 'Kalan süre'}>
       {clock.map((part, index) => <span key={index}>{index > 0 && <span className="study-clock-colon">:</span>}{String(part).padStart(2, '0')}</span>)}
     </div>
     <div className={`mb-9 mt-5 h-0.5 w-36 overflow-hidden rounded-full ${countUp ? '' : 'bg-[var(--study-soft)]'}`}>

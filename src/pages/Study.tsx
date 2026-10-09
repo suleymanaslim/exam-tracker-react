@@ -16,6 +16,7 @@ import { fetchQuestionPlans, questionPlanError } from '../lib/questionPlanData'
 import { openQuestionPlans } from '../lib/questionPlan'
 import type { QuestionPlan as QuestionTask } from '../lib/questionPlan'
 import { questionCompletionOptions, readQuestionAnswers, lockQuestionInputs } from '../lib/questionDialogs'
+import { timerSaveError } from '../lib/timerSaveError'
 import TaskSidebar from '../components/study/TaskSidebar'
 import SessionSetup from '../components/study/SessionSetup'
 import FocusTimer from '../components/study/FocusTimer'
@@ -234,7 +235,7 @@ export default function Study() {
       const result = await Swal.fire({
         ...questionCompletionOptions('', undefined, undefined, false, session.questionTarget, { ownerId: session.ownerId, subjectId: session.subjectId }), title: 'Kaç soru çözdün?',
         width: 420, customClass: { popup: 'study-save-dialog' },
-        showCancelButton: true, confirmButtonText: 'Kaydet', cancelButtonText: 'Çalışmaya dön',
+        showCancelButton: true, showDenyButton: true, denyButtonText: 'Oturumu unut', confirmButtonText: 'Kaydet', cancelButtonText: 'Çalışmaya dön',
         showLoaderOnConfirm: true, allowOutsideClick: () => !Swal.isLoading(),
         preConfirm: async value => {
           if (useTimerStore.getState().ownerId !== session.ownerId || useTimerStore.getState().sessionId !== session.id) return false
@@ -246,7 +247,7 @@ export default function Study() {
           useTimerStore.setState({ recovery: { ...completed, reason: 'save-failed' } })
           lockQuestionInputs()
           try { await saveTimerSession(completed); return completed }
-          catch { Swal.showValidationMessage('Kaydedilemedi. Süren ve soru sayın korunuyor; tekrar deneyebilirsin.'); return false }
+          catch (error) { console.error('Question timer save failed:', error); Swal.showValidationMessage(timerSaveError(error, true)); return false }
         },
       })
       const state = useTimerStore.getState()
@@ -255,7 +256,8 @@ export default function Study() {
       if (result.isConfirmed) {
         state.resetTimer(0)
         void Swal.fire({ title: `${result.value.solvedQuestions} soru kaydedildi`, width: 380, customClass: { popup: 'study-save-dialog' }, timer: 1500, showConfirmButton: false })
-      } else if (!state.recovery && wasRunning) state.startTimer()
+      } else if (result.isDenied) state.resetTimer(0)
+      else if (!state.recovery && wasRunning) state.startTimer()
       return
     }
     const wasRunning = timer.isRunning
@@ -270,7 +272,7 @@ export default function Study() {
     const result = await Swal.fire({
       title: 'Oturumu tamamla',
       text: canSave ? `${selectedSubject?.name || 'Çalışma'} · ${durationLabel}` : 'Bir dakikadan kısa süre kaydedilmeyecek.',
-      width: 380, customClass: { popup: 'study-save-dialog' }, showCancelButton: true,
+      width: 380, customClass: { popup: 'study-save-dialog' }, showCancelButton: true, showDenyButton: true, denyButtonText: 'Oturumu unut',
       confirmButtonText: canSave ? 'Kaydet ve bitir' : 'Oturumu bitir', cancelButtonText: 'Çalışmaya dön',
       showLoaderOnConfirm: true, allowOutsideClick: () => !Swal.isLoading(),
       preConfirm: async () => {
@@ -279,7 +281,7 @@ export default function Study() {
         // Freeze the UUID and duration before sending so retries cannot count twice.
         useTimerStore.setState({ recovery: { ...session, reason: 'save-failed' } })
         try { await saveTimerSession(session); return true }
-        catch { Swal.showValidationMessage('Kaydedilemedi. Süren korunuyor; tekrar deneyebilirsin.'); return false }
+        catch (error) { console.error('Timer save failed:', error); Swal.showValidationMessage(timerSaveError(error)); return false }
       },
     })
     const state = useTimerStore.getState()
@@ -288,7 +290,8 @@ export default function Study() {
     if (result.isConfirmed) {
       state.resetTimer(current.focusSeconds)
       void Swal.fire({ title: canSave ? 'Oturum kaydedildi' : 'Oturum bitirildi', width: 380, customClass: { popup: 'study-save-dialog' }, timer: 1500, showConfirmButton: false })
-    } else if (!state.recovery && wasRunning) state.startTimer()
+    } else if (result.isDenied) state.resetTimer(current.focusSeconds)
+    else if (!state.recovery && wasRunning) state.startTimer()
   }
 
   const handleSaveManualSession = async () => {

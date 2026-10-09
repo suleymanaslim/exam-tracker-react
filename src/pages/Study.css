@@ -1,28 +1,28 @@
 /* The workspace uses one surface; task rows and the timer stay unboxed. */
 .study-page,
 .study-save-dialog {
-  --study-ink: #27272a;
-  --study-muted: #71717a;
-  --study-faint: #a1a1aa;
+  --study-ink: #24354a;
+  --study-muted: #62748b;
+  --study-faint: #8e9cb0;
   --study-surface: #ffffff;
-  --study-soft: #f4f4f5;
-  --study-line: #e4e4e7;
-  --study-accent: #525e77;
-  --study-primary: #27272a;
+  --study-soft: #edf2f8;
+  --study-line: #e3e9f0;
+  --study-accent: #4269a8;
+  --study-primary: #4269a8;
   --study-on-primary: #ffffff;
-  --study-question: #7b6c91;
+  --study-question: #755798;
 }
 .dark .study-page,
 .dark .study-save-dialog {
-  --study-ink: #e4e4e7;
-  --study-muted: #a1a1aa;
-  --study-faint: #71717a;
-  --study-surface: #18181b;
-  --study-soft: #27272a;
-  --study-line: #35353b;
-  --study-accent: #a5b4cf;
-  --study-primary: #e4e4e7;
-  --study-on-primary: #18181b;
+  --study-ink: #e6edf7;
+  --study-muted: #a2b0c5;
+  --study-faint: #74849a;
+  --study-surface: #172235;
+  --study-soft: #22324a;
+  --study-line: #304057;
+  --study-accent: #93b4e4;
+  --study-primary: #789ed6;
+  --study-on-primary: #101b2d;
   --study-question: #b6a6cc;
 }
 .study-page {
@@ -33,7 +33,7 @@
   height: 100%;
   min-height: 560px;
   color: var(--study-ink);
-  font-family: 'Source Sans 3', sans-serif;
+  font-family: 'Source Sans 3', Arial, sans-serif;
 }
 .study-header { flex-shrink: 0; padding: 2px 1px; }
 .study-workspace {
@@ -131,7 +131,7 @@
 }
 .dark .study-page :is(input, select) { color-scheme: dark; }
 .study-focus-timer { min-height: 370px; padding: 36px 0 18px; }
-.study-zen-clock { font-size: clamp(64px, 7vw, 104px); line-height: 1.1; letter-spacing: -.055em; }
+.study-zen-clock { font-family: inherit; font-size: clamp(64px, 7vw, 104px); font-weight: 400; line-height: 1.1; letter-spacing: -.025em; }
 .study-zen-clock.has-hours { font-size: clamp(48px, 5.5vw, 90px); }
 .study-clock-colon { padding: 0 .025em; color: var(--study-faint); }
 .study-quiet-link { color: var(--study-muted); transition: color 200ms, background 200ms; }
@@ -184,6 +184,7 @@
 .study-save-dialog .swal2-styled { margin: 0; border-radius: 7px; font-size: 13px; }
 .study-save-dialog .swal2-confirm { background: var(--study-primary); color: var(--study-on-primary); }
 .study-save-dialog .swal2-cancel { background: var(--study-soft); color: var(--study-ink); }
+.study-save-dialog .swal2-deny { background: transparent; color: var(--study-muted); border: 1px solid var(--study-line); }
 .study-save-dialog .swal2-validation-message { background: var(--study-soft); color: var(--study-ink); font-size: 13px; }
 .study-save-dialog .swal2-input { height: 40px; margin: 10px 0 0; border: 1px solid var(--study-line); border-radius: 7px; box-shadow: none; background: var(--study-surface); color: var(--study-ink); font-size: 16px; }
 .study-save-dialog .swal2-input-label { margin-top: 14px; color: var(--study-muted); font-size: 12px; }
