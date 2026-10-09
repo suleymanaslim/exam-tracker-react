@@ -18,6 +18,7 @@ export interface TimerSnapshot {
   questionPlanId?: string | null
   questionDate?: string | null
   questionTarget?: number | null
+  previousStudyMode?: Exclude<TimerMode, 'questions'>
 }
 export interface RecoverySession {
   id: string
@@ -76,6 +77,7 @@ export function readTimerSnapshot(raw: string | null, ownerId: string): TimerSna
     if (value.recovery && (value.recovery.ownerId !== ownerId || value.recovery.id !== value.sessionId || !Number.isFinite(value.recovery.durationMinutes) || value.recovery.durationMinutes < 0 || !Number.isFinite(value.recovery.remainingSeconds) || value.recovery.remainingSeconds < 0)) return null
     if (value.questionPlanId != null && !/^[0-9a-f-]{36}$/i.test(value.questionPlanId)) return null
     if (value.questionDate != null && !/^\d{4}-\d{2}-\d{2}$/.test(value.questionDate)) return null
+    if (value.previousStudyMode != null && !['pomodoro_long', 'pomodoro_short', 'manual', 'stopwatch'].includes(value.previousStudyMode)) return null
     if (value.questionTarget != null && (!Number.isInteger(value.questionTarget) || value.questionTarget < 1 || value.questionTarget > 100000)) return null
     if (value.recovery?.solvedQuestions != null && (!Number.isInteger(value.recovery.solvedQuestions) || value.recovery.solvedQuestions < 0 || value.recovery.solvedQuestions > 100000)) return null
     if (value.recovery) {

@@ -8,7 +8,7 @@ import { recoveryFor, isCountUp } from '../lib/timerRecovery'
 import Swal from 'sweetalert2'
 import {
   Timer, Play, Pause, RotateCcw, Plus, Clock,
-  Target, CheckCircle2, Coffee, SkipForward, X
+  Target, CheckCircle2, Coffee, SkipForward, X, ArrowLeft, SlidersHorizontal
 } from 'lucide-react'
 import { useAdminStore } from '../lib/adminStore'
 import FocusReset from '../components/FocusReset'
@@ -79,6 +79,7 @@ export default function Study() {
     questionPlanId,
     isFinishing,
     startQuestions,
+    returnToStudy,
     startTimer,
     pauseTimer,
     focusSeconds: storedFocusSeconds,
@@ -369,13 +370,20 @@ export default function Study() {
   const selectedDayVideoCount = selResource ? todayPlan.filter(item => item.resource_id === selResource && item.subject_id === selSubject).reduce((sum, item) => sum + (item.video_count || 0), 0) : 0
   const todayVideoCount = todayPlan.reduce((sum, item) => sum + (item.video_count || 0), 0)
   const activePlaylistURL = playlistURL(selectedResource?.url)
-  const modeOptions: { key: SessionMode; label: string; description: string }[] = [
-    { key: 'questions', label: 'Soru çöz', description: 'Ders seç · kronometreyle çöz' },
-    { key: 'stopwatch', label: 'Kronometre', description: 'Başlat · duraklat · bitir ve kaydet' },
-    { key: 'pomodoro_short', label: 'Kısa Pomodoro', description: `${settings.short_focus_minutes} dk odak · ${settings.short_break_minutes} dk mola` },
-    { key: 'pomodoro_long', label: 'Uzun Pomodoro', description: `${settings.long_focus_minutes} dk odak · ${settings.long_break_minutes} dk mola` },
-    { key: 'manual', label: 'Kesintisiz odak', description: `${settings.long_focus_minutes * pomodoroCount} dk · molasız` },
+  const modeOptions: { key: SessionMode; label: string }[] = [
+    { key: 'pomodoro_short', label: `Kısa Pomodoro · ${settings.short_focus_minutes} dk` },
+    { key: 'pomodoro_long', label: `Uzun Pomodoro · ${settings.long_focus_minutes} dk` },
+    { key: 'manual', label: `Kesintisiz odak · ${settings.long_focus_minutes * pomodoroCount} dk` },
+    { key: 'stopwatch', label: 'Kronometre · süre tut' },
+    { key: 'questions', label: 'Soru çözümü · kronometre' },
   ]
+  const backToStudy = async () => {
+    if (!userId || ownerId !== userId || recovery || isFinishing) return
+    if (startedAt) await endEarly()
+    // An unfinished, cancelled or failed save keeps the question session intact.
+    const current = useTimerStore.getState()
+    if (current.ownerId === userId) returnToStudy()
+  }
 
   return (
     <div className="study-page">
@@ -410,15 +418,12 @@ export default function Study() {
 
         <section className={`study-card study-focus ${isBreak ? 'study-break' : ''}`}>
           <div className="study-card-heading"><h2><Timer size={18} /> {mode === 'questions' ? 'Soru çözümü' : 'Odak oturumu'}</h2><span className={`study-status ${isRunning ? 'is-running' : ''}`}>{isBreak ? 'Mola' : isRunning ? 'Çalışılıyor' : startedAt ? 'Duraklatıldı' : 'Hazır'}</span></div>
-          <details className="study-mode-picker">
-            <summary>{modeOptions.find(option => option.key === mode)?.label} {!isCountUp(mode) && <span>· {isTimerActive ? Math.round(storedFocusSeconds / 60) : focusMinutes} dk</span>}</summary>
-          <div className="study-modes" role="group" aria-label="Çalışma modu">
-            {modeOptions.map(option => <button key={option.key} disabled={isTimerActive} onClick={event => { setMode(option.key); event.currentTarget.closest('details')?.removeAttribute('open') }} aria-pressed={mode === option.key} className={mode === option.key ? 'selected' : ''}><strong>{option.label}</strong><span>{option.description}</span></button>)}
+          <div className="study-session-toolbar">
+            {mode === 'questions' && <button className="study-back-button" disabled={!!recovery || isFinishing || ownerId !== userId} onClick={() => void backToStudy()}><ArrowLeft size={16} />{startedAt ? 'Bitir ve çalışmaya dön' : 'Çalışmaya dön'}</button>}
+            <label className="study-mode-control"><span>Sayaç türü</span><select value={mode} disabled={isTimerActive} onChange={event => setMode(event.target.value as SessionMode)}>{modeOptions.map(option => <option key={option.key} value={option.key}>{option.label}</option>)}</select></label>
+            {mode === 'manual' && <label className="study-mode-control study-duration-control"><span>Odak süresi</span><select disabled={isTimerActive} value={pomodoroCount} onChange={event => setPomodoroCount(Number(event.target.value))}>{[1,2,3,4,5].map(count => <option key={count} value={count}>{count * settings.long_focus_minutes} dk</option>)}</select></label>}
+            {!isCountUp(mode) && <details className="study-duration-settings"><summary><SlidersHorizontal size={15} /> Süreler</summary><div>{([{key: 'short_focus_minutes', label: 'Kısa odak'}, {key: 'short_break_minutes', label: 'Kısa mola'}, {key: 'long_focus_minutes', label: 'Uzun odak'}, {key: 'long_break_minutes', label: 'Uzun mola'}] as const).map(field => <label key={field.key}>{field.label}<input type="number" min="1" max="180" disabled={isTimerActive} value={settings[field.key]} onChange={event => { const value = Number(event.target.value); if (Number.isFinite(value) && value >= 1 && value <= 180) setSettings(current => ({ ...current, [field.key]: value })) }} /><span>dk</span></label>)}</div></details>}
           </div>
-          {mode === 'manual' && <label className="study-block-count">Odak süresi<select disabled={isTimerActive} value={pomodoroCount} onChange={event => setPomodoroCount(Number(event.target.value))}>{[1,2,3,4,5].map(count => <option key={count} value={count}>{count * settings.long_focus_minutes} dakika</option>)}</select></label>}
-
-          {!isCountUp(mode) && <details className="study-pomodoro-settings"><summary>Oturum süreleri</summary><div>{([{key: 'short_focus_minutes', label: 'Kısa odak'}, {key: 'short_break_minutes', label: 'Kısa mola'}, {key: 'long_focus_minutes', label: 'Uzun odak'}, {key: 'long_break_minutes', label: 'Uzun mola'}] as const).map(field => <label key={field.key}>{field.label}<input type="number" min="1" max="180" disabled={isTimerActive} value={settings[field.key]} onChange={event => { const value = Number(event.target.value); if (Number.isFinite(value) && value >= 1 && value <= 180) setSettings(current => ({ ...current, [field.key]: value })) }} /><span>dk</span></label>)}</div></details>}
-          </details>
 
           {mode !== 'questions' && <div className="study-selection">
             <label>Sınav<select value={selExam} disabled={isTimerActive} onChange={event => { setSelExam(event.target.value); setSelSubject(''); setSelResource('') }}><option value="">Sınav seç</option>{exams.map(exam => <option key={exam.id} value={exam.id}>{exam.name}</option>)}</select></label>
