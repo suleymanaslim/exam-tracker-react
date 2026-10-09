@@ -17,6 +17,7 @@ export interface TimerSnapshot {
   recovery: RecoverySession | null
   questionPlanId?: string | null
   questionDate?: string | null
+  questionTarget?: number | null
 }
 export interface RecoverySession {
   id: string
@@ -32,6 +33,7 @@ export interface RecoverySession {
   reason?: 'reopened' | 'save-failed'
   questionPlanId?: string | null
   questionDate?: string | null
+  questionTarget?: number | null
   solvedQuestions?: number
   correctQuestions?: number | null
   wrongQuestions?: number | null
@@ -54,7 +56,7 @@ export function recoveryFor(snapshot: TimerSnapshot, now: number): RecoverySessi
   return {
     id: snapshot.sessionId, ownerId: snapshot.ownerId, subjectId: snapshot.selSubject,
     resourceId: snapshot.selResource, mode: snapshot.mode, startedAt: snapshot.startedAt,
-    questionPlanId: snapshot.questionPlanId || null, questionDate: snapshot.questionDate || null,
+    questionPlanId: snapshot.questionPlanId || null, questionDate: snapshot.questionDate || null, questionTarget: snapshot.questionTarget ?? null,
     endedAt: new Date(stopwatch ? Date.parse(snapshot.startedAt) + elapsed * 1000 : Math.min(now, snapshot.deadlineEpoch ?? now)).toISOString(),
     durationMinutes: stopwatch ? elapsed / 60 : Math.floor(elapsed / 60), remainingSeconds: remaining, resume: snapshot.isRunning, reason: 'reopened',
   }
@@ -74,6 +76,7 @@ export function readTimerSnapshot(raw: string | null, ownerId: string): TimerSna
     if (value.recovery && (value.recovery.ownerId !== ownerId || value.recovery.id !== value.sessionId || !Number.isFinite(value.recovery.durationMinutes) || value.recovery.durationMinutes < 0 || !Number.isFinite(value.recovery.remainingSeconds) || value.recovery.remainingSeconds < 0)) return null
     if (value.questionPlanId != null && !/^[0-9a-f-]{36}$/i.test(value.questionPlanId)) return null
     if (value.questionDate != null && !/^\d{4}-\d{2}-\d{2}$/.test(value.questionDate)) return null
+    if (value.questionTarget != null && (!Number.isInteger(value.questionTarget) || value.questionTarget < 1 || value.questionTarget > 100000)) return null
     if (value.recovery?.solvedQuestions != null && (!Number.isInteger(value.recovery.solvedQuestions) || value.recovery.solvedQuestions < 0 || value.recovery.solvedQuestions > 100000)) return null
     if (value.recovery) {
       for (const key of ['correctQuestions', 'wrongQuestions'] as const) {

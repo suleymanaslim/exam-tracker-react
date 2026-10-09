@@ -9,7 +9,7 @@ test('question presets and custom counts accept only whole numbers in range', ()
   for (const value of [0, -1, 1.5, '15.5', '15abc', '', ' ', null, 100001, Infinity, true]) assert.equal(questionCount(value), null)
   assert.equal(questionCount('0', true), 0)
 })
-test('partially watched lessons do not enter the completed video selection', () => {
+test('video watch status remains independent from question goal eligibility', () => {
   assert.equal(completedVideo({ video_count: 3, watched_count: 2 }), false)
   assert.equal(completedVideo({ video_count: 3, watched_count: 3 }), true)
   assert.equal(completedVideo({ video_count: 3, is_completed: true }), true)

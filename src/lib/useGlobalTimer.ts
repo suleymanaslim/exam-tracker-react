@@ -49,7 +49,7 @@ export function useGlobalTimer(authenticatedUserId: string | null) {
     const recovery = state.recovery
     const durationLabel = isCountUp(recovery.mode) ? `${Math.floor(recovery.remainingSeconds / 60)} dk ${recovery.remainingSeconds % 60} sn` : `${recovery.durationMinutes} dakika`
     const questionOptions = recovery.mode === 'questions'
-      ? questionCompletionOptions(recovery.solvedQuestions == null ? '' : String(recovery.solvedQuestions), recovery.correctQuestions, recovery.wrongQuestions, recovery.solvedQuestions != null)
+      ? questionCompletionOptions(recovery.solvedQuestions == null ? '' : String(recovery.solvedQuestions), recovery.correctQuestions, recovery.wrongQuestions, recovery.solvedQuestions != null, recovery.questionTarget)
       : null
     const message = recovery.reason === 'save-failed' ? `${durationLabel} çalışma korunuyor. Kaydetmeyi tekrar deneyebilirsin.` : recovery.durationMinutes > 0
       ? `Önceki oturumdan ${durationLabel} geçti. Çalıştıysanız bu süreyi kaydedebiliriz.`

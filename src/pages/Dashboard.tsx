@@ -1,4 +1,6 @@
 import './Dashboard.css'
+import QuestionProgress from '../components/QuestionProgress'
+import { localDayKey, mondayOf } from '../lib/statsPeriod'
 import { DailyProgress, WeeklyProgress, DashboardSummary } from '../components/DashboardProgress'
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
@@ -75,6 +77,7 @@ export default function Dashboard() {
   const { setSelExam, setSelSubject, setSelResource, setMode, setSecondsLeft, setTotalSeconds, resetTimer } = useTimerStore()
   const { impersonatedUserId, setIsAdmin, isAdmin } = useAdminStore()
   
+  const [questionWeek] = useState(() => localDayKey(mondayOf(new Date())))
   const [displayName, setDisplayName] = useState<string>('Kullanıcı')
   const [showNameModal, setShowNameModal] = useState(false)
   const [tempName, setTempName] = useState('')
@@ -591,6 +594,7 @@ export default function Dashboard() {
         <DashboardSummary streak={streak} studied={totalWeekMinutes} planned={totalWeekPlannedMinutes} />
       </header>
       <DailyProgress day={dayProgress[todayIdx]} regularMinutes={todayPlanItems.filter(p => !p.isVideo).reduce((sum, p) => sum + p.planned_minutes, 0)} videoMinutes={todayPlanItems.filter(p => p.isVideo).reduce((sum, p) => sum + p.planned_minutes, 0)} />
+      <QuestionProgress week={questionWeek} compact />
       <div className="dash-main-grid">
         <section className="dash-panel dash-plan">
           <div className="dash-section-head"><div><p className="dash-eyebrow">BUGÜN</p><h2>Çalışma planın <span className="dash-count">{todayPlanItems.length}</span></h2></div><button className="dash-text-button" onClick={() => navigate('/plan')}>Planı aç <ChevronRight size={15} /></button></div>

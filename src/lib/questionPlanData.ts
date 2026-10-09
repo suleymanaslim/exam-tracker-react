@@ -1,9 +1,8 @@
-import { localDayKey } from './statsPeriod'
 import { supabase } from './supabase'
-import { withQuestionProgress, completedVideo } from './questionPlan'
-import type { QuestionPlan, QuestionResult, CompletedQuestionVideo } from './questionPlan'
+import { withQuestionProgress } from './questionPlan'
+import { withWeeklyQuestionProgress } from './questionAnalytics'
+import type { QuestionPlan, QuestionLog, QuestionVideo } from './questionPlan'
 
-// Supabase caps each response; paginate so older results stay in lifetime totals.
 async function readPages(table: 'question_plans' | 'question_session_results', columns: string, userId: string) {
   const rows: unknown[] = []
   const size = 500
@@ -16,29 +15,33 @@ async function readPages(table: 'question_plans' | 'question_session_results', c
     if (page.length < size) return rows
   }
 }
-export async function fetchQuestionPlans(userId: string): Promise<QuestionPlan[]> {
-  const [plans, results] = await Promise.all([
+export async function fetchQuestionData(userId: string) {
+  const [raw, results] = await Promise.all([
     readPages('question_plans', '*,subjects(name,exam_id),resources(name)', userId),
-    readPages('question_session_results', 'question_plan_id,solved_questions,correct_questions,wrong_questions', userId),
+    readPages('question_session_results', '*', userId),
   ])
-  return withQuestionProgress(plans as QuestionPlan[], results as QuestionResult[]).sort((a, b) => b.date.localeCompare(a.date))
+  const logs = (results as QuestionLog[]).filter(log => !log.deleted_at)
+  const plans = withWeeklyQuestionProgress(withQuestionProgress(raw as QuestionPlan[], logs), logs)
+    .sort((a, b) => b.date.localeCompare(a.date))
+  return { plans, logs }
+}
+export async function fetchQuestionPlans(userId: string): Promise<QuestionPlan[]> {
+  return (await fetchQuestionData(userId)).plans.filter(plan => !plan.archived_at)
 }
 export function questionPlanError(error: { code?: string; message?: string }) {
-  return ['42P01', 'PGRST205', 'PGRST202'].includes(error.code || '')
-    ? 'Soru planı henüz kurulmamış. Supabase’de question_plans.sql dosyasını çalıştırın.'
-    : error.code === '42501' ? 'Bu hesabın soru planını düzenleme izni bulunmuyor.' : 'Soru planı yüklenemedi. Lütfen tekrar deneyin.'
+  return ['42P01', '42703', 'PGRST204', 'PGRST205', 'PGRST202'].includes(error.code || '')
+    ? 'Soru planı için Supabase’de güncel question_plans.sql dosyasını çalıştırın.'
+    : error.code === '42501' ? 'Bu hesabın soru planını düzenleme izni bulunmuyor.' : 'İşlem tamamlanamadı. Lütfen tekrar deneyin.'
 }
-
-export async function fetchCompletedQuestionVideos(userId: string): Promise<CompletedQuestionVideo[]> {
-  const rows: CompletedQuestionVideo[] = []
-  const today = localDayKey(new Date())
+export async function fetchQuestionVideos(userId: string): Promise<QuestionVideo[]> {
+  const rows: QuestionVideo[] = []
   const size = 500
   for (let start = 0; ; start += size) {
     const { data, error } = await supabase.from('video_plan_items').select('*,resources(name,subject_id,subjects(name,exam_id))')
-      .eq('user_id', userId).lte('date', today).order('date', { ascending: false }).order('id').range(start, start + size - 1)
+      .eq('user_id', userId).order('date', { ascending: false }).order('id').range(start, start + size - 1)
     if (error) throw error
-    const page = (data || []) as CompletedQuestionVideo[]
-    rows.push(...page.filter(completedVideo))
+    const page = (data || []) as QuestionVideo[]
+    rows.push(...page)
     if (page.length < size) return rows
   }
 }

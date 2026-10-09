@@ -257,3 +257,13 @@ test('question recovery is not blocked by a finishing dialog after changing acco
   assert.equal(useTimerStore.getState().recovery.remainingSeconds, 50)
   assert.equal(useTimerStore.getState().recovery.ownerId, 'alice')
 })
+
+test('question goal presets retain their target across pause and reopen and clear after saving', () => {
+  bindTimerOwner(null); storage.clear(); bindTimerOwner('alice')
+  useTimerStore.getState().startQuestions({ examId: 'ags', subjectId: 'verbal', target: 20, date: '2026-10-09' })
+  clock += 12000; reopen()
+  assert.equal(useTimerStore.getState().questionTarget, 20)
+  assert.equal(useTimerStore.getState().recovery.questionTarget, 20)
+  useTimerStore.getState().resolveRecovery(true)
+  assert.equal(useTimerStore.getState().questionTarget, null)
+})

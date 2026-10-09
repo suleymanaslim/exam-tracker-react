@@ -1,4 +1,5 @@
 import './Stats.css'
+import QuestionProgress from '../components/QuestionProgress'
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, BarChart3 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
@@ -56,6 +57,7 @@ export default function Stats() {
   return <main className="analytics">
     <header className="analytics-header"><h1><BarChart3 size={24} /> İstatistikler</h1><div className="analytics-period" aria-label="Dönem">{(['all', 'week'] as const).map(p => <button key={p} aria-pressed={period === p} onClick={() => setPeriod(p)}>{p === 'all' ? 'Tüm zamanlar' : 'Haftalık'}</button>)}</div></header>
     <div className="analytics-dates"><p aria-live="polite">{period === 'all' ? 'İlk çalışma kaydından bugüne' : `${date(start)} – ${date(last)}`}</p>{period === 'week' && <div><button onClick={() => shift(-1)} aria-label="Önceki hafta"><ChevronLeft size={18} /></button><input type="date" aria-label="Hafta seç" value={week} onChange={e => { if (e.target.value) setWeek(localDayKey(mondayOf(new Date(`${e.target.value}T00:00:00`)))) }} /><button onClick={() => shift(1)} aria-label="Sonraki hafta"><ChevronRight size={18} /></button><button onClick={() => setWeek(localDayKey(mondayOf(new Date())))}>Bu hafta</button></div>}</div>
+    <QuestionProgress week={period === 'week' ? week : null} />
     <section className="analytics-kpis">{[
       ['Toplam süre', minutesLabel(data.total), period === 'week' && difference !== null && data.days > 0 ? `${difference >= 0 ? '+' : '−'}${minutesLabel(Math.abs(difference))} · önceki haftanın aynı günleri` : `${data.selected.length} oturum`],
       ['Çalışılan gün', `${data.active} / ${data.days}`, 'Geçen takvim günleri'],

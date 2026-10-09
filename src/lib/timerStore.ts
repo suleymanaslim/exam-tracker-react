@@ -21,6 +21,7 @@ interface TimerState {
   isFinishing: boolean
   questionPlanId: string | null
   questionDate: string | null
+  questionTarget: number | null
   setIsRunning: (v: boolean) => void
   setSecondsLeft: (v: number) => void
   setTotalSeconds: (v: number) => void
@@ -34,7 +35,7 @@ interface TimerState {
   setBreakSeconds: (v: number) => void
   resetTimer: (focusSeconds: number) => void
   startTimer: () => void
-  startQuestions: (selection: { examId: string; subjectId: string; resourceId?: string | null; planId?: string | null; date: string }) => void
+  startQuestions: (selection: { examId: string; subjectId: string; resourceId?: string | null; planId?: string | null; target?: number | null; date: string }) => void
   pauseTimer: () => void
   queueRecovery: () => void
   resolveRecovery: (saved: boolean) => void
@@ -47,7 +48,7 @@ const initial = {
   focusSeconds: 3000, startedAt: null as Date | null, sessionId: null as string | null,
   mode: 'pomodoro_long' as TimerMode, phase: 'focus' as 'focus' | 'break',
   selExam: '', selSubject: '', selResource: '', deadlineEpoch: null as number | null,
-  isFinishing: false, questionPlanId: null as string | null, questionDate: null as string | null,
+  isFinishing: false, questionPlanId: null as string | null, questionDate: null as string | null, questionTarget: null as number | null,
   breakSeconds: 600, recovery: null as RecoverySession | null,
 }
 
@@ -57,12 +58,12 @@ export const useTimerStore = create<TimerState>((set, get) => ({
   setSecondsLeft: value => set({ secondsLeft: value }),
   setTotalSeconds: value => set({ totalSeconds: value, ...(get().phase === 'focus' && !get().startedAt ? { focusSeconds: value } : {}) }),
   setStartedAt: value => set({ startedAt: value, sessionId: value ? get().sessionId || crypto.randomUUID() : null }),
-  setMode: value => set({ mode: value, questionPlanId: null, questionDate: null }), setPhase: value => set({ phase: value }),
+  setMode: value => set({ mode: value, questionPlanId: null, questionDate: null, questionTarget: null }), setPhase: value => set({ phase: value }),
   setSelExam: value => set({ selExam: value }), setSelSubject: value => set({ selSubject: value }),
   setSelResource: value => set({ selResource: value }), setDeadlineEpoch: value => set({ deadlineEpoch: value }),
   setBreakSeconds: value => set({ breakSeconds: value }),
   resetTimer: focusSeconds => set({ isRunning: false, secondsLeft: focusSeconds, totalSeconds: focusSeconds,
-    focusSeconds, startedAt: null, sessionId: null, deadlineEpoch: null, phase: 'focus', recovery: null, isFinishing: false, questionPlanId: null, questionDate: null }),
+    focusSeconds, startedAt: null, sessionId: null, deadlineEpoch: null, phase: 'focus', recovery: null, isFinishing: false, questionPlanId: null, questionDate: null, questionTarget: null }),
   startTimer: () => {
     const state = get()
     if (!state.ownerId || !state.selSubject || state.recovery || (!isCountUp(state.mode) && state.secondsLeft <= 0)) return
@@ -74,7 +75,7 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     if (!state.ownerId || state.isRunning || state.startedAt || state.recovery || state.phase === 'break') return
     get().resetTimer(0)
     set({ mode: 'questions', selExam: selection.examId, selSubject: selection.subjectId,
-      selResource: selection.resourceId || '', questionPlanId: selection.planId || null, questionDate: selection.date })
+      selResource: selection.resourceId || '', questionPlanId: selection.planId || null, questionDate: selection.date, questionTarget: selection.target ?? null })
     get().startTimer()
   },
   pauseTimer: () => {
@@ -115,7 +116,7 @@ function snapshot(state: TimerState): TimerSnapshot {
     totalSeconds: state.totalSeconds, focusSeconds: state.focusSeconds, startedAt: state.startedAt?.toISOString() || null,
     sessionId: state.sessionId, mode: state.mode, phase: state.phase, selExam: state.selExam,
     selSubject: state.selSubject, selResource: state.selResource, deadlineEpoch: state.deadlineEpoch,
-    breakSeconds: state.breakSeconds, recovery: state.recovery, questionPlanId: state.questionPlanId, questionDate: state.questionDate,
+    breakSeconds: state.breakSeconds, recovery: state.recovery, questionPlanId: state.questionPlanId, questionDate: state.questionDate, questionTarget: state.questionTarget,
   }
 }
 
@@ -130,7 +131,7 @@ export function bindTimerOwner(ownerId: string | null) {
   const remaining = remainingSeconds(restored, Date.now())
   const recovery = restored.recovery || (restored.phase === 'focus' && (restored.isRunning || (restored.startedAt && remaining <= 0)) ? recoveryFor(restored, Date.now()) : null)
   const expiredBreak = restored.phase === 'break' && remaining <= 0
-  useTimerStore.setState({ ...restored, isFinishing: false, questionPlanId: restored.questionPlanId || null, questionDate: restored.questionDate || null, ownerId, startedAt: restored.startedAt ? new Date(restored.startedAt) : null,
+  useTimerStore.setState({ ...restored, isFinishing: false, questionPlanId: restored.questionPlanId || null, questionDate: restored.questionDate || null, questionTarget: restored.questionTarget ?? null, ownerId, startedAt: restored.startedAt ? new Date(restored.startedAt) : null,
     recovery, isRunning: recovery || expiredBreak ? false : restored.isRunning,
     deadlineEpoch: recovery || expiredBreak ? null : restored.deadlineEpoch,
     secondsLeft: expiredBreak ? restored.focusSeconds : remaining,

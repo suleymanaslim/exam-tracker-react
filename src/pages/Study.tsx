@@ -174,7 +174,9 @@ export default function Study() {
     setQuestionPlans([])
     void refresh()
     window.addEventListener('study-session-saved', refresh)
-    return () => { cancelled = true; window.removeEventListener('study-session-saved', refresh) }
+    window.addEventListener('question-data-changed', refresh)
+    return () => { cancelled = true; window.removeEventListener('study-session-saved', refresh)
+      window.removeEventListener('question-data-changed', refresh) }
   }, [userId])
 
   // ── Focus minutes from settings ────────────────────────────────────
@@ -230,7 +232,7 @@ export default function Study() {
       if (session.durationMinutes <= 0) { void Swal.fire('Henüz süre yok', 'En az bir saniye çalıştıktan sonra kaydedebilirsin.', 'info'); if (wasRunning) current.startTimer(); return }
       useTimerStore.setState({ isFinishing: true })
       const result = await Swal.fire({
-        ...questionCompletionOptions(), title: 'Kaç soru çözdün?',
+        ...questionCompletionOptions('', undefined, undefined, false, session.questionTarget), title: 'Kaç soru çözdün?',
         showCancelButton: true, confirmButtonText: 'Bitir ve kaydet', cancelButtonText: 'Devam et', confirmButtonColor: '#4269a8',
         showLoaderOnConfirm: true, allowOutsideClick: () => !Swal.isLoading(),
         preConfirm: async value => {
@@ -396,8 +398,8 @@ export default function Study() {
             })}
             {questionPlans.map(task => <button key={`question_${task.id}`} className={`study-plan-item study-question-task ${task.target_questions != null && task.solved_questions >= task.target_questions ? 'is-done' : ''}`} disabled={isTimerActive || !task.subject_id || !task.subjects?.exam_id || ownerId !== userId} onClick={() => {
               if (!task.subject_id || !task.subjects?.exam_id) return
-              stopTimerAlarm(); startQuestions({ examId: task.subjects.exam_id, subjectId: task.subject_id, resourceId: task.resource_id, planId: task.id, date: task.date })
-            }}><i style={{ backgroundColor: getExamColor(task.subject_id) }} /><div><strong>{task.subjects?.name || 'Ders kaldırıldı'}</strong><span>Soru çöz{task.date < todayKey ? ' · Bekleyen hedef' : ''}</span><div className="study-plan-metrics"><span>{task.solved_questions}{task.target_questions ? ` / ${task.target_questions}` : ''} soru çözüldü</span>{task.target_questions != null && task.solved_questions >= task.target_questions && <CheckCircle2 size={15} />}</div></div></button>)}
+              stopTimerAlarm(); startQuestions({ examId: task.subjects.exam_id, subjectId: task.subject_id, resourceId: task.resource_id, planId: task.id, target: task.target_questions, date: task.date })
+            }}><i style={{ backgroundColor: getExamColor(task.subject_id) }} /><div><strong>{task.subjects?.name || 'Ders kaldırıldı'}</strong><span>Soru çöz{task.period === 'week' ? ' · Haftalık hedef' : task.date < todayKey ? ' · Bekleyen hedef' : ''}</span><div className="study-plan-metrics"><span>{task.solved_questions}{task.target_questions ? ` / ${task.target_questions}` : ''} soru çözüldü</span>{task.target_questions != null && task.solved_questions >= task.target_questions && <CheckCircle2 size={15} />}</div></div></button>)}
             <Link className="study-question-link" to="/questions">Soru planını aç</Link>
             {questionError && <p className="study-question-error" role="status">{questionError}</p>}
             <details className="study-extra-questions" open={mode === 'questions' && !isTimerActive ? true : undefined}><summary>Ek soru çözümü</summary>{exams.map(exam => <div className="study-question-subjects" key={exam.id}><strong>{exam.name}</strong><div>{subjects.filter(subject => subject.exam_id === exam.id).map(subject => <button key={subject.id} disabled={isTimerActive || ownerId !== userId || !!questionError} onClick={() => { stopTimerAlarm(); startQuestions({ examId: exam.id, subjectId: subject.id, date: localDayKey(new Date()) }) }}>{subject.name}<Play size={12} /></button>)}</div></div>)}</details>
