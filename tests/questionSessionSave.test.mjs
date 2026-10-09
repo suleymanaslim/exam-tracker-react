@@ -11,14 +11,24 @@ const session = {
 }
 const missing = { code: 'PGRST202', message: 'Could not find function in the schema cache' }
 
-test('a three-second question save preserves exact duration, counts, UUID and note', async () => {
+test('a three-second question save records a whole minute with counts, UUID and note', async () => {
   const calls = []
   await persistQuestionSession({ ...session, questionNote: 'Sözcükte anlam' }, async payload => { calls.push(payload); return { error: null } })
   assert.equal(calls.length, 1)
-  assert.equal(calls[0].p_duration_minutes, 0.05)
+  assert.equal(calls[0].p_duration_minutes, 1)
   assert.equal(calls[0].p_questions, 5)
   assert.equal(calls[0].p_session_id, session.id)
   assert.equal(calls[0].p_note, 'Sözcükte anlam')
+})
+test('question saves record 19.133333 and 60.377777 as whole minutes without changing recovery precision', async () => {
+  for (const [minutes, expected] of [[19.133333, 19], [60.377777, 60], [19.9, 20]]) {
+    const original = { ...session, durationMinutes: minutes }
+    await persistQuestionSession(original, async payload => {
+      assert.equal(payload.p_duration_minutes, expected)
+      return { error: null }
+    })
+    assert.equal(original.durationMinutes, minutes)
+  }
 })
 test('a note-free save can use the older RPC signature only after a missing signature response', async () => {
   const calls = []
@@ -27,7 +37,7 @@ test('a note-free save can use the older RPC signature only after a missing sign
   const { p_note, ...expected } = calls[0]
   assert.equal(p_note, null)
   assert.deepEqual(calls[1], expected)
-  assert.equal(calls[1].p_duration_minutes, 3 / 60)
+  assert.equal(calls[1].p_duration_minutes, 1)
 })
 test('compatibility never silently discards a note', async () => {
   let calls = 0

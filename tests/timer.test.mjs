@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { bindTimerOwner, useTimerStore } from '../src/lib/timerStore.ts'
 import { recoveryFor, readTimerSnapshot, sessionPayload } from '../src/lib/timerRecovery.ts'
+import { timerSaveWasRejected } from '../src/lib/timerSaveError.ts'
 import { playlistURL, nextFocusVideo, FOCUS_VIDEO_IDS } from '../src/lib/playlist.ts'
 
 const storage = new Map()
@@ -166,7 +167,55 @@ test('stopwatch counts upward and saves seconds including a sub-minute session',
   assert.equal(session.remainingSeconds, 37)
   assert.equal(session.durationMinutes, 37 / 60)
   assert.equal(sessionPayload(session).session_type, 'manual')
+  assert.equal(sessionPayload(session).duration_minutes, 1)
   assert.equal(Date.parse(session.endedAt) - Date.parse(session.startedAt), 37000)
+})
+test('stopwatch saves whole minutes while preserving timer seconds and session UUID', () => {
+  for (const [seconds, minutes] of [[1148, 19], [3623, 60], [1194, 20]]) {
+    startStopwatch(); clock += seconds * 1000
+    const session = recoveryFor(stored(), clock)
+    assert.equal(session.remainingSeconds, seconds)
+    assert.equal(sessionPayload(session).duration_minutes, minutes)
+    assert.equal(sessionPayload(session).id, session.id)
+  }
+})
+test('continuing a reopened stopwatch retains elapsed seconds and UUID without recording or counting idle time', () => {
+  startStopwatch(); clock += 65000; reopen()
+  const pending = useTimerStore.getState().recovery
+  clock += 300000
+  assert.equal(useTimerStore.getState().continueRecovery(), true)
+  clock += 12000
+  const current = useTimerStore.getState()
+  assert.equal(current.recovery, null)
+  assert.equal(current.sessionId, pending.id)
+  assert.equal(recoveryFor(stored(), clock).remainingSeconds, 77)
+})
+test('continuing after a confirmed rejected question save preserves time and goal but allows fresh answers', () => {
+  bindTimerOwner(null); storage.clear(); bindTimerOwner('alice')
+  useTimerStore.getState().startQuestions({ examId: 'ags', subjectId: 'verbal', target: 20, date: '2026-10-09' })
+  clock += 12000; useTimerStore.getState().pauseTimer()
+  const session = recoveryFor(stored(), clock)
+  assert.equal(timerSaveWasRejected({ code: 'PGRST202' }), true)
+  useTimerStore.setState({ recovery: { ...session, reason: 'save-failed', saveRejected: true, solvedQuestions: 5 } })
+  reopen()
+  assert.equal(useTimerStore.getState().continueRecovery(), true)
+  clock += 8000
+  const continued = recoveryFor(stored(), clock)
+  assert.equal(continued.id, session.id)
+  assert.equal(continued.remainingSeconds, 20)
+  assert.equal(continued.questionTarget, 20)
+  assert.equal(continued.solvedQuestions, undefined)
+})
+test('an uncertain save remains frozen across reopen and cannot be changed by continuing', () => {
+  startStopwatch(); clock += 65000; useTimerStore.getState().pauseTimer()
+  const session = recoveryFor(stored(), clock)
+  assert.equal(timerSaveWasRejected(new TypeError('Network failure')), false)
+  useTimerStore.setState({ recovery: { ...session, reason: 'save-failed', saveRejected: false } })
+  reopen()
+  assert.equal(useTimerStore.getState().continueRecovery(), false)
+  assert.equal(useTimerStore.getState().isRunning, false)
+  assert.equal(useTimerStore.getState().recovery.id, session.id)
+  assert.deepEqual(sessionPayload(useTimerStore.getState().recovery), sessionPayload(session))
 })
 test('stopwatch pause and resume exclude paused time and keep the same session', () => {
   startStopwatch(); clock += 65000

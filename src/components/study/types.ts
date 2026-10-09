@@ -17,6 +17,8 @@ export interface PlanItem {
   title: string | null
   planned_minutes: number
   video_count?: number
+  watched_count?: number
+  is_completed?: boolean
 }
 export interface TaskRow {
   id: string

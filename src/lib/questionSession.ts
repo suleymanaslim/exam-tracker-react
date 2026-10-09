@@ -1,4 +1,5 @@
 import type { RecoverySession } from './timerRecovery.ts'
+import { recordedMinutes } from './timerRecovery.ts'
 import { questionAnswers, questionNote } from './questionPlan.ts'
 import { localDayKey } from './statsPeriod.ts'
 
@@ -12,7 +13,7 @@ export function questionSessionPayload(session: RecoverySession) {
     p_user_id: session.ownerId, p_subject_id: session.subjectId,
     p_date: session.questionDate || localDayKey(new Date(session.startedAt)),
     p_questions: answers.solved_questions, p_correct: answers.correct_questions, p_wrong: answers.wrong_questions, p_note: note,
-    p_started_at: session.startedAt, p_ended_at: session.endedAt, p_duration_minutes: session.durationMinutes,
+    p_started_at: session.startedAt, p_ended_at: session.endedAt, p_duration_minutes: recordedMinutes(session.durationMinutes),
   }
 }
 

@@ -10,3 +10,10 @@ export function timerSaveError(error: unknown, questions = false) {
   if (['PGRST301', 'PGRST302', 'PGRST303'].includes(code)) return `Giriş oturumunu yenilemen gerekiyor${suffix}. Çalışma kaydın bu cihazda korunuyor.`
   return `Kaydedilemedi${suffix}. Süren korunuyor; tekrar kaydetmeyi deneyebilir veya oturumu unutabilirsin.`
 }
+
+// These server errors confirm rejection, so continuing cannot change a saved payload.
+// A network failure may hide a successful write; that payload must stay frozen.
+export function timerSaveWasRejected(error: unknown) {
+  const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : null
+  return typeof code === 'string' && ['PGRST202', 'PGRST204', 'PGRST205', '42P01', '42703', '42501', '23514', '22003', '22P02', 'PGRST301', 'PGRST302', 'PGRST303'].includes(code)
+}

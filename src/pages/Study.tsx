@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useTimerStore } from '../lib/timerStore'
 import { saveTimerSession } from '../lib/useGlobalTimer'
-import { recoveryFor, isCountUp } from '../lib/timerRecovery'
+import { recoveryFor, isCountUp, recordedMinutes, canContinueRecovery } from '../lib/timerRecovery'
 import Swal from 'sweetalert2'
 import { Plus } from 'lucide-react'
 import { useAdminStore } from '../lib/adminStore'
@@ -16,7 +16,8 @@ import { fetchQuestionPlans, questionPlanError } from '../lib/questionPlanData'
 import { openQuestionPlans } from '../lib/questionPlan'
 import type { QuestionPlan as QuestionTask } from '../lib/questionPlan'
 import { questionCompletionOptions, readQuestionAnswers, lockQuestionInputs } from '../lib/questionDialogs'
-import { timerSaveError } from '../lib/timerSaveError'
+import { timerSaveError, timerSaveWasRejected } from '../lib/timerSaveError'
+import { sessionCompletionDialog } from '../lib/sessionCompletionDialog'
 import TaskSidebar from '../components/study/TaskSidebar'
 import SessionSetup from '../components/study/SessionSetup'
 import FocusTimer from '../components/study/FocusTimer'
@@ -128,6 +129,8 @@ export default function Study() {
                 resource_id: v.resource_id,
                 title: `${cleanName} ${v.video_count}`,
                 video_count: v.video_count,
+                watched_count: v.watched_count || 0,
+                is_completed: v.is_completed || false,
                 planned_minutes: v.video_count * (res.avg_video_duration || 0),
                 sort_order: -1,
                 isVideo: true
@@ -232,11 +235,11 @@ export default function Study() {
       if (!session) return
       if (session.durationMinutes <= 0) { void Swal.fire('Henüz süre yok', 'En az bir saniye çalıştıktan sonra kaydedebilirsin.', 'info'); if (wasRunning) current.startTimer(); return }
       useTimerStore.setState({ isFinishing: true })
-      const result = await Swal.fire({
+      let saveUncertain = false
+      const result = await Swal.fire(sessionCompletionDialog({
         ...questionCompletionOptions('', undefined, undefined, false, session.questionTarget, { ownerId: session.ownerId, subjectId: session.subjectId }), title: 'Kaç soru çözdün?',
-        width: 420, customClass: { popup: 'study-save-dialog' },
-        showCancelButton: true, showDenyButton: true, denyButtonText: 'Oturumu unut', confirmButtonText: 'Kaydet', cancelButtonText: 'Çalışmaya dön',
-        showLoaderOnConfirm: true, allowOutsideClick: () => !Swal.isLoading(),
+        width: 420,
+        showLoaderOnConfirm: true,
         preConfirm: async value => {
           if (useTimerStore.getState().ownerId !== session.ownerId || useTimerStore.getState().sessionId !== session.id) return false
           const pending = useTimerStore.getState().recovery
@@ -244,20 +247,31 @@ export default function Study() {
           if (!answers) return false
           const completed = { ...session, solvedQuestions: answers.solved_questions, correctQuestions: answers.correct_questions, wrongQuestions: answers.wrong_questions, questionNote: answers.note }
           // Persist the frozen count and UUID before sending, including network failures/reloads.
-          useTimerStore.setState({ recovery: { ...completed, reason: 'save-failed' } })
+          useTimerStore.setState({ recovery: { ...completed, reason: 'save-failed', saveRejected: false } })
           lockQuestionInputs()
           try { await saveTimerSession(completed); return completed }
-          catch (error) { console.error('Question timer save failed:', error); Swal.showValidationMessage(timerSaveError(error, true)); return false }
+          catch (error) {
+            console.error('Question timer save failed:', error)
+            saveUncertain ||= !timerSaveWasRejected(error)
+            if (useTimerStore.getState().ownerId === session.ownerId && useTimerStore.getState().recovery?.id === session.id) {
+              useTimerStore.setState({ recovery: { ...completed, reason: 'save-failed', saveRejected: !saveUncertain } })
+            }
+            Swal.showValidationMessage(timerSaveError(error, true))
+            return false
+          }
         },
-      })
+      }, () => canContinueRecovery(useTimerStore.getState().recovery)))
       const state = useTimerStore.getState()
       if (state.ownerId !== session.ownerId || state.sessionId !== session.id) return
       useTimerStore.setState({ isFinishing: false })
       if (result.isConfirmed) {
         state.resetTimer(0)
-        void Swal.fire({ title: `${result.value.solvedQuestions} soru kaydedildi`, width: 380, customClass: { popup: 'study-save-dialog' }, timer: 1500, showConfirmButton: false })
+        void Swal.fire({ title: `${result.value.solvedQuestions} soru kaydedildi`, icon: 'success', width: 380, customClass: { popup: 'study-save-dialog' }, timer: 1500, showConfirmButton: false })
       } else if (result.isDenied) state.resetTimer(0)
-      else if (!state.recovery && wasRunning) state.startTimer()
+      else if (result.dismiss === Swal.DismissReason.cancel) {
+        if (state.recovery) state.continueRecovery()
+        else state.startTimer()
+      } else if (!state.recovery && wasRunning) state.startTimer()
       return
     }
     const wasRunning = timer.isRunning
@@ -267,31 +281,42 @@ export default function Study() {
     const session = recoveryFor({ ...current, ownerId: current.ownerId, startedAt: current.startedAt?.toISOString() || null }, Date.now())
     if (!session) return
     const canSave = session.durationMinutes > 0 && (session.mode === 'stopwatch' || session.durationMinutes >= 1)
-    const durationLabel = session.mode === 'stopwatch' ? `${Math.floor(session.remainingSeconds / 60)} dk ${session.remainingSeconds % 60} sn` : `${session.durationMinutes} dk`
+    const durationLabel = `${recordedMinutes(session.durationMinutes)} dk`
     useTimerStore.setState({ isFinishing: true })
-    const result = await Swal.fire({
+    let saveUncertain = false
+    const result = await Swal.fire(sessionCompletionDialog({
       title: 'Oturumu tamamla',
       text: canSave ? `${selectedSubject?.name || 'Çalışma'} · ${durationLabel}` : 'Bir dakikadan kısa süre kaydedilmeyecek.',
-      width: 380, customClass: { popup: 'study-save-dialog' }, showCancelButton: true, showDenyButton: true, denyButtonText: 'Oturumu unut',
-      confirmButtonText: canSave ? 'Kaydet ve bitir' : 'Oturumu bitir', cancelButtonText: 'Çalışmaya dön',
-      showLoaderOnConfirm: true, allowOutsideClick: () => !Swal.isLoading(),
+      width: 380,
+      showLoaderOnConfirm: true,
       preConfirm: async () => {
         const state = useTimerStore.getState()
         if (state.ownerId !== session.ownerId || state.sessionId !== session.id) return false
         // Freeze the UUID and duration before sending so retries cannot count twice.
-        useTimerStore.setState({ recovery: { ...session, reason: 'save-failed' } })
+        useTimerStore.setState({ recovery: { ...session, reason: 'save-failed', saveRejected: false } })
         try { await saveTimerSession(session); return true }
-        catch (error) { console.error('Timer save failed:', error); Swal.showValidationMessage(timerSaveError(error)); return false }
+        catch (error) {
+          console.error('Timer save failed:', error)
+          saveUncertain ||= !timerSaveWasRejected(error)
+          if (useTimerStore.getState().ownerId === session.ownerId && useTimerStore.getState().recovery?.id === session.id) {
+            useTimerStore.setState({ recovery: { ...session, reason: 'save-failed', saveRejected: !saveUncertain } })
+          }
+          Swal.showValidationMessage(timerSaveError(error))
+          return false
+        }
       },
-    })
+    }, () => canContinueRecovery(useTimerStore.getState().recovery)))
     const state = useTimerStore.getState()
     if (state.ownerId !== session.ownerId || state.sessionId !== session.id) return
     useTimerStore.setState({ isFinishing: false })
     if (result.isConfirmed) {
       state.resetTimer(current.focusSeconds)
-      void Swal.fire({ title: canSave ? 'Oturum kaydedildi' : 'Oturum bitirildi', width: 380, customClass: { popup: 'study-save-dialog' }, timer: 1500, showConfirmButton: false })
+      void Swal.fire({ title: canSave ? 'Oturum kaydedildi' : 'Oturum bitirildi', icon: 'success', width: 380, customClass: { popup: 'study-save-dialog' }, timer: 1500, showConfirmButton: false })
     } else if (result.isDenied) state.resetTimer(current.focusSeconds)
-    else if (!state.recovery && wasRunning) state.startTimer()
+    else if (result.dismiss === Swal.DismissReason.cancel) {
+      if (state.recovery) state.continueRecovery()
+      else state.startTimer()
+    } else if (!state.recovery && wasRunning) state.startTimer()
   }
 
   const handleSaveManualSession = async () => {
@@ -300,8 +325,8 @@ export default function Study() {
       Swal.fire({ icon: 'warning', title: 'Eksik Bilgi', text: 'Lütfen sınav ve ders seçin.', confirmButtonColor: '#4269a8' })
       return
     }
-    if (!manualDuration || Number(manualDuration) <= 0) {
-      Swal.fire({ icon: 'warning', title: 'Geçersiz Süre', text: 'Lütfen geçerli bir süre (dakika) girin.', confirmButtonColor: '#4269a8' })
+    if (!manualDuration || !Number.isInteger(Number(manualDuration)) || Number(manualDuration) <= 0) {
+      Swal.fire({ icon: 'warning', title: 'Geçersiz Süre', text: 'Lütfen dakika olarak pozitif bir tam sayı girin.', confirmButtonColor: '#4269a8' })
       return
     }
 
@@ -381,7 +406,8 @@ export default function Study() {
   const formatDuration = (minutes: number) => { const value = Math.max(0, Math.round(minutes)); return `${Math.floor(value / 60) ? `${Math.floor(value / 60)} sa ` : ''}${value % 60} dk` }
   const selectedSubject = subjects.find(subject => subject.id === selSubject)
   const selectedResource = resources.find(resource => resource.id === selResource)
-  const selectedDayVideoCount = selResource ? todayPlan.filter(item => item.resource_id === selResource && item.subject_id === selSubject).reduce((sum, item) => sum + (item.video_count || 0), 0) : 0
+  const selectedPlanTask = selectionSource === 'plan' ? todayPlan.find(item => item.id === selectedTaskId) : null
+  const selectedVideoCount = mode !== 'questions' ? selectedPlanTask?.video_count ?? null : null
   const activePlaylistURL = playlistURL(selectedResource?.url)
   const changeMode = (nextMode: SessionMode) => {
     const current = useTimerStore.getState()
@@ -406,13 +432,25 @@ export default function Study() {
   const studiedToday = (subjectId: string | null) => Math.round(todaySessions.filter(session => session.subject_id === subjectId).reduce((sum, session) => sum + Number(session.duration_minutes || 0), 0))
   const taskRows: TaskRow[] = todayPlan.map(item => {
     const studied = todaySessions.filter(session => session.subject_id === item.subject_id && (!item.resource_id || session.resource_id === item.resource_id)).reduce((sum, session) => sum + Number(session.duration_minutes || 0), 0)
-    return { id: item.id, name: getSubjectName(item.subject_id) || 'Çalışma', detail: item.planned_minutes > 0 ? `${formatDuration(item.planned_minutes)} plan` : 'Günlük plan', todayMinutes: studiedToday(item.subject_id), kind: item.video_count != null ? 'video' : 'study', done: item.planned_minutes > 0 && studied >= item.planned_minutes, disabled: !item.subject_id || !subjects.some(subject => subject.id === item.subject_id) || ownerId !== userId }
+    const videoCount = item.video_count
+    const isVideo = videoCount != null
+    const detail = isVideo
+      ? `${videoCount} video${item.watched_count ? ` · ${item.watched_count} izlendi` : ''}`
+      : item.planned_minutes > 0 ? `${formatDuration(item.planned_minutes)} plan` : 'Günlük plan'
+    const done = isVideo
+      ? (videoCount > 0 && (item.watched_count || 0) >= videoCount) || !!item.is_completed
+      : item.planned_minutes > 0 && studied >= item.planned_minutes
+    return {
+      id: item.id, name: getSubjectName(item.subject_id) || 'Çalışma', detail,
+      todayMinutes: studiedToday(item.subject_id), kind: isVideo ? 'video' : 'study', done,
+      disabled: !item.subject_id || !subjects.some(subject => subject.id === item.subject_id) || ownerId !== userId,
+    }
   })
   const questionRows: TaskRow[] = questionPlans.map(task => ({ id: task.id, name: task.subjects?.name || 'Ders kaldırıldı', detail: `${task.solved_questions} / ${task.target_questions} soru${task.period === 'week' ? ' · Haftalık' : task.date < todayKey ? ' · Bekleyen' : ''}`, todayMinutes: studiedToday(task.subject_id), kind: 'questions', done: task.target_questions != null && task.solved_questions >= task.target_questions, disabled: !task.subject_id || !task.subjects?.exam_id || ownerId !== userId || !!questionError }))
   const activeQuestion = questionPlans.find(task => task.id === (questionPlanId || selectedTaskId))
   const timerDetail = mode === 'questions'
     ? activeQuestion ? `${activeQuestion.solved_questions} / ${activeQuestion.target_questions} soru` : 'Ek soru çözümü'
-    : selectedDayVideoCount > 0 ? `${selectedDayVideoCount} video` : mode === 'manual' ? `${focusMinutes} dk kesintisiz odak` : ''
+    : selectedVideoCount != null ? '' : mode === 'manual' ? `${focusMinutes} dk kesintisiz odak` : ''
   const savedTodayMinutes = todaySessions.reduce((sum, session) => sum + Number(session.duration_minutes || 0), 0)
 
   return (
@@ -436,7 +474,7 @@ export default function Study() {
             onExam={id => { setSelExam(id); setSelSubject(''); setSelResource(''); setSelectedTaskId(null) }}
             onSubject={id => { setSelSubject(id); setSelResource(''); setSelectedTaskId(null) }}
             onResource={setSelResource} onBlocks={setPomodoroCount} onSetting={(key, value) => setSettings(current => ({ ...current, [key]: value }))} />}
-          <FocusTimer subject={selectedSubject?.name || ''} playlist={activePlaylistURL} seconds={secondsLeft} countUp={isCountUp(mode)} isBreak={isBreak} active={isTimerActive} running={isRunning} detail={timerDetail} progress={progress}>
+          <FocusTimer subject={selectedSubject?.name || ''} playlist={activePlaylistURL} seconds={secondsLeft} countUp={isCountUp(mode)} isBreak={isBreak} active={isTimerActive} running={isRunning} detail={timerDetail} videoCount={selectedVideoCount} progress={progress}>
             <TimerControls running={isRunning} started={!!startedAt} isBreak={isBreak} saving={isFinishing}
               disabled={!selSubject || !userId || ownerId !== userId || !!recovery || isFinishing || (mode === 'questions' && !!questionError)}
               onToggle={toggleTimer} onFinish={() => void endEarly()} onReset={() => void handleReset()} onSkipBreak={skipBreak} />

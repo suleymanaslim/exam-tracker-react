@@ -32,6 +32,7 @@ export interface RecoverySession {
   remainingSeconds: number
   resume: boolean
   reason?: 'reopened' | 'save-failed'
+  saveRejected?: boolean
   questionPlanId?: string | null
   questionDate?: string | null
   questionTarget?: number | null
@@ -98,8 +99,18 @@ export function sessionPayload(session: RecoverySession) {
     id: session.id, user_id: session.ownerId, subject_id: session.subjectId,
     resource_id: session.resourceId || null, session_type: isCountUp(session.mode) ? 'manual' : session.mode,
     started_at: session.startedAt, ended_at: session.endedAt,
-    duration_minutes: session.durationMinutes,
+    duration_minutes: recordedMinutes(session.durationMinutes),
   }
 }
 
 export function isCountUp(mode?: TimerMode) { return mode === 'stopwatch' || mode === 'questions' }
+
+// Keep timer/recovery precision; only the persisted minute count is rounded.
+export function recordedMinutes(minutes: number) {
+  return Number.isFinite(minutes) && minutes > 0 ? Math.max(1, Math.round(minutes)) : 0
+}
+
+export function canContinueRecovery(session: RecoverySession | null) {
+  return !session || (isCountUp(session.mode) || session.remainingSeconds > 0)
+    && (session.reason === 'reopened' || session.saveRejected === true)
+}
