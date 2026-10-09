@@ -49,7 +49,7 @@ export function useGlobalTimer(authenticatedUserId: string | null) {
     const recovery = state.recovery
     const durationLabel = isCountUp(recovery.mode) ? `${Math.floor(recovery.remainingSeconds / 60)} dk ${recovery.remainingSeconds % 60} sn` : `${recovery.durationMinutes} dakika`
     const questionOptions = recovery.mode === 'questions'
-      ? questionCompletionOptions(recovery.solvedQuestions == null ? '' : String(recovery.solvedQuestions), recovery.correctQuestions, recovery.wrongQuestions, recovery.solvedQuestions != null, recovery.questionTarget)
+      ? questionCompletionOptions(recovery.solvedQuestions == null ? '' : String(recovery.solvedQuestions), recovery.correctQuestions, recovery.wrongQuestions, recovery.solvedQuestions != null, recovery.questionTarget, { note: recovery.questionNote, ownerId: recovery.ownerId, subjectId: recovery.subjectId })
       : null
     const message = recovery.reason === 'save-failed' ? `${durationLabel} çalışma korunuyor. Kaydetmeyi tekrar deneyebilirsin.` : recovery.durationMinutes > 0
       ? `Önceki oturumdan ${durationLabel} geçti. Çalıştıysanız bu süreyi kaydedebiliriz.`
@@ -70,9 +70,9 @@ export function useGlobalTimer(authenticatedUserId: string | null) {
           let session = recovery
           if (recovery.mode === 'questions') {
             const pending = useTimerStore.getState().recovery
-            const answers = pending?.solvedQuestions != null ? { solved_questions: pending.solvedQuestions, correct_questions: pending.correctQuestions ?? null, wrong_questions: pending.wrongQuestions ?? null } : readQuestionAnswers(value)
+            const answers = pending?.solvedQuestions != null ? { solved_questions: pending.solvedQuestions, correct_questions: pending.correctQuestions ?? null, wrong_questions: pending.wrongQuestions ?? null, note: pending.questionNote ?? null } : readQuestionAnswers(value)
             if (!answers) return false
-            session = { ...recovery, solvedQuestions: answers.solved_questions, correctQuestions: answers.correct_questions, wrongQuestions: answers.wrong_questions }
+            session = { ...recovery, solvedQuestions: answers.solved_questions, correctQuestions: answers.correct_questions, wrongQuestions: answers.wrong_questions, questionNote: answers.note }
             useTimerStore.setState({ recovery: session })
             lockQuestionInputs()
           }

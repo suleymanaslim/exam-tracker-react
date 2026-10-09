@@ -36,7 +36,11 @@ async function scenario(oldMigration = null) {
     if (oldMigration) {
       await db.exec(oldMigration)
       await user(alice)
-      const oldPlan = (await value("INSERT INTO public.question_plans(user_id,video_plan_item_id,subject_id,resource_id,date,target_questions) VALUES ($1,$2,$3,$4,'2026-10-09',30) RETURNING id", [alice, video, subject, resource])).id
+      // Version 1 granted inserts; later versions use the target RPC.
+      const legacyInsert = (await value("SELECT has_table_privilege('authenticated','public.question_plans','INSERT') AS allowed")).allowed
+      const oldPlan = legacyInsert
+        ? (await value("INSERT INTO public.question_plans(user_id,video_plan_item_id,subject_id,resource_id,date,target_questions) VALUES ($1,$2,$3,$4,'2026-10-09',30) RETURNING id", [alice, video, subject, resource])).id
+        : await target(alice, subject, '2026-10-09', 30, 'day', video)
       await add(id(10), oldPlan, 15)
       await db.query("SELECT public.save_question_study_session($1,NULL,$2,$3,'2026-10-09',5,'2026-10-09T10:00Z','2026-10-09T10:01:07Z',67.0/60)", [id(11), alice, subject])
       await db.exec('RESET ROLE')
@@ -77,6 +81,19 @@ async function scenario(oldMigration = null) {
     await db.query('SELECT public.remove_question_result($1)', [timed.id])
     assert.equal(Number((await value('SELECT duration_minutes FROM public.study_sessions WHERE id=$1', [id(21)])).duration_minutes), 1.116667)
     console.log('PASS extra stopwatch sessions use the new conflict key and retain time after count edits')
+    await db.query('SELECT public.add_solved_questions($1,$2,20,15,5,$3)', [id(30), week, '  Sözcükte anlam  '])
+    await db.query('SELECT public.add_solved_questions($1,$2,20,15,5,$3)', [id(30), week, 'Sözcükte anlam'])
+    assert.equal((await value('SELECT note FROM public.question_session_results WHERE id=$1', [id(30)])).note, 'Sözcükte anlam')
+    await assert.rejects(db.query('SELECT public.add_solved_questions($1,$2,20,15,5,$3)', [id(30), week, 'Other topic']), /different data/)
+    await db.query('SELECT public.update_question_result($1,25,20,5,$2)', [id(30), 'Paragraf'])
+    assert.equal((await value('SELECT note FROM public.question_session_results WHERE id=$1', [id(30)])).note, 'Paragraf')
+    await assert.rejects(db.query('SELECT public.update_question_result($1,25,20,5,$2)', [id(30), 'x'.repeat(1001)]), /Invalid question count/)
+    await db.query("SELECT public.save_question_study_session($1,NULL,$2,$3,'2026-10-09',20,'2026-10-09T10:00Z','2026-10-09T10:01:07Z',67.0/60,15,5,$4)", [id(31), alice, subject, 'Deyimler'])
+    await db.query("SELECT public.save_question_study_session($1,NULL,$2,$3,'2026-10-09',20,'2026-10-09T10:00Z','2026-10-09T10:01:07Z',67.0/60,15,5,$4)", [id(31), alice, subject, 'Deyimler'])
+    assert.equal((await value('SELECT note FROM public.question_session_results WHERE session_id=$1', [id(31)])).note, 'Deyimler')
+    const signatures = await value("SELECT count(*)::int AS n FROM pg_proc WHERE proname IN ('save_question_study_session','add_solved_questions','update_question_result') AND pronamespace='public'::regnamespace")
+    assert.equal(signatures.n, 3)
+    console.log('PASS notes persist through manual/timed saves, edits and retries without ambiguous RPC overloads')
     await assert.rejects(target(bob, foreignSubject, '2026-10-09', 20), /Access denied/)
     await assert.rejects(target(alice, foreignSubject, '2026-10-09', 20), /Subject not found/)
     await assert.rejects(target(alice, subject, '2026-10-09', 20, 'day', foreignVideo), /Video not found/)
@@ -103,7 +120,8 @@ async function scenario(oldMigration = null) {
     assert.deepEqual(await value('SELECT (SELECT count(*) FROM public.question_plans)::int AS plans, (SELECT count(*) FROM public.question_session_results)::int AS results, (SELECT count(*) FROM public.study_sessions)::int AS sessions'), counts)
     assert.ok((await value('SELECT deleted_at FROM public.question_session_results WHERE id=$1', [id(20)])).deleted_at)
     assert.ok((await value('SELECT archived_at FROM public.question_plans WHERE id=$1', [videoPlan])).archived_at)
-    console.log('PASS rerunning migration keeps data, archives and removed results intact')
+    assert.equal((await value('SELECT note FROM public.question_session_results WHERE id=$1', [id(30)])).note, 'Paragraf')
+    console.log('PASS rerunning migration keeps data, notes, archives and removed results intact')
   } finally { await db.close() }
 }
 try {

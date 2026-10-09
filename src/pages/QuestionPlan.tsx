@@ -116,14 +116,14 @@ export default function QuestionPlan() {
     const entryId = crypto.randomUUID()
     let pendingAnswers: ReturnType<typeof readQuestionAnswers> = null
     const result = await Swal.fire({
-      ...questionCompletionOptions('', undefined, undefined, false, plan.target_questions), title: 'Çözülen soru ekle',
+      ...questionCompletionOptions('', undefined, undefined, false, plan.target_questions, { ownerId: userId, subjectId: plan.subject_id }), title: 'Çözülen soru ekle',
       showCancelButton: true, confirmButtonText: 'Ekle', cancelButtonText: 'İptal', confirmButtonColor: '#4269a8',
       showLoaderOnConfirm: true, allowOutsideClick: () => !Swal.isLoading(),
       preConfirm: async value => {
         const answers = pendingAnswers || readQuestionAnswers(value)
         if (!answers || answers.solved_questions < 1) { if (answers) Swal.showValidationMessage('En az 1 soru girin.'); return false }
         pendingAnswers = answers; lockQuestionInputs()
-        const { error: saveError } = await supabase.rpc('add_solved_questions', { p_entry_id: entryId, p_question_plan_id: plan.id, p_questions: answers.solved_questions, p_correct: answers.correct_questions, p_wrong: answers.wrong_questions })
+        const { error: saveError } = await supabase.rpc('add_solved_questions', { p_entry_id: entryId, p_question_plan_id: plan.id, p_questions: answers.solved_questions, p_correct: answers.correct_questions, p_wrong: answers.wrong_questions, p_note: answers.note })
         if (saveError) { Swal.showValidationMessage(questionPlanError(saveError)); return false }
         return true
       },
@@ -133,13 +133,13 @@ export default function QuestionPlan() {
   const editLog = async (entry: QuestionLog) => {
     const plan = plans.find(p => p.id === entry.question_plan_id)
     const result = await Swal.fire({
-      ...questionCompletionOptions(String(entry.solved_questions), entry.correct_questions, entry.wrong_questions, false, plan?.target_questions),
+      ...questionCompletionOptions(String(entry.solved_questions), entry.correct_questions, entry.wrong_questions, false, plan?.target_questions, { note: entry.note, ownerId: userId, subjectId: plan?.subject_id }),
       title: 'Çözüm kaydını düzenle', showCancelButton: true, confirmButtonText: 'Kaydet', cancelButtonText: 'İptal', confirmButtonColor: '#4269a8',
       showLoaderOnConfirm: true, allowOutsideClick: () => !Swal.isLoading(),
       preConfirm: async value => {
         const answers = readQuestionAnswers(value)
         if (!answers) return false
-        const { error: saveError } = await supabase.rpc('update_question_result', { p_entry_id: entry.id, p_questions: answers.solved_questions, p_correct: answers.correct_questions, p_wrong: answers.wrong_questions })
+        const { error: saveError } = await supabase.rpc('update_question_result', { p_entry_id: entry.id, p_questions: answers.solved_questions, p_correct: answers.correct_questions, p_wrong: answers.wrong_questions, p_note: answers.note })
         if (saveError) { Swal.showValidationMessage(questionPlanError(saveError)); return false }
         return true
       },
@@ -167,14 +167,14 @@ export default function QuestionPlan() {
   const weekLessons = lessons.filter(lesson => inWeek(lesson.date))
   const visibleLessons = weekLessons.filter(lesson => matches(`${lesson.resources?.subjects?.name || ''} ${lesson.resources?.name || ''}`))
   const weekLogs = logs.filter(log => inWeek(localDayKey(new Date(log.created_at))))
-  const visibleLogs = weekLogs.filter(log => { const plan = plans.find(p => p.id === log.question_plan_id); return matches(`${plan?.subjects?.name || ''} ${plan?.resources?.name || ''}`) }).sort((a, b) => b.created_at.localeCompare(a.created_at))
+  const visibleLogs = weekLogs.filter(log => { const plan = plans.find(p => p.id === log.question_plan_id); return matches(`${plan?.subjects?.name || ''} ${plan?.resources?.name || ''} ${log.note || ''}`) }).sort((a, b) => b.created_at.localeCompare(a.created_at))
   const summary = useMemo(() => analyzeQuestions(plans, logs, week), [plans, logs, week])
   const shift = (direction: number) => { const next = new Date(start); next.setDate(next.getDate() + direction * 7); setWeek(localDayKey(next)) }
   return <div className="question-page">
     <header className="question-header"><div><p>SORU ÇALIŞMASI</p><h1>Soru planı</h1></div><div className="question-header-actions"><button className="question-button" disabled={loading || !!error || !subjects.length} onClick={() => void saveTarget()}><Plus size={16} /> Hedef ekle</button><Link className="question-button" to="/study"><Play size={16} /> Çalışmaya geç</Link></div></header>
     <div className="question-week"><strong>{dateLabel(week)} – {dateLabel(localDayKey(weekEnd))}</strong><div><button aria-label="Önceki hafta" onClick={() => shift(-1)}><ChevronLeft size={17} /></button><input type="date" aria-label="Hafta seç" value={week} onChange={e => { if (e.target.value) setWeek(localDayKey(mondayOf(new Date(`${e.target.value}T00:00:00`)))) }} /><button aria-label="Sonraki hafta" onClick={() => shift(1)}><ChevronRight size={17} /></button><button onClick={() => setWeek(localDayKey(mondayOf(new Date())))}>Bu hafta</button></div></div>
     <div className="question-summary"><span><strong>{summary.solved.toLocaleString('tr-TR')}</strong> soru çözüldü</span><span>{summary.target.toLocaleString('tr-TR')} haftalık hedef · {summary.remaining.toLocaleString('tr-TR')} kalan</span></div>
-    <div className="question-toolbar"><div className="question-tabs" role="group" aria-label="Soru planı görünümü"><button aria-pressed={tab === 'plans'} onClick={() => setTab('plans')}>Hedefler <span>{weekPlans.length}</span></button><button aria-pressed={tab === 'videos'} onClick={() => setTab('videos')}>Video görevleri <span>{weekLessons.length}</span></button><button aria-pressed={tab === 'logs'} onClick={() => setTab('logs')}>Kayıtlar <span>{weekLogs.length}</span></button></div><input type="search" aria-label="Ders ara" placeholder="Ders ara…" value={search} onChange={event => setSearch(event.target.value)} /></div>
+    <div className="question-toolbar"><div className="question-tabs" role="group" aria-label="Soru planı görünümü"><button aria-pressed={tab === 'plans'} onClick={() => setTab('plans')}>Hedefler <span>{weekPlans.length}</span></button><button aria-pressed={tab === 'videos'} onClick={() => setTab('videos')}>Video görevleri <span>{weekLessons.length}</span></button><button aria-pressed={tab === 'logs'} onClick={() => setTab('logs')}>Kayıtlar <span>{weekLogs.length}</span></button></div><input type="search" aria-label="Ders veya konu ara" placeholder="Ders veya konu ara…" value={search} onChange={event => setSearch(event.target.value)} /></div>
     {error && <div className="question-error" role="alert"><span>{error}</span><button onClick={() => userId && void load(userId)}><RefreshCw size={16} /> Tekrar dene</button></div>}
     {loading ? <div className="question-empty">Yükleniyor…</div> : !error && (tab === 'plans' ? <div className="question-cards">
       {visiblePlans.length === 0 && <div className="question-empty"><BookOpenCheck size={28} /><p>{search ? 'Aramaya uygun plan yok.' : 'Bu haftaya bir ders hedefi veya video görevi ekle.'}</p><button className="question-button" onClick={() => void saveTarget()}><Plus size={16} /> Hedef ekle</button></div>}
@@ -197,7 +197,7 @@ export default function QuestionPlan() {
       })}
     </div> : <div className="question-logs">
       {visibleLogs.length === 0 && <div className="question-empty"><BookOpenCheck size={28} /><p>Bu haftada çözüm kaydı yok.</p></div>}
-      {visibleLogs.map(entry => { const plan = plans.find(p => p.id === entry.question_plan_id); return <article className="question-log" key={entry.id}><div><strong>{plan?.subjects?.name || 'Ders kaldırıldı'}</strong><span>{new Date(entry.created_at).toLocaleString('tr-TR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · {entry.session_id ? 'Çalışma oturumu' : 'Elle eklendi'}{plan?.archived_at ? ' · Plan silindi' : ''}</span>{(entry.correct_questions != null || entry.wrong_questions != null) && <small>{[entry.correct_questions != null ? `${entry.correct_questions} doğru` : '', entry.wrong_questions != null ? `${entry.wrong_questions} yanlış` : ''].filter(Boolean).join(' · ')}</small>}</div><strong className="question-log-count">{entry.solved_questions}<small>soru</small></strong><div className="question-log-actions"><button className="question-icon-button" aria-label="Çözüm kaydını düzenle" onClick={() => void editLog(entry)}><Pencil size={16} /></button><button className="question-icon-button is-danger" aria-label="Çözüm kaydını sil" onClick={() => void remove(entry.id, 'log')}><Trash2 size={16} /></button></div></article> })}
+      {visibleLogs.map(entry => { const plan = plans.find(p => p.id === entry.question_plan_id); return <article className="question-log" key={entry.id}><div><strong>{plan?.subjects?.name || 'Ders kaldırıldı'}</strong><span>{new Date(entry.created_at).toLocaleString('tr-TR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · {entry.session_id ? 'Çalışma oturumu' : 'Elle eklendi'}{plan?.archived_at ? ' · Plan silindi' : ''}</span>{entry.note && <p className="question-log-note">{entry.note}</p>}{(entry.correct_questions != null || entry.wrong_questions != null) && <small>{[entry.correct_questions != null ? `${entry.correct_questions} doğru` : '', entry.wrong_questions != null ? `${entry.wrong_questions} yanlış` : ''].filter(Boolean).join(' · ')}</small>}</div><strong className="question-log-count">{entry.solved_questions}<small>soru</small></strong><div className="question-log-actions"><button className="question-icon-button" aria-label="Çözüm kaydını düzenle" onClick={() => void editLog(entry)}><Pencil size={16} /></button><button className="question-icon-button is-danger" aria-label="Çözüm kaydını sil" onClick={() => void remove(entry.id, 'log')}><Trash2 size={16} /></button></div></article> })}
     </div>)}
   </div>
 }

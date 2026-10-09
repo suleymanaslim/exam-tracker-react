@@ -38,6 +38,7 @@ export interface RecoverySession {
   solvedQuestions?: number
   correctQuestions?: number | null
   wrongQuestions?: number | null
+  questionNote?: string | null
 }
 
 export function remainingSeconds(snapshot: Pick<TimerSnapshot, 'isRunning' | 'deadlineEpoch' | 'secondsLeft'> & { mode?: TimerMode }, now: number) {
@@ -80,6 +81,7 @@ export function readTimerSnapshot(raw: string | null, ownerId: string): TimerSna
     if (value.previousStudyMode != null && !['pomodoro_long', 'pomodoro_short', 'manual', 'stopwatch'].includes(value.previousStudyMode)) return null
     if (value.questionTarget != null && (!Number.isInteger(value.questionTarget) || value.questionTarget < 1 || value.questionTarget > 100000)) return null
     if (value.recovery?.solvedQuestions != null && (!Number.isInteger(value.recovery.solvedQuestions) || value.recovery.solvedQuestions < 0 || value.recovery.solvedQuestions > 100000)) return null
+    if (value.recovery?.questionNote != null && (typeof value.recovery.questionNote !== 'string' || value.recovery.questionNote.length > 1000)) return null
     if (value.recovery) {
       for (const key of ['correctQuestions', 'wrongQuestions'] as const) {
         const count = value.recovery[key]

@@ -23,6 +23,7 @@ export interface QuestionResult {
   solved_questions: number
   correct_questions?: number | null
   wrong_questions?: number | null
+  note?: string | null
   created_at?: string
   deleted_at?: string | null
 }
@@ -88,4 +89,30 @@ export interface QuestionVideo {
   id: string; date: string; resource_id: string; video_count: number
   watched_count?: number; is_completed?: boolean
   resources: { name: string; subject_id: string; subjects: { name: string; exam_id: string } | null } | null
+}
+
+// Used when answer fields are edited; unedited historical records retain their total.
+export function questionEntryAnswers(total: unknown, correct: unknown = '', wrong: unknown = '') {
+  const hasAnswers = correct != null && correct !== '' || wrong != null && wrong !== ''
+  if (!hasAnswers) return questionAnswers(total)
+  const answers = questionAnswers(100000, correct, wrong)
+  if (!answers) return null
+  return questionAnswers((answers.correct_questions || 0) + (answers.wrong_questions || 0), correct, wrong)
+}
+export function questionNote(value: unknown): string | null | undefined {
+  if (value == null) return null
+  if (typeof value !== 'string' || value.length > 1000) return undefined
+  return value.trim() || null
+}
+export function questionNoteSuggestions(values: (string | null | undefined)[], limit = 50): string[] {
+  const seen = new Set<string>(), notes: string[] = []
+  for (const value of values) {
+    const note = questionNote(value)
+    if (!note) continue
+    const key = note.toLocaleLowerCase('tr-TR')
+    if (seen.has(key)) continue
+    seen.add(key); notes.push(note)
+    if (notes.length >= limit) break
+  }
+  return notes
 }

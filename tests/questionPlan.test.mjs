@@ -59,3 +59,32 @@ test('question session payload keeps stable IDs, exact time and counts for atomi
   assert.throws(() => questionSessionPayload({ ...session, correctQuestions: 21 }))
   assert.throws(() => questionSessionPayload({ ...session, durationMinutes: 0 }))
 })
+
+test('entering answer counts derives total automatically and preserves optional unknown values', async () => {
+  const { questionEntryAnswers } = await import('../src/lib/questionPlan.ts')
+  assert.deepEqual(questionEntryAnswers('', '15', '5'), { solved_questions: 20, correct_questions: 15, wrong_questions: 5 })
+  assert.deepEqual(questionEntryAnswers('45', '15', '5'), { solved_questions: 20, correct_questions: 15, wrong_questions: 5 })
+  assert.deepEqual(questionEntryAnswers('', '15', ''), { solved_questions: 15, correct_questions: 15, wrong_questions: null })
+  assert.deepEqual(questionEntryAnswers('', '', '5'), { solved_questions: 5, correct_questions: null, wrong_questions: 5 })
+  assert.deepEqual(questionEntryAnswers('30'), { solved_questions: 30, correct_questions: null, wrong_questions: null })
+  assert.deepEqual(questionEntryAnswers('', '0', '0'), { solved_questions: 0, correct_questions: 0, wrong_questions: 0 })
+  for (const [right, wrong] of [['1.5', '5'], ['-1', '5'], ['100000', '1'], ['x', '5']]) assert.equal(questionEntryAnswers('', right, wrong), null)
+  // Old records can legitimately contain a total with only some answers entered.
+  assert.equal(questionAnswers(30, 20, 5).solved_questions, 30)
+})
+test('notes retain Turkish text, normalize blanks and reject oversized or non-text payloads', async () => {
+  const { questionNote, questionNoteSuggestions } = await import('../src/lib/questionPlan.ts')
+  assert.equal(questionNote('  Sözcükte anlam  '), 'Sözcükte anlam')
+  assert.equal(questionNote(' '), null)
+  assert.equal(questionNote(undefined), null)
+  assert.equal(questionNote('x'.repeat(1001)), undefined)
+  assert.equal(questionNote({ text: 'topic' }), undefined)
+  assert.deepEqual(questionNoteSuggestions([' Sözcükte anlam ', 'sözcükte anlam', null, 'İsimler', 'isimler', 'Tarih']), ['Sözcükte anlam', 'İsimler', 'Tarih'])
+})
+test('question save retries carry the same note while legacy sessions have no note', () => {
+  const session = { id: 'session-id', ownerId: 'alice', subjectId: 'subject', resourceId: '', mode: 'questions', startedAt: '2026-10-09T11:00:00Z', endedAt: '2026-10-09T11:01:00Z', durationMinutes: 1, remainingSeconds: 60, solvedQuestions: 20, correctQuestions: 15, wrongQuestions: 5 }
+  assert.equal(questionSessionPayload(session).p_note, null)
+  assert.equal(questionSessionPayload({ ...session, questionNote: '  Sözcükte anlam ' }).p_note, 'Sözcükte anlam')
+  assert.deepEqual(questionSessionPayload({ ...session, questionNote: 'Tarih' }), questionSessionPayload({ ...structuredClone(session), questionNote: 'Tarih' }))
+  assert.throws(() => questionSessionPayload({ ...session, questionNote: 'x'.repeat(1001) }))
+})

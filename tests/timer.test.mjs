@@ -300,3 +300,15 @@ test('switching to idle questions from the compact selector can immediately retu
   assert.equal(useTimerStore.getState().returnToStudy(), true)
   assert.equal(useTimerStore.getState().mode, 'pomodoro_short')
 })
+
+test('a pending question note stays with its counts and time across reopening', () => {
+  bindTimerOwner(null); storage.clear(); bindTimerOwner('alice')
+  useTimerStore.getState().startQuestions({ examId: 'ags', subjectId: 'verbal', date: '2026-10-09' })
+  clock += 90000; useTimerStore.getState().pauseTimer()
+  const session = recoveryFor(stored(), clock)
+  useTimerStore.setState({ recovery: { ...session, solvedQuestions: 20, correctQuestions: 15, wrongQuestions: 5, questionNote: 'Sözcükte anlam', reason: 'save-failed' } })
+  clock += 500000; reopen()
+  assert.equal(useTimerStore.getState().recovery.questionNote, 'Sözcükte anlam')
+  assert.equal(useTimerStore.getState().recovery.solvedQuestions, 20)
+  assert.equal(useTimerStore.getState().recovery.remainingSeconds, 90)
+})

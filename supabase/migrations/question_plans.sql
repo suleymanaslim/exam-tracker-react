@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS public.question_session_results (
   CHECK (COALESCE(correct_questions, 0) + COALESCE(wrong_questions, 0) <= solved_questions)
 );
 ALTER TABLE public.question_session_results ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
+ALTER TABLE public.question_session_results ADD COLUMN IF NOT EXISTS note text CHECK (char_length(note) <= 1000);
 
 CREATE INDEX IF NOT EXISTS question_results_user_plan ON public.question_session_results(user_id, question_plan_id);
 
@@ -65,20 +66,23 @@ GRANT SELECT ON public.question_session_results TO authenticated;
 
 -- Time and counts save together; retrying a session ID never increments twice.
 -- A null plan ID creates/reuses a standalone daily subject question record.
+-- Replace the old RPC signature only; existing rows are retained.
+DROP FUNCTION IF EXISTS public.save_question_study_session(uuid, uuid, uuid, uuid, date, integer, timestamptz, timestamptz, numeric, integer, integer);
 CREATE OR REPLACE FUNCTION public.save_question_study_session(
   p_session_id uuid, p_question_plan_id uuid, p_user_id uuid, p_subject_id uuid,
   p_date date, p_questions integer, p_started_at timestamptz, p_ended_at timestamptz,
-  p_duration_minutes numeric, p_correct integer DEFAULT NULL, p_wrong integer DEFAULT NULL
+  p_duration_minutes numeric, p_correct integer DEFAULT NULL, p_wrong integer DEFAULT NULL, p_note text DEFAULT NULL
 ) RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 DECLARE
   plan public.question_plans%ROWTYPE;
   previous public.question_session_results%ROWTYPE;
+  saved_note text := nullif(btrim(p_note), '');
 BEGIN
   IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Authentication required' USING ERRCODE = '42501'; END IF;
   IF p_user_id IS NULL OR (p_user_id <> auth.uid() AND NOT EXISTS (
     SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'
   )) THEN RAISE EXCEPTION 'Access denied' USING ERRCODE = '42501'; END IF;
-  IF p_questions IS NULL OR p_questions < 0 OR p_questions > 100000
+  IF char_length(saved_note) > 1000 OR p_questions IS NULL OR p_questions < 0 OR p_questions > 100000
     OR p_correct < 0 OR p_correct > 100000 OR p_wrong < 0 OR p_wrong > 100000
     OR COALESCE(p_correct, 0) + COALESCE(p_wrong, 0) > p_questions
     OR p_duration_minutes IS NULL OR p_duration_minutes <= 0 OR p_duration_minutes::text IN ('NaN', 'Infinity', '-Infinity')
@@ -104,28 +108,31 @@ BEGIN
   SELECT * INTO previous FROM public.question_session_results WHERE session_id = p_session_id;
   IF FOUND THEN
     IF previous.question_plan_id <> plan.id OR previous.user_id <> plan.user_id OR previous.solved_questions <> p_questions
-      OR previous.correct_questions IS DISTINCT FROM p_correct OR previous.wrong_questions IS DISTINCT FROM p_wrong THEN
+      OR previous.correct_questions IS DISTINCT FROM p_correct OR previous.wrong_questions IS DISTINCT FROM p_wrong OR previous.note IS DISTINCT FROM saved_note THEN
       RAISE EXCEPTION 'Session already recorded with different data';
     END IF;
     RETURN;
   END IF;
   INSERT INTO public.study_sessions(id, user_id, subject_id, resource_id, session_type, started_at, ended_at, duration_minutes)
   VALUES (p_session_id, plan.user_id, plan.subject_id, plan.resource_id, 'manual', p_started_at, p_ended_at, p_duration_minutes);
-  INSERT INTO public.question_session_results(session_id, user_id, question_plan_id, solved_questions, correct_questions, wrong_questions)
-  VALUES (p_session_id, plan.user_id, plan.id, p_questions, p_correct, p_wrong);
+  INSERT INTO public.question_session_results(session_id, user_id, question_plan_id, solved_questions, correct_questions, wrong_questions, note)
+  VALUES (p_session_id, plan.user_id, plan.id, p_questions, p_correct, p_wrong, saved_note);
 END;
 $$;
-REVOKE ALL ON FUNCTION public.save_question_study_session(uuid, uuid, uuid, uuid, date, integer, timestamptz, timestamptz, numeric, integer, integer) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.save_question_study_session(uuid, uuid, uuid, uuid, date, integer, timestamptz, timestamptz, numeric, integer, integer) TO authenticated;
+REVOKE ALL ON FUNCTION public.save_question_study_session(uuid, uuid, uuid, uuid, date, integer, timestamptz, timestamptz, numeric, integer, integer, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.save_question_study_session(uuid, uuid, uuid, uuid, date, integer, timestamptz, timestamptz, numeric, integer, integer, text) TO authenticated;
 
 -- Manual extra questions have no study session and do not invent study time.
+-- Replace the old RPC signature only; existing rows are retained.
+DROP FUNCTION IF EXISTS public.add_solved_questions(uuid, uuid, integer, integer, integer);
 CREATE OR REPLACE FUNCTION public.add_solved_questions(
   p_entry_id uuid, p_question_plan_id uuid, p_questions integer,
-  p_correct integer DEFAULT NULL, p_wrong integer DEFAULT NULL
+  p_correct integer DEFAULT NULL, p_wrong integer DEFAULT NULL, p_note text DEFAULT NULL
 ) RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 DECLARE
   plan public.question_plans%ROWTYPE;
   previous public.question_session_results%ROWTYPE;
+  saved_note text := nullif(btrim(p_note), '');
 BEGIN
   IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Authentication required' USING ERRCODE = '42501'; END IF;
   SELECT * INTO plan FROM public.question_plans WHERE id = p_question_plan_id FOR UPDATE;
@@ -133,7 +140,7 @@ BEGIN
   IF plan.user_id <> auth.uid() AND NOT EXISTS (
     SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'
   ) THEN RAISE EXCEPTION 'Access denied' USING ERRCODE = '42501'; END IF;
-  IF p_questions IS NULL OR p_questions < 1 OR p_questions > 100000 OR p_entry_id IS NULL
+  IF char_length(saved_note) > 1000 OR p_questions IS NULL OR p_questions < 1 OR p_questions > 100000 OR p_entry_id IS NULL
     OR p_correct < 0 OR p_correct > 100000 OR p_wrong < 0 OR p_wrong > 100000
     OR COALESCE(p_correct, 0) + COALESCE(p_wrong, 0) > p_questions THEN
     RAISE EXCEPTION 'Invalid question count';
@@ -141,17 +148,17 @@ BEGIN
   SELECT * INTO previous FROM public.question_session_results WHERE id = p_entry_id;
   IF FOUND THEN
     IF previous.question_plan_id <> plan.id OR previous.user_id <> plan.user_id OR previous.solved_questions <> p_questions OR previous.session_id IS NOT NULL
-      OR previous.correct_questions IS DISTINCT FROM p_correct OR previous.wrong_questions IS DISTINCT FROM p_wrong THEN
+      OR previous.correct_questions IS DISTINCT FROM p_correct OR previous.wrong_questions IS DISTINCT FROM p_wrong OR previous.note IS DISTINCT FROM saved_note THEN
       RAISE EXCEPTION 'Entry already recorded with different data';
     END IF;
     RETURN;
   END IF;
-  INSERT INTO public.question_session_results(id, user_id, question_plan_id, solved_questions, correct_questions, wrong_questions)
-  VALUES (p_entry_id, plan.user_id, plan.id, p_questions, p_correct, p_wrong);
+  INSERT INTO public.question_session_results(id, user_id, question_plan_id, solved_questions, correct_questions, wrong_questions, note)
+  VALUES (p_entry_id, plan.user_id, plan.id, p_questions, p_correct, p_wrong, saved_note);
 END;
 $$;
-REVOKE ALL ON FUNCTION public.add_solved_questions(uuid, uuid, integer, integer, integer) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.add_solved_questions(uuid, uuid, integer, integer, integer) TO authenticated;
+REVOKE ALL ON FUNCTION public.add_solved_questions(uuid, uuid, integer, integer, integer, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.add_solved_questions(uuid, uuid, integer, integer, integer, text) TO authenticated;
 
 
 -- Create/edit a video goal or a standalone day/week subject goal.
@@ -222,25 +229,29 @@ REVOKE ALL ON FUNCTION public.archive_question_plan(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.archive_question_plan(uuid) TO authenticated;
 
 -- Corrections change question counts only, preserving the stopwatch study session.
+-- Replace the old RPC signature only; existing rows are retained.
+DROP FUNCTION IF EXISTS public.update_question_result(uuid, integer, integer, integer);
 CREATE OR REPLACE FUNCTION public.update_question_result(
-  p_entry_id uuid, p_questions integer, p_correct integer DEFAULT NULL, p_wrong integer DEFAULT NULL
+  p_entry_id uuid, p_questions integer, p_correct integer DEFAULT NULL, p_wrong integer DEFAULT NULL, p_note text DEFAULT NULL
 ) RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
-DECLARE entry public.question_session_results%ROWTYPE;
+DECLARE
+  entry public.question_session_results%ROWTYPE;
+  saved_note text := nullif(btrim(p_note), '');
 BEGIN
   SELECT * INTO entry FROM public.question_session_results WHERE id = p_entry_id FOR UPDATE;
   IF NOT FOUND OR auth.uid() IS NULL OR (entry.user_id <> auth.uid() AND NOT EXISTS (
     SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'
   )) THEN RAISE EXCEPTION 'Access denied' USING ERRCODE = '42501'; END IF;
   IF entry.deleted_at IS NOT NULL THEN RAISE EXCEPTION 'Entry removed'; END IF;
-  IF p_questions IS NULL OR p_questions NOT BETWEEN 0 AND 100000
+  IF char_length(saved_note) > 1000 OR p_questions IS NULL OR p_questions NOT BETWEEN 0 AND 100000
     OR p_correct < 0 OR p_correct > 100000 OR p_wrong < 0 OR p_wrong > 100000
     OR COALESCE(p_correct, 0) + COALESCE(p_wrong, 0) > p_questions THEN RAISE EXCEPTION 'Invalid question count'; END IF;
   UPDATE public.question_session_results SET solved_questions = p_questions,
-    correct_questions = p_correct, wrong_questions = p_wrong WHERE id = entry.id;
+    correct_questions = p_correct, wrong_questions = p_wrong, note = saved_note WHERE id = entry.id;
 END;
 $$;
-REVOKE ALL ON FUNCTION public.update_question_result(uuid, integer, integer, integer) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.update_question_result(uuid, integer, integer, integer) TO authenticated;
+REVOKE ALL ON FUNCTION public.update_question_result(uuid, integer, integer, integer, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.update_question_result(uuid, integer, integer, integer, text) TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.remove_question_result(p_entry_id uuid)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
