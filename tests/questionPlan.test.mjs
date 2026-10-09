@@ -47,11 +47,11 @@ test('study tasks contain real goals, retain completed daily goals and exclude e
   ]
   assert.deepEqual(openQuestionPlans(plans, '2026-10-09').map(plan => plan.id), ['today', 'overdue'])
 })
-test('question session payload keeps stable IDs, exact time and counts for atomic retries', () => {
+test('question session payload keeps stable IDs, timestamps and counts with whole minutes for atomic retries', () => {
   const session = { id: 'session-id', ownerId: 'alice', subjectId: 'subject', resourceId: 'video-resource', mode: 'questions', questionPlanId: 'question-plan', questionDate: '2026-10-09', startedAt: '2026-10-09T11:00:00Z', endedAt: '2026-10-09T11:01:07Z', durationMinutes: 67 / 60, remainingSeconds: 67, solvedQuestions: 20, correctQuestions: 15, wrongQuestions: 5 }
   const payload = questionSessionPayload(session)
   assert.equal(payload.p_questions, 20)
-  assert.equal(payload.p_duration_minutes, 67 / 60)
+  assert.equal(payload.p_duration_minutes, 1)
   assert.equal(payload.p_question_plan_id, 'question-plan')
   assert.equal(payload.p_user_id, 'alice')
   assert.equal(payload.p_session_id, 'session-id')

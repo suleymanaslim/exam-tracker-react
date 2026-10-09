@@ -1,9 +1,11 @@
 import { useEffect, useRef } from 'react'
 import { bindTimerOwner, useTimerStore } from './timerStore'
-import { recoveryFor, remainingSeconds, sessionPayload, isCountUp } from './timerRecovery'
+import { recoveryFor, remainingSeconds, sessionPayload, isCountUp, recordedMinutes, canContinueRecovery } from './timerRecovery'
 import type { RecoverySession } from './timerRecovery'
 import { supabase } from './supabase'
-import { questionSessionPayload } from './questionSession'
+import { persistQuestionSession } from './questionSession'
+import { timerSaveError, timerSaveWasRejected } from './timerSaveError'
+import { sessionCompletionDialog } from './sessionCompletionDialog'
 import { questionCompletionOptions, readQuestionAnswers, lockQuestionInputs } from './questionDialogs'
 import { useAdminStore } from './adminStore'
 import Swal from 'sweetalert2'
@@ -18,8 +20,7 @@ function alarm(title: string, body: string) {
 
 export async function saveTimerSession(session: RecoverySession) {
   if (session.mode === 'questions') {
-    const { error } = await supabase.rpc('save_question_study_session', questionSessionPayload(session))
-    if (error) throw error
+    await persistQuestionSession(session, payload => supabase.rpc('save_question_study_session', payload))
     window.dispatchEvent(new Event('study-session-saved'))
     return true
   }
@@ -47,7 +48,7 @@ export function useGlobalTimer(authenticatedUserId: string | null) {
   useEffect(() => {
     if (!ownerId || state.ownerId !== ownerId || !state.recovery || state.isFinishing || promptingRef.current) return
     const recovery = state.recovery
-    const durationLabel = isCountUp(recovery.mode) ? `${Math.floor(recovery.remainingSeconds / 60)} dk ${recovery.remainingSeconds % 60} sn` : `${recovery.durationMinutes} dakika`
+    const durationLabel = `${recordedMinutes(recovery.durationMinutes)} dakika`
     const questionOptions = recovery.mode === 'questions'
       ? questionCompletionOptions(recovery.solvedQuestions == null ? '' : String(recovery.solvedQuestions), recovery.correctQuestions, recovery.wrongQuestions, recovery.solvedQuestions != null, recovery.questionTarget, { note: recovery.questionNote, ownerId: recovery.ownerId, subjectId: recovery.subjectId })
       : null
@@ -56,37 +57,41 @@ export function useGlobalTimer(authenticatedUserId: string | null) {
       : 'Önceki oturumda bir dakikadan az süre geçti. Çalışmaya devam etmek ister misiniz?'
     promptingRef.current = true
     void (async () => {
-      const result = await Swal.fire({
+      let saveUncertain = recovery.reason === 'save-failed' && recovery.saveRejected !== true
+      const result = await Swal.fire(sessionCompletionDialog({
         ...(questionOptions ? { ...questionOptions, html: `<p>${message}</p>${questionOptions.html}` } : {}),
         title: recovery.reason === 'save-failed' ? 'Oturum kaydedilemedi' : 'Bu süre içinde çalıştınız mı?',
         text: message,
-        icon: 'question', showDenyButton: recovery.reason !== 'save-failed', showCancelButton: true,
-        confirmButtonText: recovery.reason === 'save-failed' ? 'Tekrar kaydet' : recovery.durationMinutes > 0 ? 'Evet, kaydet' : 'Evet, devam et',
-        denyButtonText: 'Hayır, kaydetme', cancelButtonText: 'Sonra karar ver',
-        confirmButtonColor: '#4269a8', allowOutsideClick: false,
+        width: recovery.mode === 'questions' ? 420 : 380,
         showLoaderOnConfirm: true,
         preConfirm: async value => {
-          if (useTimerStore.getState().ownerId !== recovery.ownerId) return false
+          if (useTimerStore.getState().ownerId !== recovery.ownerId || useTimerStore.getState().recovery?.id !== recovery.id) return false
           let session = recovery
           if (recovery.mode === 'questions') {
             const pending = useTimerStore.getState().recovery
             const answers = pending?.solvedQuestions != null ? { solved_questions: pending.solvedQuestions, correct_questions: pending.correctQuestions ?? null, wrong_questions: pending.wrongQuestions ?? null, note: pending.questionNote ?? null } : readQuestionAnswers(value)
             if (!answers) return false
             session = { ...recovery, solvedQuestions: answers.solved_questions, correctQuestions: answers.correct_questions, wrongQuestions: answers.wrong_questions, questionNote: answers.note }
-            useTimerStore.setState({ recovery: session })
             lockQuestionInputs()
           }
+          useTimerStore.setState({ recovery: { ...session, reason: 'save-failed', saveRejected: false } })
           try { await saveTimerSession(session); return true }
           catch (error) {
             console.error('Recovered timer save failed:', error)
-            Swal.showValidationMessage('Kaydedilemedi. Süren korunuyor; tekrar deneyebilirsin.')
+            saveUncertain ||= !timerSaveWasRejected(error)
+            if (useTimerStore.getState().ownerId === recovery.ownerId && useTimerStore.getState().recovery?.id === recovery.id) {
+              useTimerStore.setState({ recovery: { ...session, reason: 'save-failed', saveRejected: !saveUncertain } })
+            }
+            Swal.showValidationMessage(timerSaveError(error, recovery.mode === 'questions'))
             return false
           }
         },
-      })
+      }, () => canContinueRecovery(useTimerStore.getState().recovery)))
       if (useTimerStore.getState().ownerId === recovery.ownerId && useTimerStore.getState().recovery?.id === recovery.id) {
-        if (result.isConfirmed) useTimerStore.getState().resolveRecovery(true)
-        else if (result.isDenied) useTimerStore.getState().resolveRecovery(false)
+        const current = useTimerStore.getState()
+        if (result.isConfirmed) current.resetTimer(isCountUp(recovery.mode) ? 0 : current.focusSeconds)
+        else if (result.isDenied) current.resolveRecovery(false)
+        else if (result.dismiss === Swal.DismissReason.cancel) current.continueRecovery()
       }
       promptingRef.current = false
     })()

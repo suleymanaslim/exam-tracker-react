@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { readTimerSnapshot, recoveryFor, remainingSeconds, isCountUp } from './timerRecovery.ts'
+import { readTimerSnapshot, recoveryFor, remainingSeconds, isCountUp, canContinueRecovery } from './timerRecovery.ts'
 import type { RecoverySession, TimerMode, TimerSnapshot } from './timerRecovery.ts'
 
 interface TimerState {
@@ -41,6 +41,7 @@ interface TimerState {
   pauseTimer: () => void
   queueRecovery: () => void
   resolveRecovery: (saved: boolean) => void
+  continueRecovery: () => boolean
   finishFocus: () => void
   finishBreak: () => void
 }
@@ -108,6 +109,13 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     set({ recovery: null, totalSeconds: unrecordedTotal, secondsLeft: recovery.remainingSeconds,
       startedAt: new Date(Date.now() - carriedSeconds * 1000), sessionId: recovery.durationMinutes > 0 ? crypto.randomUUID() : state.sessionId, isRunning: recovery.resume,
       deadlineEpoch: recovery.resume ? Date.now() + recovery.remainingSeconds * 1000 : null })
+  },
+  continueRecovery: () => {
+    const state = get(), recovery = state.recovery
+    if (!recovery || state.isFinishing || !canContinueRecovery(recovery)) return false
+    set({ recovery: null, secondsLeft: recovery.remainingSeconds, isRunning: false, deadlineEpoch: null })
+    get().startTimer()
+    return true
   },
   finishFocus: () => {
     const state = get()

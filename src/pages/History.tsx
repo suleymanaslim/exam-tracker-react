@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useAdminStore } from '../lib/adminStore'
+import { recordedMinutes } from '../lib/timerRecovery'
 
 interface Session {
   id: string; subject_id: string | null; resource_id: string | null
@@ -96,7 +97,7 @@ export default function History() {
   const startEdit = (s: Session) => {
     setEdit({
       id: s.id,
-      duration_minutes: s.duration_minutes,
+      duration_minutes: recordedMinutes(s.duration_minutes),
       note: s.note ?? '',
       subject_id: s.subject_id ?? '',
       resource_id: s.resource_id ?? '',
@@ -105,6 +106,10 @@ export default function History() {
 
   const saveEdit = async () => {
     if (!edit) return
+    if (!Number.isInteger(edit.duration_minutes) || edit.duration_minutes <= 0) {
+      void Swal.fire('Geçersiz süre', 'Dakika olarak pozitif bir tam sayı girin.', 'warning')
+      return
+    }
     const session = sessions.find(s => s.id === edit.id)
     if (!session) return
 
@@ -227,7 +232,7 @@ export default function History() {
               <div>
                 <label className="text-[13px] font-semibold text-[#62748b] uppercase tracking-wider">Süre (dakika)</label>
                 <input
-                  type="number" min={1} value={edit.duration_minutes}
+                  type="number" min={1} step={1} value={edit.duration_minutes}
                   onChange={e => setEdit(prev => prev ? { ...prev, duration_minutes: Number(e.target.value) } : prev)}
                   className="mt-1 w-full h-10 rounded-2xl border border-[#e3e9f0] bg-[#f8fafc] px-3 text-[15px] focus:outline-none focus:ring-2 focus:ring-[#4269a8]/30"
                 />
@@ -294,7 +299,7 @@ export default function History() {
                   <span className="text-[12px] font-semibold text-[#62748b] uppercase tracking-wider">
                     {formatDate(dateSessions[0].started_at)}
                     <span className="ml-2 text-[#718096] normal-case font-normal">
-                      — {dateSessions.reduce((a, s) => a + s.duration_minutes, 0)} dk toplam
+                      — {recordedMinutes(dateSessions.reduce((a, s) => a + s.duration_minutes, 0))} dk toplam
                     </span>
                   </span>
                 </div>
@@ -328,7 +333,7 @@ export default function History() {
                       </span>
 
                       <span className="font-semibold text-[#24354a]">
-                        {s.duration_minutes} dk
+                        {recordedMinutes(s.duration_minutes)} dk
                         {s.is_edited && <span className="text-[11px] text-orange-400 ml-1">✎</span>}
                       </span>
 
