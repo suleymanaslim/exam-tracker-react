@@ -1,3 +1,4 @@
+import { examHasPoints } from '../lib/examTemplates'
 import './SuitePages.css'
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
@@ -12,10 +13,11 @@ import type { LucideIcon } from 'lucide-react'
 import { useAdminStore } from '../lib/adminStore'
 import { defaultVocabularyText } from '../lib/defaultVocabulary'
 import { useSettingsStore } from '../lib/settingsStore'
+import AIStudyReportExport from '../components/AIStudyReportExport'
 import ExamTemplatePanel from '../components/ExamTemplatePanel'
 import ResetVideoProgressButton from '../components/ResetVideoProgressButton'
 
-interface Exam { id: string; name: string; color: string; exam_date: string | null; wrong_penalty: number | null; point_per_net: number }
+interface Exam { id: string; name: string; color: string; exam_date: string | null; wrong_penalty: number | null; point_per_net: number; base_template_key?: string | null }
 interface Subject { id: string; exam_id: string; name: string }
 interface Resource { id: string; subject_id: string; name: string; author: string | null; publisher: string | null; resource_type: string; url: string | null; total_videos: number; avg_video_duration: number }
 interface PomodoroSettings { id: string; long_focus_minutes: number; long_break_minutes: number; short_focus_minutes: number; short_break_minutes: number }
@@ -24,7 +26,7 @@ interface QuestionType { id: string; exam_id: string; name: string; sort_order: 
 const examIcons: Record<string, LucideIcon> = { AGS: Shield, YDS: Globe, IELTS: BookOpen, ALES: Calculator }
 const typeLabels: Record<string, string> = { video_ders: 'Video Ders', soru_bankasi: 'Soru Bankası', kitap: 'Kitap', deneme: 'Deneme', site: 'Site', diger: 'Diğer' }
 
-type Tab = 'resources' | 'exam_settings' | 'pomodoro' | 'exam_dates' | 'export' | 'vocabulary'
+type Tab = 'resources' | 'exam_settings' | 'pomodoro' | 'exam_dates' | 'export' | 'ai_analysis' | 'vocabulary'
 
 export default function Settings() {
   const { impersonatedUserId, isAdmin } = useAdminStore()
@@ -244,9 +246,11 @@ export default function Settings() {
     if (!selExamSettings) return
     const penalty = editWrongPenalty ? parseFloat(editWrongPenalty) : null
     const point = parseFloat(editPointPerNet) || 1
-    await supabase.from('exams').update({ wrong_penalty: penalty, point_per_net: point }).eq('id', selExamSettings)
-    setExams(prev => prev.map(e => e.id === selExamSettings ? { ...e, wrong_penalty: penalty, point_per_net: point } : e))
-    Swal.fire({ title: 'Kaydedildi', text: 'Puanlama ayarları güncellendi.', icon: 'success', toast: true, position: 'top-end', showConfirmButton: false, timer: 1500 })
+    const changes = examHasPoints(exams.find(exam => exam.id === selExamSettings)) ? { wrong_penalty: penalty, point_per_net: point } : { wrong_penalty: penalty }
+    const { error } = await supabase.from('exams').update(changes).eq('id', selExamSettings).eq('user_id', userId)
+    if (error) { void Swal.fire({ icon: 'error', title: 'Kaydedilemedi', text: 'Lütfen tekrar dene.' }); return }
+    setExams(prev => prev.map(e => e.id === selExamSettings ? { ...e, ...changes } : e))
+    Swal.fire({ title: 'Kaydedildi', text: 'Sınav ayarları güncellendi.', icon: 'success', toast: true, position: 'top-end', showConfirmButton: false, timer: 1500 })
   }
 
   const addQuestionType = async () => {
@@ -398,10 +402,9 @@ export default function Settings() {
           net = correct - (incorrect / penalty)
         }
         net = Math.max(0, parseFloat(net.toFixed(2)))
-        let points = net * (e.exams?.point_per_net || 1)
-        points = Math.max(0, parseFloat(points.toFixed(2)))
+        const points = examHasPoints(exams.find(exam => exam.id === e.exam_id) || e.exams) ? Math.max(0, Number((net * (e.exams?.point_per_net || 1)).toFixed(2))) : null
         
-        return `${e.exams?.name || 'Sınav'}: ${correct}D ${incorrect}Y ${net}Net (${points} Puan)`
+        return `${e.exams?.name || 'Sınav'}: ${correct}D ${incorrect}Y ${net}Net${points !== null ? ` (${points} Puan)` : ''}`
       }).join(' | ')
     }
 
@@ -486,6 +489,7 @@ export default function Settings() {
           { key: 'pomodoro' as Tab, label: 'Pomodoro' },
           { key: 'exam_dates' as Tab, label: 'Sınav Tarihleri' },
           { key: 'export' as Tab, label: 'JSON Rapor' },
+          { key: 'ai_analysis' as Tab, label: 'AI Analiz JSON' },
           ...(isAdmin ? [{ key: 'vocabulary' as Tab, label: 'YKS Kelimeleri' }] : [])
         ].map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
@@ -687,16 +691,16 @@ export default function Settings() {
                           className="mt-1 w-full rounded-lg border border-[#e3e9f0] px-3 py-2 text-sm focus:border-[#4269a8] focus:ring-1 focus:ring-[#4269a8] outline-none"
                         />
                       </div>
-                      <div>
+                      {examHasPoints(exams.find(exam => exam.id === selExamSettings)) && <div>
                         <label className="text-[13px] font-semibold text-[#62748b] uppercase">Net Başına Puan</label>
                         <input 
                           type="number" min="0.1" step="0.05" placeholder="Örn: 1.25"
                           value={editPointPerNet} onChange={e => setEditPointPerNet(e.target.value)}
                           className="mt-1 w-full rounded-lg border border-[#e3e9f0] px-3 py-2 text-sm focus:border-[#4269a8] focus:ring-1 focus:ring-[#4269a8] outline-none"
                         />
-                      </div>
+                      </div>}
                     </div>
-                    <button onClick={saveExamSettings} className="w-full bg-[#4269a8] hover:bg-blue-600 text-white font-medium text-sm py-2 rounded-lg transition-all">Puanlama Ayarlarını Kaydet</button>
+                    <button onClick={saveExamSettings} className="w-full bg-[#4269a8] hover:bg-blue-600 text-white font-medium text-sm py-2 rounded-lg transition-all">Sınav Ayarlarını Kaydet</button>
 
                     <div className="border-t border-[#e3e9f0] pt-4 mt-4">
                       <label className="text-[13px] font-semibold text-[#62748b] uppercase mb-2 block">Bu Sınavdaki Soru Türleri</label>
@@ -865,6 +869,8 @@ export default function Settings() {
             </div>
           </div>
         )}
+
+        {tab === 'ai_analysis' && userId && <div className="h-full overflow-y-auto py-4"><AIStudyReportExport key={userId} userId={userId} /></div>}
 
         {tab === 'export' && (
           <div className="h-full flex items-start justify-center pt-8">

@@ -16,7 +16,7 @@ test('a YDS snapshot retains exact question names, order, counts and scoring', (
   for (const patch of [{ question_types: [] }, { point_per_net: 0 }, { point_per_net: Infinity }, { wrong_penalty: -1 }, { question_types: [{ name: 'Test', question_count: 2.5 }] }]) assert.throws(() => readExamTemplate({ ...snapshot, ...patch }))
 })
 test('practice scores are not labelled as official IELTS bands or standardized AGS/ALES scores', () => {
-  assert.equal(examScoreLabel({ base_template_key: 'ags' }), 'Takip puanı')
+  assert.equal(examScoreLabel({ base_template_key: 'ags' }), 'Net')
   assert.equal(examScoreLabel({ base_template_key: 'ales' }), 'Takip puanı')
   assert.equal(examScoreLabel({ base_template_key: 'ielts', point_per_net: 1, wrong_penalty: null }), 'Ham doğru')
   assert.equal(examScoreLabel({ base_template_key: 'ielts', point_per_net: 2 }), 'Takip puanı')

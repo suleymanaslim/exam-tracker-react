@@ -1,6 +1,8 @@
+import { examHasPoints } from './examTemplates.ts'
+
 export interface ExamEntry { id: string; exam_id: string; title: string; date: string; created_at: string; is_draft?: boolean }
 export interface AnswerEntry { result_id: string; question_type_id: string; correct_count: number; incorrect_count: number }
-export interface ExamRule { id: string; wrong_penalty: number | null; point_per_net: number }
+export interface ExamRule { id: string; name?: string; base_template_key?: string | null; wrong_penalty: number | null; point_per_net: number }
 export function answerNet(correct: number, incorrect: number, penalty: number | null) {
   return Math.round((correct - (penalty && penalty > 0 ? incorrect / penalty : 0)) * 100) / 100
 }
@@ -13,7 +15,7 @@ export function examTrend(results: ExamEntry[], details: AnswerEntry[], exam: Ex
       const correct = answers.reduce((sum, d) => sum + d.correct_count, 0)
       const incorrect = answers.reduce((sum, d) => sum + d.incorrect_count, 0)
       const net = answers.length ? (questionType ? answerNet(correct, incorrect, exam.wrong_penalty) : Math.max(0, answerNet(correct, incorrect, exam.wrong_penalty))) : null
-      return { id: result.id, order: index + 1, name: result.title, date: result.date, correct, incorrect, net, points: net === null ? null : Math.max(0, Math.round(net * (exam.point_per_net || 1) * 100) / 100) }
+      return { id: result.id, order: index + 1, name: result.title, date: result.date, correct, incorrect, net, points: net === null || !examHasPoints(exam) ? null : Math.max(0, Math.round(net * (exam.point_per_net || 1) * 100) / 100) }
     })
 }
 export function questionComparison(results: ExamEntry[], details: AnswerEntry[], exam: ExamRule | undefined, types: { id: string; exam_id: string; name: string }[]) {

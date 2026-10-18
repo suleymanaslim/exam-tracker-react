@@ -1,6 +1,6 @@
 import './SuitePages.css'
 import './Results.css'
-import { examScoreLabel } from '../lib/examTemplates'
+import { examHasPoints, examScoreLabel } from '../lib/examTemplates'
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { Plus, Trash2, Calendar, Award, List, X, Edit3, Eye } from 'lucide-react'
@@ -8,6 +8,7 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ReferenceLine, Tooltip as
 import Swal from 'sweetalert2'
 import CustomSelect from '../components/CustomSelect'
 import { useAdminStore } from '../lib/adminStore'
+import { answerLimit, readAnswerInput, validateAnswers } from '../lib/resultAnswers'
 import { examTrend, questionComparison, groupQuestionChanges } from '../lib/examAnalytics'
 
 interface Exam { id: string; name: string; color: string; wrong_penalty: number | null; point_per_net: number; base_template_key?: string | null }
@@ -81,10 +82,7 @@ export default function Results() {
   const currentType = formTypes[formStep - 1]
   const validateType = (type: QuestionType) => {
     const score = formScores[type.id]
-    if (!score || score.correct === '' || score.incorrect === '') return 'Doğru ve yanlış sayısını girin. Yoksa 0 yazın.'
-    if (![score.correct, score.incorrect].every(n => Number.isInteger(n) && n >= 0)) return 'Sayılar sıfır veya pozitif tam sayı olmalı.'
-    if (type.question_count > 0 && Number(score.correct) + Number(score.incorrect) > type.question_count) return `Toplam ${type.question_count} soruyu geçemez.`
-    return ''
+    return validateAnswers(score?.correct, score?.incorrect, type.question_count)
   }
   const nextStep = () => {
     const error = formStep === 0 ? (!formTitle.trim() || !formDate || !formExamId ? 'Deneme adını, sınavı ve tarihi girin.' : !formTypes.length ? 'Bu sınav için Ayarlar’dan soru türü ekleyin.' : '') : currentType ? validateType(currentType) : ''
@@ -94,14 +92,7 @@ export default function Results() {
 
   const saveResult = async (saveAsDraft: boolean = false) => {
     if (saving || !userId || !formExamId || !formTitle.trim() || !formDate) return
-    const errors = formTypes.map(type => {
-      const score = formScores[type.id]
-      if (saveAsDraft && (!score || score.correct === '' || score.incorrect === '')) {
-        const c = Number(score?.correct || 0), w = Number(score?.incorrect || 0)
-        return ![c, w].every(n => Number.isInteger(n) && n >= 0) || (type.question_count > 0 && c + w > type.question_count) ? 'Soru sayılarını kontrol edin.' : ''
-      }
-      return validateType(type)
-    })
+    const errors = formTypes.map(validateType)
     const error = errors.find(Boolean)
     if (error) { setFormError(error); return }
     setSaving(true); setFormError('')
@@ -178,15 +169,16 @@ export default function Results() {
     if (exam.wrong_penalty && exam.wrong_penalty > 0) {
       net = correct - (incorrect / exam.wrong_penalty)
     }
-    const points = net * (exam.point_per_net || 1)
-    return { net: Math.max(0, parseFloat(net.toFixed(2))), points: Math.max(0, parseFloat(points.toFixed(2))), totalCorrect: correct, totalIncorrect: incorrect }
+    const points = examHasPoints(exam) ? Math.max(0, parseFloat((net * (exam.point_per_net || 1)).toFixed(2))) : null
+    return { net: Math.max(0, parseFloat(net.toFixed(2))), points, totalCorrect: correct, totalIncorrect: incorrect }
   }
 
   const selectedExam = exams.find(e => e.id === selectedExamId)
+  const chartMetric = examHasPoints(selectedExam) ? metric : 'net'
   const chartData = useMemo(() => examTrend(results, details, selectedExam, chartQuestion), [results, details, selectedExam, chartQuestion])
   const displayedChart = chartRange === '10' ? chartData.slice(-10) : chartData
-  const measured = displayedChart.filter(row => row[metric] !== null)
-  const average = measured.length ? measured.reduce((sum, row) => sum + row[metric]!, 0) / measured.length : 0
+  const measured = displayedChart.filter(row => row[chartMetric] !== null)
+  const average = measured.length ? measured.reduce((sum, row) => sum + row[chartMetric]!, 0) / measured.length : 0
   const latest = measured.at(-1), previous = measured.at(-2)
   const focused = displayedChart.find(row => row.id === focusedResult) || latest
   const changes = useMemo(() => questionComparison(results, details, selectedExam, questionTypes), [results, details, selectedExam, questionTypes])
@@ -244,7 +236,7 @@ export default function Results() {
               <label className="result-wide">Deneme adı<input required value={formTitle} placeholder="Örn. Pegem 3. Deneme" onChange={e => setFormTitle(e.target.value)} /></label>
             </div> : currentType ? <div key={currentType.id} className="result-question">
               <h3>{currentType.name}</h3><p>{currentType.question_count > 0 ? `${currentType.question_count} soru` : 'Soru sayısı tanımlanmamış'}</p>
-              <div className="result-fields">{(['correct', 'incorrect'] as const).map((field, i) => <label key={field} className={i === 0 ? 'result-correct' : 'result-incorrect'}>{i === 0 ? 'Doğru' : 'Yanlış'}<input autoFocus={i === 0} type="number" inputMode="numeric" min="0" step="1" max={currentType.question_count || undefined} value={formScores[currentType.id]?.[field] ?? ''} onChange={e => { setFormError(''); setFormScores(p => ({ ...p, [currentType.id]: { correct: p[currentType.id]?.correct ?? '', incorrect: p[currentType.id]?.incorrect ?? '', [field]: e.target.value === '' ? '' : Number(e.target.value) } })) }} /></label>)}</div>
+              <p id="result-answer-help" className="text-xs text-[#62748b]">Boş bırakılan alanlar 0 sayılır.</p><div className="result-fields">{(['correct', 'incorrect'] as const).map((field, i) => <label key={field} className={i === 0 ? 'result-correct' : 'result-incorrect'}>{i === 0 ? 'Doğru' : 'Yanlış'}<input autoFocus={i === 0} type="text" inputMode="numeric" pattern="[0-9]*" placeholder="0" autoComplete="off" aria-label={`${currentType.name} ${i === 0 ? 'doğru' : 'yanlış'}`} aria-describedby="result-answer-help" title={`En fazla ${answerLimit(currentType.question_count, formScores[currentType.id]?.[field === 'correct' ? 'incorrect' : 'correct'] ?? '')} soru`} value={formScores[currentType.id]?.[field] ?? ''} onChange={e => { const raw = e.target.value; setFormError(''); setFormScores(previous => { const score = previous[currentType.id] || { correct: '', incorrect: '' }; const value = readAnswerInput(raw, score[field === 'correct' ? 'incorrect' : 'correct'], currentType.question_count); return value === null ? previous : { ...previous, [currentType.id]: { ...score, [field]: value } } }) }} /></label>)}</div>
               {currentType.question_count > 0 && <p>Boş: {Math.max(0, currentType.question_count - Number(formScores[currentType.id]?.correct || 0) - Number(formScores[currentType.id]?.incorrect || 0))}</p>}
             </div> : <div className="result-review"><h3>{formTitle}</h3>{formTypes.map((type, i) => <button type="button" key={type.id} onClick={() => setFormStep(i + 1)}><span>{type.name}</span><strong>{formScores[type.id]?.correct || 0} D · {formScores[type.id]?.incorrect || 0} Y</strong></button>)}</div>}
             {formError && <p className="result-error" role="alert">{formError}</p>}
@@ -333,9 +325,9 @@ export default function Results() {
                               <p className="text-lg font-semibold text-red-500">{stats.totalIncorrect}</p>
                             </div>
                             <div className="text-center bg-[#f8fafc] rounded-lg p-1.5 flex flex-col justify-center">
-                              <p className="text-[11px] text-[#62748b] font-semibold uppercase mb-0.5">Net & {examScoreLabel(exams.find(exam => exam.id === r.exam_id))}</p>
+                              <p className="text-[11px] text-[#62748b] font-semibold uppercase mb-0.5">Net{stats.points !== null ? ` & ${examScoreLabel(exams.find(exam => exam.id === r.exam_id))}` : ''}</p>
                               <p className="text-[13px] font-semibold text-[#62748b]">{stats.net} Net</p>
-                              <p className="text-sm font-semibold text-[#4269a8]">{stats.points} {examScoreLabel(exams.find(exam => exam.id === r.exam_id))}</p>
+                              {stats.points !== null && <p className="text-sm font-semibold text-[#4269a8]">{stats.points} {examScoreLabel(exams.find(exam => exam.id === r.exam_id))}</p>}
                             </div>
                           </div>
                         </div>
@@ -366,26 +358,26 @@ export default function Results() {
               ] as const).map(group => <section key={group.kind} className={`result-change-group is-${group.kind}`}><header><h3>{group.title}</h3><span>{group.rows.length} konu</span></header>{group.rows.length === 0 ? <p className="result-change-empty">{group.empty}</p> : group.rows.map(row => <article className="result-change-card" key={row.id}><div className="result-change-main"><h4>{row.name}</h4><strong>{signedChange(row.change!)}<small>net</small></strong></div><div className="result-change-before-after"><span>Önceki <b>{formatNumber(row.previousNet)}</b></span><span aria-hidden="true">→</span><span>Son <b>{formatNumber(row.latestNet)}</b></span></div><p>Son deneme: {row.correct} doğru · {row.incorrect} yanlış</p></article>)}</section>)}</div>}
               {changeGroups.unchanged.length > 0 && <details className="result-other-changes"><summary>Değişmeyen konular <span>{changeGroups.unchanged.length}</span></summary><div>{changeGroups.unchanged.map(row => <article key={row.id}><strong>{row.name}</strong><b>0 <small>net</small></b><span>{formatNumber(row.previousNet)} → {formatNumber(row.latestNet)} net</span></article>)}</div></details>}
               {changeGroups.unavailable.length > 0 && <details className="result-other-changes"><summary>Karşılaştırma için kayıt eksik <span>{changeGroups.unavailable.length}</span></summary><div>{changeGroups.unavailable.map(row => <article key={row.id}><strong>{row.name}</strong><span>Önceki: {formatNumber(row.previousNet)} net · Son: {formatNumber(row.latestNet)} net</span></article>)}</div></details>}
-              <details className="result-history-details"><summary>Deneme geçmişi ve çizgi grafiği</summary><div className="result-analysis-toolbar"><label>Soru türü<CustomSelect value={chartQuestion} onChange={value => { setChartQuestion(value); setFocusedResult(null) }} options={[{ value: '', label: 'Tüm soru türleri' }, ...questionTypes.filter(q => q.exam_id === selectedExamId).map(q => ({ value: q.id, label: q.name }))]} /></label><div className="result-chart-toggle" aria-label="Grafik ölçüsü">{(['net', 'points'] as const).map(value => <button key={value} aria-pressed={metric === value} onClick={() => setMetric(value)}>{value === 'net' ? 'Net' : examScoreLabel(selectedExam)}</button>)}</div></div>
+              <details className="result-history-details"><summary>Deneme geçmişi ve çizgi grafiği</summary><div className="result-analysis-toolbar"><label>Soru türü<CustomSelect value={chartQuestion} onChange={value => { setChartQuestion(value); setFocusedResult(null) }} options={[{ value: '', label: 'Tüm soru türleri' }, ...questionTypes.filter(q => q.exam_id === selectedExamId).map(q => ({ value: q.id, label: q.name }))]} /></label><div className="result-chart-toggle" aria-label="Grafik ölçüsü">{(examHasPoints(selectedExam) ? ['net', 'points'] as const : ['net'] as const).map(value => <button key={value} aria-pressed={chartMetric === value} onClick={() => setMetric(value)}>{value === 'net' ? 'Net' : examScoreLabel(selectedExam)}</button>)}</div></div>
               <div className="result-kpis">{[
-                ['Son sonuç', formatNumber(latest?.[metric])],
+                ['Son sonuç', formatNumber(latest?.[chartMetric])],
                 ['Ortalama', measured.length ? formatNumber(average) : '—'],
-                ['En iyi', measured.length ? formatNumber(Math.max(...measured.map(r => r[metric]!))) : '—'],
-                ['Son değişim', latest && previous ? (latest[metric]! - previous[metric]! > 0 ? '+' : '') + formatNumber(latest[metric]! - previous[metric]!) : '—'],
+                ['En iyi', measured.length ? formatNumber(Math.max(...measured.map(r => r[chartMetric]!))) : '—'],
+                ['Son değişim', latest && previous ? (latest[chartMetric]! - previous[chartMetric]! > 0 ? '+' : '') + formatNumber(latest[chartMetric]! - previous[chartMetric]!) : '—'],
               ].map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>
               <section className="result-chart result-history-chart">
-                <div className="result-chart-heading"><div><h3>{metric === 'net' ? 'Net gelişimi' : `${examScoreLabel(selectedExam)} gelişimi`}</h3><p>{chartQuestion ? questionTypes.find(q => q.id === chartQuestion)?.name : selectedExam?.name} · {measured.length} sonuç</p></div><div className="result-chart-toggle" aria-label="Grafik aralığı"><button aria-pressed={chartRange === '10'} onClick={() => setChartRange('10')}>Son 10</button><button aria-pressed={chartRange === 'all'} onClick={() => setChartRange('all')}>Tümü</button></div></div>
-                <div className="result-chart-legend"><span><i />{metric === 'net' ? 'Net' : examScoreLabel(selectedExam)}</span><span><i className="is-average" />Ortalama {formatNumber(average)}</span></div>
+                <div className="result-chart-heading"><div><h3>{chartMetric === 'net' ? 'Net gelişimi' : `${examScoreLabel(selectedExam)} gelişimi`}</h3><p>{chartQuestion ? questionTypes.find(q => q.id === chartQuestion)?.name : selectedExam?.name} · {measured.length} sonuç</p></div><div className="result-chart-toggle" aria-label="Grafik aralığı"><button aria-pressed={chartRange === '10'} onClick={() => setChartRange('10')}>Son 10</button><button aria-pressed={chartRange === 'all'} onClick={() => setChartRange('all')}>Tümü</button></div></div>
+                <div className="result-chart-legend"><span><i />{chartMetric === 'net' ? 'Net' : examScoreLabel(selectedExam)}</span><span><i className="is-average" />Ortalama {formatNumber(average)}</span></div>
                 {measured.length === 0 ? <p className="result-empty">Bu soru türüne ait kayıt yok.</p> : <div className="result-history-canvas"><ResponsiveContainer width="100%" height="100%"><AreaChart data={displayedChart} margin={{ top: 18, right: 16, left: -14, bottom: 2 }} onClick={event => { const index = event?.activeTooltipIndex; if (index != null) { const row = displayedChart[Number(index)]; if (row) setFocusedResult(row.id) } }}>
                   <defs><linearGradient id="exam-history-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#6a8cbf" stopOpacity={.25} /><stop offset="100%" stopColor="#6a8cbf" stopOpacity={.02} /></linearGradient></defs>
                   <CartesianGrid vertical={false} stroke="#edf1f6" strokeDasharray="3 4" />
                   <XAxis dataKey="order" tick={{ fontSize: 12, fill: '#62748b' }} axisLine={false} tickLine={false} minTickGap={22} tickFormatter={n => `${n}.`} />
                   <YAxis width={48} domain={['auto', 'auto']} tick={{ fontSize: 12, fill: '#62748b' }} tickFormatter={n => formatNumber(n)} axisLine={false} tickLine={false} />
                   <ReferenceLine y={average} stroke="#9baabd" strokeDasharray="5 5" />
-                  <RechartsTooltip cursor={{ stroke: '#c6d4e7', strokeDasharray: '3 4' }} content={({ active, payload }) => { const row = payload?.[0]?.payload; if (!active || !row) return null; return <div className="result-history-tooltip"><strong>{row.name}</strong><span>{chartDate(row.date)}</span><b>{formatNumber(row[metric])} {metric === 'net' ? 'net' : 'puan'}</b><small>{row.correct} doğru · {row.incorrect} yanlış</small></div> }} />
-                  <Area type="linear" dataKey={metric} connectNulls={false} stroke="#4269a8" fill="url(#exam-history-fill)" strokeWidth={2.5} dot={displayedChart.length <= 30 ? { r: 4, fill: '#fff', stroke: '#4269a8', strokeWidth: 2 } : false} activeDot={{ r: 6, fill: '#4269a8', stroke: '#fff', strokeWidth: 3 }} />
+                  <RechartsTooltip cursor={{ stroke: '#c6d4e7', strokeDasharray: '3 4' }} content={({ active, payload }) => { const row = payload?.[0]?.payload; if (!active || !row) return null; return <div className="result-history-tooltip"><strong>{row.name}</strong><span>{chartDate(row.date)}</span><b>{formatNumber(row[chartMetric])} {chartMetric === 'net' ? 'net' : 'puan'}</b><small>{row.correct} doğru · {row.incorrect} yanlış</small></div> }} />
+                  <Area type="linear" dataKey={chartMetric} connectNulls={false} stroke="#4269a8" fill="url(#exam-history-fill)" strokeWidth={2.5} dot={displayedChart.length <= 30 ? { r: 4, fill: '#fff', stroke: '#4269a8', strokeWidth: 2 } : false} activeDot={{ r: 6, fill: '#4269a8', stroke: '#fff', strokeWidth: 3 }} />
                 </AreaChart></ResponsiveContainer></div>}
-                {focused && <div className="result-focused" aria-live="polite"><div><strong>{focused.name}</strong><span>{chartDate(focused.date)} · {focused.order}. deneme</span></div><div><span className="result-up">{focused.correct} doğru</span><span className="result-down">{focused.incorrect} yanlış</span><strong>{formatNumber(focused[metric])} {metric === 'net' ? 'net' : 'puan'}</strong><button onClick={() => setSelectedDetailResult(results.find(r => r.id === focused.id) || null)}>Detay</button></div></div>}
+                {focused && <div className="result-focused" aria-live="polite"><div><strong>{focused.name}</strong><span>{chartDate(focused.date)} · {focused.order}. deneme</span></div><div><span className="result-up">{focused.correct} doğru</span><span className="result-down">{focused.incorrect} yanlış</span><strong>{formatNumber(focused[chartMetric])} {chartMetric === 'net' ? 'net' : 'puan'}</strong><button onClick={() => setSelectedDetailResult(results.find(r => r.id === focused.id) || null)}>Detay</button></div></div>}
               </section>
               </details>
             </>}

@@ -12,6 +12,10 @@ export function examTemplateKey(name: string): ExamTemplateKey | null {
   return key === 'ALES' ? 'ales' : key === 'IELTS' ? 'ielts' : null
 }
 
+export function examHasPoints(exam?: { name?: string; base_template_key?: string | null } | null): boolean {
+  return exam?.base_template_key !== 'ags' && examTemplateKey(exam?.name || '') !== 'ags'
+}
+
 export function readExamTemplate(value: unknown): ExamTemplate {
   const row = value as ExamTemplate | null
   if (!row || !['ags', 'yds', 'ales', 'ielts'].includes(row.template_key) || typeof row.name !== 'string'
@@ -24,9 +28,10 @@ export function readExamTemplate(value: unknown): ExamTemplate {
   return row
 }
 
-export function examScoreLabel(exam?: { base_template_key?: string | null; point_per_net?: number; wrong_penalty?: number | null } | null) {
+export function examScoreLabel(exam?: { name?: string; base_template_key?: string | null; point_per_net?: number; wrong_penalty?: number | null } | null) {
+  if (!examHasPoints(exam)) return 'Net'
   if (exam?.base_template_key === 'ielts') return (exam.point_per_net ?? 1) === 1 && !exam.wrong_penalty ? 'Ham doğru' : 'Takip puanı'
-  return ['ags', 'ales'].includes(exam?.base_template_key || '') ? 'Takip puanı' : 'Puan'
+  return exam?.base_template_key === 'ales' ? 'Takip puanı' : 'Puan'
 }
 
 export function examTemplateError(error: unknown) {

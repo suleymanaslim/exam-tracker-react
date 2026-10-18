@@ -1,3 +1,4 @@
+import { examHasPoints } from '../lib/examTemplates'
 import './Dashboard.css'
 import QuestionProgress from '../components/QuestionProgress'
 import { localDayKey, mondayOf } from '../lib/statsPeriod'
@@ -488,10 +489,9 @@ export default function Dashboard() {
           net = correct - (incorrect / penalty)
         }
         net = Math.max(0, parseFloat(net.toFixed(2)))
-        let points = net * (e.exams?.point_per_net || 1)
-        points = Math.max(0, parseFloat(points.toFixed(2)))
+        const points = examHasPoints(exams.find(exam => exam.id === e.exam_id) || e.exams) ? Math.max(0, Number((net * (e.exams?.point_per_net || 1)).toFixed(2))) : null
         
-        return `${e.exams?.name || 'Sınav'}: ${correct}D ${incorrect}Y ${net}Net (${points} Puan)`
+        return `${e.exams?.name || 'Sınav'}: ${correct}D ${incorrect}Y ${net}Net${points !== null ? ` (${points} Puan)` : ''}`
       }).join(' | ')
     }
 

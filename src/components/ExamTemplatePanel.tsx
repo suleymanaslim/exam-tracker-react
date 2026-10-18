@@ -69,7 +69,7 @@ export default function ExamTemplatePanel({ userId, examId, examName, questionTy
     <h3><Layers3 size={16} /> Başlangıç şablonları</h3>
     <p>Hazır soru türlerini ve soru sayılarını ekle. Kişisel ayarların korunur.</p>
     <div className="exam-template-actions"><select aria-label="Başlangıç şablonu" disabled={busy || loading || !templates.length} value={selected} onChange={event => setSelected(event.target.value)}><option value="">Tüm eksik sınavlar</option>{templates.map(item => <option key={item.template_key} value={item.template_key}>{item.name} · {item.question_types.reduce((sum, q) => sum + q.question_count, 0)} soru</option>)}</select><button type="button" onClick={() => void apply()} disabled={busy || loading || !templates.length}>{busy ? 'İşleniyor…' : 'Eksikleri ekle'}</button></div>
-    {template && <p className="exam-template-note">{template.description}</p>}
+    {template && <p className="exam-template-note">{template.template_key === 'ags' ? 'AGS’de doğru, yanlış ve net takibi yapılır. Puan hesaplanmaz.' : template.description}</p>}
     {!loading && !templates.some(item => item.template_key === 'yds') && canPublish && <p className="exam-template-note">YDS şablonu henüz yok. Kendi YDS sınavını seçip aşağıdaki düğmeyle paylaşabilirsin.</p>}
     {canPublish && examTemplateKey(examName) && <button type="button" className="exam-template-publish" disabled={busy || loading || !questionTypeCount || !!error} onClick={() => void publish()}>Seçili {examName} ayarlarını ortak şablon yap</button>}
     {error && <p className="exam-template-error" role="alert">{error}<button type="button" disabled={busy} onClick={() => void loadTemplates()}>Yeniden dene</button></p>}
