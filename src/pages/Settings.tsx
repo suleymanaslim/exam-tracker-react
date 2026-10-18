@@ -12,6 +12,7 @@ import type { LucideIcon } from 'lucide-react'
 import { useAdminStore } from '../lib/adminStore'
 import { defaultVocabularyText } from '../lib/defaultVocabulary'
 import { useSettingsStore } from '../lib/settingsStore'
+import ExamTemplatePanel from '../components/ExamTemplatePanel'
 
 interface Exam { id: string; name: string; color: string; exam_date: string | null; wrong_penalty: number | null; point_per_net: number }
 interface Subject { id: string; exam_id: string; name: string }
@@ -660,6 +661,7 @@ export default function Settings() {
           <div className="h-full overflow-y-auto px-4">
             <div className="flex flex-col gap-4 max-w-2xl mx-auto py-4">
               <h2 className="text-md font-semibold text-[#24354a]">Sınav Ayarları ve Soru Türleri</h2>
+              {userId && <ExamTemplatePanel key={userId} userId={userId} examId={selExamSettings} examName={exams.find(exam => exam.id === selExamSettings)?.name || ''} questionTypeCount={questionTypes.filter(type => type.exam_id === selExamSettings).length} canPublish={isAdmin && !impersonatedUserId} onApplied={() => loadAll(userId)} />}
               <div className="p-4 rounded-2xl border border-[#e3e9f0] bg-white space-y-4">
                 <div>
                   <label className="text-[13px] font-semibold text-[#62748b] uppercase">Sınav Seç</label>

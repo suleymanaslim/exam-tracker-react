@@ -1,5 +1,6 @@
 import './SuitePages.css'
 import './Results.css'
+import { examScoreLabel } from '../lib/examTemplates'
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { Plus, Trash2, Calendar, Award, List, X, Edit3, Eye } from 'lucide-react'
@@ -9,7 +10,7 @@ import CustomSelect from '../components/CustomSelect'
 import { useAdminStore } from '../lib/adminStore'
 import { examTrend, questionComparison, groupQuestionChanges } from '../lib/examAnalytics'
 
-interface Exam { id: string; name: string; color: string; wrong_penalty: number | null; point_per_net: number }
+interface Exam { id: string; name: string; color: string; wrong_penalty: number | null; point_per_net: number; base_template_key?: string | null }
 interface QuestionType { id: string; exam_id: string; name: string; sort_order: number; question_count: number }
 interface ExamResult { id: string; exam_id: string; title: string; date: string; created_at: string; is_draft?: boolean }
 interface ResultDetail { id: string; result_id: string; question_type_id: string; correct_count: number; incorrect_count: number }
@@ -332,9 +333,9 @@ export default function Results() {
                               <p className="text-lg font-semibold text-red-500">{stats.totalIncorrect}</p>
                             </div>
                             <div className="text-center bg-[#f8fafc] rounded-lg p-1.5 flex flex-col justify-center">
-                              <p className="text-[11px] text-[#62748b] font-semibold uppercase mb-0.5">Net & Puan</p>
+                              <p className="text-[11px] text-[#62748b] font-semibold uppercase mb-0.5">Net & {examScoreLabel(exams.find(exam => exam.id === r.exam_id))}</p>
                               <p className="text-[13px] font-semibold text-[#62748b]">{stats.net} Net</p>
-                              <p className="text-sm font-semibold text-[#4269a8]">{stats.points} Puan</p>
+                              <p className="text-sm font-semibold text-[#4269a8]">{stats.points} {examScoreLabel(exams.find(exam => exam.id === r.exam_id))}</p>
                             </div>
                           </div>
                         </div>
@@ -365,7 +366,7 @@ export default function Results() {
               ] as const).map(group => <section key={group.kind} className={`result-change-group is-${group.kind}`}><header><h3>{group.title}</h3><span>{group.rows.length} konu</span></header>{group.rows.length === 0 ? <p className="result-change-empty">{group.empty}</p> : group.rows.map(row => <article className="result-change-card" key={row.id}><div className="result-change-main"><h4>{row.name}</h4><strong>{signedChange(row.change!)}<small>net</small></strong></div><div className="result-change-before-after"><span>Önceki <b>{formatNumber(row.previousNet)}</b></span><span aria-hidden="true">→</span><span>Son <b>{formatNumber(row.latestNet)}</b></span></div><p>Son deneme: {row.correct} doğru · {row.incorrect} yanlış</p></article>)}</section>)}</div>}
               {changeGroups.unchanged.length > 0 && <details className="result-other-changes"><summary>Değişmeyen konular <span>{changeGroups.unchanged.length}</span></summary><div>{changeGroups.unchanged.map(row => <article key={row.id}><strong>{row.name}</strong><b>0 <small>net</small></b><span>{formatNumber(row.previousNet)} → {formatNumber(row.latestNet)} net</span></article>)}</div></details>}
               {changeGroups.unavailable.length > 0 && <details className="result-other-changes"><summary>Karşılaştırma için kayıt eksik <span>{changeGroups.unavailable.length}</span></summary><div>{changeGroups.unavailable.map(row => <article key={row.id}><strong>{row.name}</strong><span>Önceki: {formatNumber(row.previousNet)} net · Son: {formatNumber(row.latestNet)} net</span></article>)}</div></details>}
-              <details className="result-history-details"><summary>Deneme geçmişi ve çizgi grafiği</summary><div className="result-analysis-toolbar"><label>Soru türü<CustomSelect value={chartQuestion} onChange={value => { setChartQuestion(value); setFocusedResult(null) }} options={[{ value: '', label: 'Tüm soru türleri' }, ...questionTypes.filter(q => q.exam_id === selectedExamId).map(q => ({ value: q.id, label: q.name }))]} /></label><div className="result-chart-toggle" aria-label="Grafik ölçüsü">{(['net', 'points'] as const).map(value => <button key={value} aria-pressed={metric === value} onClick={() => setMetric(value)}>{value === 'net' ? 'Net' : 'Puan'}</button>)}</div></div>
+              <details className="result-history-details"><summary>Deneme geçmişi ve çizgi grafiği</summary><div className="result-analysis-toolbar"><label>Soru türü<CustomSelect value={chartQuestion} onChange={value => { setChartQuestion(value); setFocusedResult(null) }} options={[{ value: '', label: 'Tüm soru türleri' }, ...questionTypes.filter(q => q.exam_id === selectedExamId).map(q => ({ value: q.id, label: q.name }))]} /></label><div className="result-chart-toggle" aria-label="Grafik ölçüsü">{(['net', 'points'] as const).map(value => <button key={value} aria-pressed={metric === value} onClick={() => setMetric(value)}>{value === 'net' ? 'Net' : examScoreLabel(selectedExam)}</button>)}</div></div>
               <div className="result-kpis">{[
                 ['Son sonuç', formatNumber(latest?.[metric])],
                 ['Ortalama', measured.length ? formatNumber(average) : '—'],
@@ -373,8 +374,8 @@ export default function Results() {
                 ['Son değişim', latest && previous ? (latest[metric]! - previous[metric]! > 0 ? '+' : '') + formatNumber(latest[metric]! - previous[metric]!) : '—'],
               ].map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>
               <section className="result-chart result-history-chart">
-                <div className="result-chart-heading"><div><h3>{metric === 'net' ? 'Net gelişimi' : 'Puan gelişimi'}</h3><p>{chartQuestion ? questionTypes.find(q => q.id === chartQuestion)?.name : selectedExam?.name} · {measured.length} sonuç</p></div><div className="result-chart-toggle" aria-label="Grafik aralığı"><button aria-pressed={chartRange === '10'} onClick={() => setChartRange('10')}>Son 10</button><button aria-pressed={chartRange === 'all'} onClick={() => setChartRange('all')}>Tümü</button></div></div>
-                <div className="result-chart-legend"><span><i />{metric === 'net' ? 'Net' : 'Puan'}</span><span><i className="is-average" />Ortalama {formatNumber(average)}</span></div>
+                <div className="result-chart-heading"><div><h3>{metric === 'net' ? 'Net gelişimi' : `${examScoreLabel(selectedExam)} gelişimi`}</h3><p>{chartQuestion ? questionTypes.find(q => q.id === chartQuestion)?.name : selectedExam?.name} · {measured.length} sonuç</p></div><div className="result-chart-toggle" aria-label="Grafik aralığı"><button aria-pressed={chartRange === '10'} onClick={() => setChartRange('10')}>Son 10</button><button aria-pressed={chartRange === 'all'} onClick={() => setChartRange('all')}>Tümü</button></div></div>
+                <div className="result-chart-legend"><span><i />{metric === 'net' ? 'Net' : examScoreLabel(selectedExam)}</span><span><i className="is-average" />Ortalama {formatNumber(average)}</span></div>
                 {measured.length === 0 ? <p className="result-empty">Bu soru türüne ait kayıt yok.</p> : <div className="result-history-canvas"><ResponsiveContainer width="100%" height="100%"><AreaChart data={displayedChart} margin={{ top: 18, right: 16, left: -14, bottom: 2 }} onClick={event => { const index = event?.activeTooltipIndex; if (index != null) { const row = displayedChart[Number(index)]; if (row) setFocusedResult(row.id) } }}>
                   <defs><linearGradient id="exam-history-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#6a8cbf" stopOpacity={.25} /><stop offset="100%" stopColor="#6a8cbf" stopOpacity={.02} /></linearGradient></defs>
                   <CartesianGrid vertical={false} stroke="#edf1f6" strokeDasharray="3 4" />
