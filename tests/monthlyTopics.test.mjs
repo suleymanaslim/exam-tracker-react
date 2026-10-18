@@ -29,7 +29,7 @@ const clientFor = tables => {
   const calls=[]
   return { calls,from(table) {
     const call={table};calls.push(call)
-    return {select(){return this},order(key){call.order=key;return this},eq(field,id){call.owner={field,id};return this},async range(from,to){
+    return {select(){return this},order(key){call.order=key;return this},eq(field,id){call.owner={field,id};return this},async maybeSingle(){ const data=tables[table]; return data ? {data:data.find(row=>row[call.owner.field]===call.owner.id)||null,error:null} : {data:null,error:{code:'42P01'}} },async range(from,to){
       const data=tables[table]
       if(!data)return {data:null,error:{code:'42P01'}}
       return {data:data.filter(row=>!call.owner||row[call.owner.field]===call.owner.id).slice(from,to+1),error:null}
@@ -46,6 +46,7 @@ test('shared fetch reads every page and only the selected account completion rec
 })
 test('monthly picker separates shared and personal topic IDs and reads only the real admin account targets',async()=>{
   const client=clientFor({
+    ags_topic_preferences:[{user_id:'admin',source:'shared'}],
     ags_shared_subjects:[{id:'s',name:'Tarih',sort_order:0}],ags_shared_topics:[{id:'t',subject_id:'s',title:'Ortak konu',sort_order:0,archived_at:null}],ags_topic_progress:[{user_id:'admin',topic_id:'t',is_completed:true}],
     topics:[{id:'t',user_id:'admin',subject_id:'personal-s',title:'Kendi konusu',is_completed:false},{id:'foreign',user_id:'bob',subject_id:'foreign-s',title:'Gizli'}],
     subjects:[{id:'personal-s',user_id:'admin',exam_id:'e',name:'Kelime'}],exams:[{id:'e',user_id:'admin',name:'YDS'}],

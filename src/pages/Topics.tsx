@@ -1,5 +1,8 @@
 import './SuitePages.css'
 import SharedAgsTopics from '../components/SharedAgsTopics'
+import AgsTopicSourceChoice from '../components/AgsTopicSourceChoice'
+import { useAgsTopicSource } from '../lib/useAgsTopicSource'
+import { isAgsExam } from '../lib/agsTopicSource'
 import { useEffect, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import Swal from 'sweetalert2'
@@ -9,7 +12,7 @@ import {
 } from 'lucide-react'
 import { useAdminStore } from '../lib/adminStore'
 
-interface Exam    { id: string; name: string; color: string }
+interface Exam    { id: string; name: string; color: string; base_template_key?: string | null }
 interface Subject { id: string; exam_id: string; name: string }
 interface Topic   {
   id: string; subject_id: string; title: string
@@ -24,6 +27,8 @@ export default function Topics() {
   const [openExam, setOpenExam]       = useState<string | null>(null)
   const [openSubject, setOpenSubject] = useState<string | null>(null)
   const { impersonatedUserId, isAdmin } = useAdminStore()
+  const agsSource = useAgsTopicSource(userId)
+  const visibleExams = exams.filter(exam => !isAgsExam(exam) || agsSource.source === 'personal')
 
   // Yeni konu ekleme
   const [addingTo, setAddingTo]   = useState<string | null>(null) // subject_id
@@ -155,15 +160,16 @@ export default function Topics() {
 
       {/* Exam accordion list */}
       <div className="flex-1 min-h-0 overflow-y-auto space-y-3">
-        {userId && <SharedAgsTopics key={userId} userId={userId} canManage={isAdmin && !impersonatedUserId} />}
-        <h2 className="text-sm font-semibold text-[#62748b] pt-2">Kişisel konu listelerin</h2>
+        {userId && <AgsTopicSourceChoice key={userId} source={agsSource.source} loading={agsSource.loading} saving={agsSource.saving} error={agsSource.error} onChoose={agsSource.choose} onRetry={agsSource.refresh} />}
+        {userId && agsSource.source === 'shared' && <SharedAgsTopics key={userId} userId={userId} canManage={isAdmin && !impersonatedUserId} />}
+        {visibleExams.length > 0 && <h2 className="text-sm font-semibold text-[#62748b] pt-2">{agsSource.source === 'personal' ? 'Kendi konu listelerin' : 'Diğer sınavların konuları'}</h2>}
         {exams.length === 0 && (
           <div className="flex items-center justify-center h-full text-[#718096] text-[15px]">
             Henüz sınav eklenmemiş. Ayarlar sayfasından başlayabilirsin.
           </div>
         )}
 
-        {exams.map(exam => {
+        {visibleExams.map(exam => {
           const subs = examSubjects(exam.id)
           const examTopicCount = subs.reduce((a, s) => a + subjectTopics(s.id).length, 0)
           const examDoneCount  = subs.reduce((a, s) => a + subjectTopics(s.id).filter(t => t.is_completed).length, 0)

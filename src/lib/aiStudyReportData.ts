@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AIReportData } from './aiStudyReport.ts'
 import { fetchSharedTopics } from './sharedTopicsData.ts'
+import { isAgsExam, readAgsTopicSource } from './agsTopicSource.ts'
 
 export const AI_REPORT_TABLES = {
   exams: 'exams', subjects: 'subjects', resources: 'resources', sessions: 'study_sessions',
@@ -37,6 +38,16 @@ export async function readOwnedReportRows(client: SupabaseClient, table: string,
 export async function fetchAIReportData(client: SupabaseClient, userId: string): Promise<AIReportData> {
   const entries = await Promise.all(Object.entries(AI_REPORT_TABLES).map(async ([key, table]) => [key, await readOwnedReportRows(client, table, userId)]))
   const report = Object.fromEntries(entries) as AIReportData
+  try { report.agsTopicSource = await readAgsTopicSource(client, userId) }
+  catch (error) {
+    if (!error || typeof error !== 'object' || !('code' in error) || error.code !== 'AGS_SOURCE_SETUP') throw new Error('AGS liste tercihi okunamadı. Eksik AI raporu oluşturulmadı; tekrar dene.')
+    report.agsTopicSource = null
+  }
+  report.topics = report.topics.filter(topic => {
+    const subject = report.subjects.find(subject => subject.id === topic.subject_id)
+    return !isAgsExam(report.exams.find(exam => exam.id === subject?.exam_id)) || report.agsTopicSource === 'personal'
+  })
+  if (report.agsTopicSource !== 'shared') { report.sharedTopicsAvailability = 'not_selected'; return report }
   try {
     const shared = await fetchSharedTopics(client, userId)
     report.topics.push(...shared.topics.filter(topic => !topic.archived_at).map(topic => ({

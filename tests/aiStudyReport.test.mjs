@@ -98,6 +98,7 @@ test('AI export includes the selected user shared AGS completion with its subjec
   const source=data()
   source.topics.push({id:'shared:t',subject_id:'shared:s',subject_name:'Tarih',title:'Ortak konu',is_completed:true,source:'shared_ags'})
   source.sharedTopicsAvailability='available'
+  source.agsTopicSource='shared'
   const report=buildAIStudyReport(source,now)
   assert.deepEqual(report.ayrintilar.konular.at(-1),{ders:'Tarih',konu:'Ortak konu',tamamlandi:true,kaynak:'shared_ags'})
   assert.match(report.veri_aciklamalari.ortak_ags_konulari,/dahil/)

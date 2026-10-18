@@ -2,7 +2,7 @@ export interface SharedSubject { id: string; name: string; sort_order: number }
 export interface SharedTopic { id: string; subject_id: string; title: string; sort_order: number; archived_at: string | null }
 export interface SharedTopicProgress { user_id: string; topic_id: string; is_completed: boolean }
 export interface MonthlyTarget { id: string; owner_id: string; shared_topic_id: string | null; personal_topic_id: string | null; target_month: string; note: string | null }
-export interface MonthlyTopic { key: string; id: string; kind: 'shared' | 'personal'; subjectKey: string; subject: string; exam: string; title: string; completed: boolean; archived: boolean }
+export interface MonthlyTopic { key: string; id: string; kind: 'shared' | 'personal'; subjectKey: string; subject: string; exam: string; title: string; completed: boolean; archived: boolean; isAgs?: boolean }
 
 export function monthKey(value: string) {
   return /^(20\d{2}|2100)-(0[1-9]|1[0-2])$/.test(value) ? value : null
@@ -37,6 +37,7 @@ export function monthlyTargetKey(target: MonthlyTarget) {
 }
 export function sharedTopicsError(error: { code?: string } | unknown) {
   const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
+  if (code === 'AGS_SOURCE_SETUP') return 'AGS liste seçimi için Supabase’de ags_topic_source.sql dosyasını çalıştırın.'
   if (['42P01', '42703', 'PGRST202', 'PGRST204', 'PGRST205'].includes(code)) return 'Bu bölüm için Supabase’de shared_ags_topics_monthly.sql dosyasını çalıştırın.'
   if (code === '42501') return 'Bu işlem için yetkin bulunmuyor. Ortak başlıkları ve aylık planı yalnızca admin düzenleyebilir.'
   if (code === '23505') return 'Bu isimde bir ders veya konu zaten var.'

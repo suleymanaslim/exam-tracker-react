@@ -8,12 +8,14 @@ import { fetchMonthlyData } from '../lib/sharedTopicsData'
 import { monthKey, monthLabel, shiftMonth, monthlyPayload, monthlyTargetKey, sharedTopicsError } from '../lib/monthlyTopics'
 import type { MonthlyTopic, MonthlyTarget } from '../lib/monthlyTopics'
 import { useAdminStore } from '../lib/adminStore'
+import type { AgsTopicSource } from '../lib/agsTopicSource'
 
 export default function MonthlyPlan() {
   const [ownerId, setOwnerId] = useState('')
   const [access, setAccess] = useState<'loading' | 'allowed' | 'denied' | 'error'>('loading')
   const [topics, setTopics] = useState<MonthlyTopic[]>([])
   const [targets, setTargets] = useState<MonthlyTarget[]>([])
+  const [agsSource, setAgsSource] = useState<AgsTopicSource | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [start, setStart] = useState(() => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}` })
@@ -30,7 +32,7 @@ export default function MonthlyPlan() {
     try {
       const data = await fetchMonthlyData(supabase, uid)
       if (!mounted.current || request !== version.current) return
-      setTopics(data.topics); setTargets(data.targets); setError('')
+      setTopics(data.topics); setTargets(data.targets); setAgsSource(data.agsTopicSource); setError('')
       setSubject(previous => data.topics.some(topic => topic.subjectKey === previous && !topic.archived) ? previous : data.topics.find(topic => !topic.archived)?.subjectKey || '')
       setSelected(previous => previous.filter(key => data.topics.some(topic => topic.key === key && !topic.archived)))
     } catch (error) { if (mounted.current && request === version.current) setError(sharedTopicsError(error)) }
@@ -51,6 +53,12 @@ export default function MonthlyPlan() {
     })()
     return () => { mounted.current = false; version.current++ }
   }, [load])
+  useEffect(() => {
+    if (!ownerId) return
+    const refresh = (event: Event) => { if (!submitting.current && (!(event instanceof CustomEvent) || event.detail?.userId === ownerId)) void load(ownerId) }
+    window.addEventListener('ags-topic-source-changed', refresh); window.addEventListener('focus', refresh)
+    return () => { window.removeEventListener('ags-topic-source-changed', refresh); window.removeEventListener('focus', refresh) }
+  }, [ownerId, load])
   const months = useMemo(() => Array.from({ length: 12 }, (_, index) => shiftMonth(start, index)).filter(value => monthKey(value)), [start])
   const subjectOptions = [...new Map(topics.filter(topic => !topic.archived).map(topic => [topic.subjectKey, { key: topic.subjectKey, label: `${topic.exam} · ${topic.subject}` }])).values()]
   const choices = topics.filter(topic => !topic.archived && topic.subjectKey === subject && topic.title.toLocaleLowerCase('tr-TR').includes(search.toLocaleLowerCase('tr-TR')))
@@ -96,6 +104,7 @@ export default function MonthlyPlan() {
   return <div className="monthly-page">
     <header className="monthly-heading"><div><p className="monthly-eyebrow">YALNIZCA ADMİN</p><h1><CalendarDays size={24} /> Aylık plan</h1><p>Hangi dersin hangi konusu, hangi ay bitecek?</p>{impersonatedUserId && <p>Bu plan kendi admin hesabına aittir.</p>}</div><Link to="/topics" className="monthly-button">Konu listesine git</Link></header>
     {error && <div className="monthly-error" role="alert">{error}<button type="button" className="monthly-button" disabled={busy} onClick={() => void load(ownerId)}><RefreshCw size={14} /> Tekrar dene</button></div>}
+    {!error && !agsSource && <p className="monthly-source-notice">AGS konularını planlamak için önce <Link to="/topics">Konu Takibi’nden AGS listeni seç</Link>.</p>}
     <div className="monthly-layout">
       <section className="monthly-planner" aria-label="Ders ve konu planla" aria-busy={busy}><h2>Konu planla</h2><label>Ders<select value={subject} disabled={busy || !!error} onChange={event => { setSubject(event.target.value); setSelected([]); setSearch(''); setMessage('') }}><option value="">Ders seç</option>{subjectOptions.map(row => <option key={row.key} value={row.key}>{row.label}</option>)}</select></label><label>Bitiş ayı<input type="month" min="2000-01" max="2100-12" value={month} disabled={busy} onChange={event => { if (monthKey(event.target.value)) setMonth(event.target.value) }} /></label>
         <div className="monthly-topic-picker"><div><strong>Konular</strong><button type="button" disabled={!choices.length || busy} onClick={() => setSelected(choices.every(topic => selected.includes(topic.key)) ? [] : choices.map(topic => topic.key))}>{choices.length && choices.every(topic => selected.includes(topic.key)) ? 'Seçimi temizle' : 'Tümünü seç'}</button></div><input type="search" aria-label="Konu ara" placeholder="Konu ara…" value={search} onChange={event => setSearch(event.target.value)} /><div className="monthly-topic-options">{!choices.length && <p className="monthly-muted">Bu derste seçilebilir konu yok. Konu Takibi’nden başlık ekleyebilirsin.</p>}{choices.map(topic => <label key={topic.key}><input type="checkbox" checked={selected.includes(topic.key)} disabled={busy} onChange={event => setSelected(previous => event.target.checked ? [...previous, topic.key] : previous.filter(key => key !== topic.key))} /><span>{topic.title}{assigned.has(topic.key) && <small>Planlı: {monthLabel(assigned.get(topic.key)!.target_month)}</small>}</span></label>)}</div></div>
