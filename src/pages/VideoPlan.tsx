@@ -9,6 +9,7 @@ import { useAdminStore } from '../lib/adminStore'
 import { playlistURL } from '../lib/playlist'
 import { openVideoPlanPrint } from '../lib/videoPlanPrint'
 import { buildVideoPlanExport } from '../lib/videoPlanExport'
+import ResetVideoProgressButton from '../components/ResetVideoProgressButton'
 
 /* ─────────────── Types ─────────────── */
 function showPlanError(error: { code?: string; message: string }) {
@@ -580,6 +581,7 @@ ADD COLUMN is_completed BOOLEAN DEFAULT false;</pre>`,
                           <button disabled={savingResource} onClick={() => setEditingRes(null)} className="flex-1 h-6 rounded border border-slate-200 text-[11px] font-medium text-slate-500 hover:bg-slate-50">İptal</button>
                           <button disabled={savingResource} onClick={saveEditResource} className="flex-1 h-6 rounded bg-slate-900 text-white text-[11px] font-medium hover:bg-slate-700">{savingResource ? 'Kaydediliyor…' : 'Kaydet'}</button>
                         </div>
+                        {userId && <ResetVideoProgressButton key={`${userId}:${res.id}`} userId={userId} resourceId={res.id} resourceName={res.name} disabled={savingResource} onReset={() => setPlanItems(current => current.map(item => item.resource_id === res.id ? { ...item, watched_count: 0, is_completed: false } : item))} />}
                       </div>
                     ) : (
                       <>

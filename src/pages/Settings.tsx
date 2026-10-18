@@ -13,6 +13,7 @@ import { useAdminStore } from '../lib/adminStore'
 import { defaultVocabularyText } from '../lib/defaultVocabulary'
 import { useSettingsStore } from '../lib/settingsStore'
 import ExamTemplatePanel from '../components/ExamTemplatePanel'
+import ResetVideoProgressButton from '../components/ResetVideoProgressButton'
 
 interface Exam { id: string; name: string; color: string; exam_date: string | null; wrong_penalty: number | null; point_per_net: number }
 interface Subject { id: string; exam_id: string; name: string }
@@ -591,6 +592,7 @@ export default function Settings() {
                                   {r.author && <span>{r.author}</span>}
                                   {r.publisher && <span>· {r.publisher}</span>}
                                 </p>
+                                {r.resource_type === 'video_ders' && userId && <ResetVideoProgressButton key={`${userId}:${r.id}`} userId={userId} resourceId={r.id} resourceName={r.name} />}
                               </>
                             )}
                           </div>
