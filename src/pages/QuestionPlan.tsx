@@ -1,7 +1,7 @@
 import './QuestionPlan.css'
 import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { Link } from 'react-router-dom'
-import { BookOpenCheck, Check, ChevronLeft, ChevronRight, Plus, RefreshCw, Play, Pencil, Trash2 } from 'lucide-react'
+import { BookOpenCheck, Check, ChevronLeft, ChevronRight, Plus, RefreshCw, Play, Pencil, Trash2, Copy } from 'lucide-react'
 import Swal from 'sweetalert2'
 import { supabase } from '../lib/supabase'
 import { useAdminStore } from '../lib/adminStore'
@@ -11,14 +11,19 @@ import { fetchQuestionData, fetchQuestionVideos, questionPlanError } from '../li
 import { questionInputOptions, questionCompletionOptions, readQuestionAnswers, lockQuestionInputs } from '../lib/questionDialogs'
 import { analyzeQuestions } from '../lib/questionAnalytics'
 import { localDayKey, mondayOf, weekBounds } from '../lib/statsPeriod'
+import QuestionWeekBoard from '../components/QuestionWeekBoard'
+import QuestionWeekPlanner from '../components/QuestionWeekPlanner'
+import CopyQuestionWeekDialog from '../components/CopyQuestionWeekDialog'
+import { isQuestionTarget, questionWeekDays } from '../lib/questionWeek'
 
 const dateLabel = (date: string) => new Date(`${date}T12:00:00`).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' })
 const htmlText = (value: string) => value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!)
 interface Subject { id: string; name: string; exam_id: string; exams: { name: string } | null }
 
 export default function QuestionPlan() {
-  const { impersonatedUserId } = useAdminStore()
+  const { impersonatedUserId, isAdmin } = useAdminStore()
   const loadVersion = useRef(0)
+  const ownerRef = useRef<string | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
   const [lessons, setLessons] = useState<QuestionVideo[]>([])
   const [plans, setPlans] = useState<QuestionTask[]>([])
@@ -26,24 +31,29 @@ export default function QuestionPlan() {
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [tab, setTab] = useState<'plans' | 'videos' | 'logs'>('plans')
+  const [tab, setTab] = useState<'plans' | 'videos' | 'logs' | 'planner'>('plans')
   const [search, setSearch] = useState('')
   const [today] = useState(() => localDayKey(new Date()))
   const [week, setWeek] = useState(() => localDayKey(mondayOf(new Date())))
+  const [selectedDay, setSelectedDay] = useState(() => (new Date().getDay() + 6) % 7)
+  const [copyScope, setCopyScope] = useState<{ userId: string; week: string } | null>(null)
+  const days = useMemo(() => questionWeekDays(week), [week])
+  const selectedDate = days[selectedDay].date
   const { start, end } = weekBounds(week)
   const weekEnd = new Date(end); weekEnd.setDate(weekEnd.getDate() - 1)
   const inWeek = (date: string) => date >= localDayKey(start) && date < localDayKey(end)
 
-  const load = useCallback(async (uid: string) => {
+  const load = useCallback(async (uid: string, background = false) => {
     const version = ++loadVersion.current
-    setLoading(true); setError('')
+    if (!background) setLoading(true)
+    setError('')
     try {
       const [videos, snapshot, s] = await Promise.all([
         fetchQuestionVideos(uid), fetchQuestionData(uid),
         supabase.from('subjects').select('id,name,exam_id,exams(name)').eq('user_id', uid).order('name'),
       ])
       if (s.error) throw s.error
-      if (version !== loadVersion.current) return
+      if (version !== loadVersion.current || ownerRef.current !== uid) return
       setLessons(videos); setPlans(snapshot.plans); setLogs(snapshot.logs); setSubjects((s.data || []) as unknown as Subject[])
     } catch (failure) { if (version === loadVersion.current) setError(questionPlanError(failure as { code?: string })) }
     finally { if (version === loadVersion.current) setLoading(false) }
@@ -51,14 +61,15 @@ export default function QuestionPlan() {
   useEffect(() => {
     let cancelled = false
     loadVersion.current++
+    ownerRef.current = null; setCopyScope(null)
     setPlans([]); setLessons([]); setLogs([]); setSubjects([]); setUserId(null); setError(''); setLoading(true)
     void supabase.auth.getUser().then(({ data: { user } }) => {
       if (cancelled) return
       if (!user) { setLoading(false); return }
       const uid = impersonatedUserId || user.id
-      setUserId(uid); void load(uid)
+      ownerRef.current = uid; setUserId(uid); void load(uid)
     })
-    return () => { cancelled = true; loadVersion.current++ }
+    return () => { cancelled = true; loadVersion.current++; ownerRef.current = null }
   }, [impersonatedUserId, load])
   useEffect(() => {
     if (!userId) return
@@ -69,19 +80,19 @@ export default function QuestionPlan() {
 
   const afterSave = async () => {
     window.dispatchEvent(new Event('question-data-changed'))
-    if (userId) await load(userId)
+    if (userId && ownerRef.current === userId) await load(userId, true)
   }
-  const saveTarget = async (lesson?: QuestionVideo, existing?: QuestionTask) => {
+  const saveTarget = async (lesson?: QuestionVideo, existing?: QuestionTask, date?: string) => {
     if (!userId || (lesson && !lesson.resources?.subject_id)) return
-    let selectedDate = existing?.date || lesson?.date || (week === localDayKey(mondayOf(new Date(`${today}T00:00:00`))) ? today : week)
+    let selectedDate = lesson?.date || existing?.date || date || days[selectedDay].date
     const subjectId = existing?.subject_id || lesson?.resources?.subject_id
     const options = questionInputOptions(String(existing?.target_questions || 30))
     const fixed = !!existing || !!lesson
     const result = await Swal.fire({
-      ...options, title: existing ? 'Soru hedefini düzenle' : 'Soru hedefi ekle',
+      ...options, title: existing ? 'Soru hedefini düzenle' : lesson ? 'Videonun gününe soru ekle' : 'Soru hedefi ekle',
       html: (!fixed ? `<label class="question-dialog-date">Ders<select id="question-subject"><option value="">Ders seç</option>${subjects.map(s => `<option value="${htmlText(s.id)}">${htmlText(`${s.exams?.name || ''} · ${s.name}`)}</option>`).join('')}</select></label>` : '')
-        + `<label class="question-dialog-date">Hedef dönemi<select id="question-period" ${fixed ? 'disabled' : ''}><option value="day">Günlük</option><option value="week">Haftalık</option></select></label>`
-        + options.html + '<label class="question-dialog-date">Gün / hafta<input id="question-date" type="date" required></label>',
+        + (!fixed ? '<label class="question-dialog-date">Hedef dönemi<select id="question-period"><option value="day">Günlük</option><option value="week">Genel haftalık hedef</option></select></label>' : `<p>${htmlText(subjects.find(subject => subject.id === subjectId)?.name || 'Ders')} · ${existing?.period === 'week' ? 'Haftalık hedef' : 'Günlük hedef'}</p>`)
+        + options.html + `<label class="question-dialog-date">Gün / hafta<input id="question-date" type="date" required ${lesson ? 'readonly' : ''}></label>`,
       didOpen: () => {
         options.didOpen()
         const input = Swal.getPopup()?.querySelector<HTMLInputElement>('#question-date')
@@ -100,8 +111,8 @@ export default function QuestionPlan() {
         const target = questionCount(value), popup = Swal.getPopup()
         const dateInput = popup?.querySelector<HTMLInputElement>('#question-date')
         const subject = subjectId || popup?.querySelector<HTMLSelectElement>('#question-subject')?.value
-        const period = popup?.querySelector<HTMLSelectElement>('#question-period')?.value || 'day'
-        selectedDate = dateInput?.value || ''
+        const period = existing?.period || popup?.querySelector<HTMLSelectElement>('#question-period')?.value || 'day'
+        selectedDate = lesson?.date || dateInput?.value || ''
         if (target === null || !dateInput?.checkValidity() || !selectedDate || !subject) { Swal.showValidationMessage('Ders, soru sayısı ve gün seçin.'); return false }
         const { error: saveError } = await supabase.rpc('set_question_target', { p_user_id: userId, p_subject_id: subject, p_date: selectedDate, p_target: target,
           p_period: period, p_video_id: existing?.video_plan_item_id || lesson?.id || null, p_plan_id: existing?.id || null })
@@ -109,7 +120,7 @@ export default function QuestionPlan() {
         return true
       },
     })
-    if (result.isConfirmed) { setWeek(localDayKey(mondayOf(new Date(`${selectedDate}T00:00:00`)))); setTab('plans'); await afterSave() }
+    if (result.isConfirmed) { setSelectedDay((new Date(`${selectedDate}T12:00:00`).getDay() + 6) % 7); setWeek(localDayKey(mondayOf(new Date(`${selectedDate}T00:00:00`)))); setTab('plans'); await afterSave() }
   }
   const addSolved = async (plan: QuestionTask) => {
     if (!userId) return
@@ -162,7 +173,7 @@ export default function QuestionPlan() {
     if (result.isConfirmed) await afterSave()
   }
   const matches = (name: string) => name.toLocaleLowerCase('tr-TR').includes(search.toLocaleLowerCase('tr-TR').trim())
-  const weekPlans = plans.filter(plan => !plan.archived_at && inWeek(plan.date))
+  const weekPlans = plans.filter(plan => isQuestionTarget(plan) && inWeek(plan.date))
   const visiblePlans = weekPlans.filter(plan => matches(`${plan.subjects?.name || ''} ${plan.resources?.name || ''}`))
   const weekLessons = lessons.filter(lesson => inWeek(lesson.date))
   const visibleLessons = weekLessons.filter(lesson => matches(`${lesson.resources?.subjects?.name || ''} ${lesson.resources?.name || ''}`))
@@ -171,14 +182,15 @@ export default function QuestionPlan() {
   const summary = useMemo(() => analyzeQuestions(plans, logs, week), [plans, logs, week])
   const shift = (direction: number) => { const next = new Date(start); next.setDate(next.getDate() + direction * 7); setWeek(localDayKey(next)) }
   return <div className="question-page">
-    <header className="question-header"><div><p>SORU ÇALIŞMASI</p><h1>Soru planı</h1></div><div className="question-header-actions"><button className="question-button" disabled={loading || !!error || !subjects.length} onClick={() => void saveTarget()}><Plus size={16} /> Hedef ekle</button><Link className="question-button" to="/study"><Play size={16} /> Çalışmaya geç</Link></div></header>
+    <header className="question-header"><div><p>SORU ÇALIŞMASI</p><h1>Soru planı</h1></div><div className="question-header-actions"><button className="question-button" disabled={loading || !!error || !subjects.length} onClick={() => void saveTarget()}><Plus size={16} /> Hedef ekle</button>{isAdmin && userId && <button className="question-button is-secondary" disabled={loading || !!error || !weekPlans.length} onClick={() => setCopyScope({ userId, week })}><Copy size={16} /> Kullanıcıya yapıştır</button>}<Link className="question-button is-secondary" to="/study"><Play size={16} /> Çalışmaya geç</Link></div></header>
     <div className="question-week"><strong>{dateLabel(week)} – {dateLabel(localDayKey(weekEnd))}</strong><div><button aria-label="Önceki hafta" onClick={() => shift(-1)}><ChevronLeft size={17} /></button><input type="date" aria-label="Hafta seç" value={week} onChange={e => { if (e.target.value) setWeek(localDayKey(mondayOf(new Date(`${e.target.value}T00:00:00`)))) }} /><button aria-label="Sonraki hafta" onClick={() => shift(1)}><ChevronRight size={17} /></button><button onClick={() => setWeek(localDayKey(mondayOf(new Date())))}>Bu hafta</button></div></div>
     <div className="question-summary"><span><strong>{summary.solved.toLocaleString('tr-TR')}</strong> soru çözüldü</span><span>{summary.target.toLocaleString('tr-TR')} haftalık hedef · {summary.remaining.toLocaleString('tr-TR')} kalan</span></div>
-    <div className="question-toolbar"><div className="question-tabs" role="group" aria-label="Soru planı görünümü"><button aria-pressed={tab === 'plans'} onClick={() => setTab('plans')}>Hedefler <span>{weekPlans.length}</span></button><button aria-pressed={tab === 'videos'} onClick={() => setTab('videos')}>Video görevleri <span>{weekLessons.length}</span></button><button aria-pressed={tab === 'logs'} onClick={() => setTab('logs')}>Kayıtlar <span>{weekLogs.length}</span></button></div><input type="search" aria-label="Ders veya konu ara" placeholder="Ders veya konu ara…" value={search} onChange={event => setSearch(event.target.value)} /></div>
+    <div className="question-toolbar"><div className="question-tabs" role="group" aria-label="Soru planı görünümü"><button aria-pressed={tab === 'plans'} onClick={() => setTab('plans')}>Planım <span>{weekPlans.length}</span></button><button aria-pressed={tab === 'videos'} onClick={() => setTab('videos')}>Videodan ekle <span>{weekLessons.length}</span></button><button aria-pressed={tab === 'planner'} onClick={() => setTab('planner')}>Haftayı planla</button><button aria-pressed={tab === 'logs'} onClick={() => setTab('logs')}>Kayıtlar <span>{weekLogs.length}</span></button></div><input type="search" aria-label="Ders veya konu ara" placeholder="Ders veya konu ara…" value={search} onChange={event => setSearch(event.target.value)} /></div>
     {error && <div className="question-error" role="alert"><span>{error}</span><button onClick={() => userId && void load(userId)}><RefreshCw size={16} /> Tekrar dene</button></div>}
-    {loading ? <div className="question-empty">Yükleniyor…</div> : !error && (tab === 'plans' ? <div className="question-cards">
-      {visiblePlans.length === 0 && <div className="question-empty"><BookOpenCheck size={28} /><p>{search ? 'Aramaya uygun plan yok.' : 'Bu haftaya bir ders hedefi veya video görevi ekle.'}</p><button className="question-button" onClick={() => void saveTarget()}><Plus size={16} /> Hedef ekle</button></div>}
-      {visiblePlans.map(plan => {
+    {loading ? <div className="question-empty">Yükleniyor…</div> : !error && (tab === 'planner' && userId ? <QuestionWeekPlanner key={`${userId}:${week}`} userId={userId} week={week} plans={plans} subjects={subjects} onSaved={() => void afterSave()} /> : tab === 'plans' ? <div className="question-plan-layout">
+      <QuestionWeekBoard week={week} today={today} selectedDate={selectedDate} plans={visiblePlans} onSelectDate={date => setSelectedDay(days.findIndex(day => day.date === date))} onAdd={date => void saveTarget(undefined, undefined, date)} onEdit={plan => void saveTarget(lessons.find(lesson => lesson.id === plan.video_plan_item_id), plan)} onSolved={plan => void addSolved(plan)} onRemove={plan => void remove(plan.id, 'plan')} />
+      {visiblePlans.some(plan => plan.period === 'week') && <section className="question-weekly-targets"><header><h2>Genel haftalık hedefler</h2><p>Bu hedefler dersin günlük soru görevlerini kapsar; toplama tekrar eklenmez.</p></header><div className="question-cards">
+      {visiblePlans.filter(plan => plan.period === 'week').map(plan => {
         const done = plan.target_questions != null && plan.solved_questions >= plan.target_questions
         return <article className={`question-card ${done ? 'is-done' : ''}`} key={plan.id}>
           <div className="question-card-top"><span>{plan.period === 'week' ? 'Haftalık hedef' : dateLabel(plan.date)}{plan.period !== 'week' && plan.date < today && !done ? ' · Bekliyor' : ''}</span>{done && <span><Check size={14} /> Tamamlandı</span>}</div>
@@ -188,9 +200,12 @@ export default function QuestionPlan() {
           <div className="question-answers">{plan.answers_recorded && <span>{[plan.correct_recorded ? `${plan.correct_questions} doğru` : '', plan.wrong_recorded ? `${plan.wrong_questions} yanlış` : ''].filter(Boolean).join(' · ')}</span>}</div><div className="question-card-actions"><button className="question-button" onClick={() => void addSolved(plan)}><Plus size={15} /> Çözülen ekle</button><button className="question-icon-button" aria-label={`${plan.subjects?.name || 'Ders'} hedefini düzenle`} onClick={() => void saveTarget(undefined, plan)}><Pencil size={16} /></button><button className="question-icon-button is-danger" aria-label={`${plan.subjects?.name || 'Ders'} planını sil`} onClick={() => void remove(plan.id, 'plan')}><Trash2 size={16} /></button></div>
         </article>
       })}
+    </div></section>}
     </div> : tab === 'videos' ? <div className="question-lessons">
-      {visibleLessons.length === 0 && <div className="question-empty"><BookOpenCheck size={28} /><p>{search ? 'Aramaya uygun video yok.' : 'Bu haftada video görevi yok.'}</p><Link className="question-button" to="/videos">Video planını aç</Link></div>}
-      {visibleLessons.map(lesson => {
+      <nav className="question-day-nav" aria-label="Video görevinin günü">{days.map((day, index) => <button type="button" key={day.date} aria-pressed={index === selectedDay} onClick={() => setSelectedDay(index)}><span>{day.short}</span><strong>{day.day}</strong><small>{weekLessons.filter(lesson => lesson.date === day.date).length} görev</small></button>)}</nav>
+      <p className="question-video-hint">{days[selectedDay].label}: bir videoya tıkla, aynı güne soru hedefi ekle.</p>
+      {visibleLessons.filter(lesson => lesson.date === selectedDate).length === 0 && <div className="question-empty"><BookOpenCheck size={28} /><p>{search ? 'Aramaya uygun video yok.' : 'Seçili günde video görevi yok.'}</p><Link className="question-button" to="/videos">Video planını aç</Link></div>}
+      {visibleLessons.filter(lesson => lesson.date === selectedDate).map(lesson => {
         const existing = plans.find(plan => !plan.archived_at && plan.video_plan_item_id === lesson.id)
         const watched = completedVideo(lesson)
         return <button key={lesson.id} className="question-lesson" disabled={!lesson.resources?.subject_id} onClick={() => void saveTarget(lesson, existing)}><div className="question-lesson-icon">{watched ? <Check size={20} /> : <Play size={20} />}</div><div><strong>{lesson.resources?.subjects?.name || 'Ders kaldırıldı'}</strong><span>{lesson.resources?.name} · {dateLabel(lesson.date)} · {lesson.video_count} video · {watched ? 'İzlendi' : `${lesson.watched_count || 0} izlendi`}</span></div><span className="question-lesson-target">{existing ? `${existing.target_questions} soru` : 'Hedef ekle'}<ChevronRight size={17} /></span></button>
@@ -199,5 +214,6 @@ export default function QuestionPlan() {
       {visibleLogs.length === 0 && <div className="question-empty"><BookOpenCheck size={28} /><p>Bu haftada çözüm kaydı yok.</p></div>}
       {visibleLogs.map(entry => { const plan = plans.find(p => p.id === entry.question_plan_id); return <article className="question-log" key={entry.id}><div><strong>{plan?.subjects?.name || 'Ders kaldırıldı'}</strong><span>{new Date(entry.created_at).toLocaleString('tr-TR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · {entry.session_id ? 'Çalışma oturumu' : 'Elle eklendi'}{plan?.archived_at ? ' · Plan silindi' : ''}</span>{entry.note && <p className="question-log-note">{entry.note}</p>}{(entry.correct_questions != null || entry.wrong_questions != null) && <small>{[entry.correct_questions != null ? `${entry.correct_questions} doğru` : '', entry.wrong_questions != null ? `${entry.wrong_questions} yanlış` : ''].filter(Boolean).join(' · ')}</small>}</div><strong className="question-log-count">{entry.solved_questions}<small>soru</small></strong><div className="question-log-actions"><button className="question-icon-button" aria-label="Çözüm kaydını düzenle" onClick={() => void editLog(entry)}><Pencil size={16} /></button><button className="question-icon-button is-danger" aria-label="Çözüm kaydını sil" onClick={() => void remove(entry.id, 'log')}><Trash2 size={16} /></button></div></article> })}
     </div>)}
+    {isAdmin && userId && copyScope?.userId === userId && copyScope.week === week && <CopyQuestionWeekDialog key={`${userId}:${week}`} sourceUserId={userId} week={week} onClose={() => setCopyScope(null)} />}
   </div>
 }

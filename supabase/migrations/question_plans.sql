@@ -267,5 +267,117 @@ $$;
 REVOKE ALL ON FUNCTION public.remove_question_result(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.remove_question_result(uuid) TO authenticated;
 
+-- Save a subject's daily targets in one transaction. Blank days are not sent and are preserved.
+CREATE OR REPLACE FUNCTION public.save_question_week_targets(
+  p_user_id uuid, p_subject_id uuid, p_week_start date, p_targets jsonb
+) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE
+  week_start date := date_trunc('week', p_week_start::timestamp)::date;
+  entry jsonb;
+  saved integer := 0;
+BEGIN
+  IF auth.uid() IS NULL OR p_user_id IS NULL OR (p_user_id <> auth.uid() AND NOT EXISTS (
+    SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'
+  )) THEN RAISE EXCEPTION 'Access denied' USING ERRCODE = '42501'; END IF;
+  IF p_week_start IS NULL OR p_targets IS NULL OR jsonb_typeof(p_targets) <> 'array' THEN
+    RAISE EXCEPTION 'Invalid week targets' USING ERRCODE = '22023';
+  END IF;
+  IF jsonb_array_length(p_targets) NOT BETWEEN 1 AND 7 THEN RAISE EXCEPTION 'Invalid week targets' USING ERRCODE = '22023'; END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.subjects WHERE id = p_subject_id AND user_id = p_user_id) THEN
+    RAISE EXCEPTION 'Subject not found' USING ERRCODE = '42501';
+  END IF;
+  IF (SELECT count(DISTINCT value->>'date') FROM jsonb_array_elements(p_targets)) <> jsonb_array_length(p_targets) THEN
+    RAISE EXCEPTION 'Duplicate target dates' USING ERRCODE = '22023';
+  END IF;
+  -- Validate every item before the first write, including its exact calendar day.
+  FOR entry IN SELECT value FROM jsonb_array_elements(p_targets) LOOP
+    IF jsonb_typeof(entry) <> 'object' OR jsonb_typeof(entry->'target') IS DISTINCT FROM 'number'
+      OR entry->>'target' !~ '^[0-9]{1,6}$'
+      OR NOT EXISTS (SELECT 1 FROM generate_series(0, 6) AS d WHERE to_char(week_start + d, 'YYYY-MM-DD') = entry->>'date') THEN
+      RAISE EXCEPTION 'Invalid week target' USING ERRCODE = '22023';
+    END IF;
+    IF (entry->>'target')::integer NOT BETWEEN 1 AND 100000 THEN RAISE EXCEPTION 'Invalid week target' USING ERRCODE = '22023'; END IF;
+  END LOOP;
+  PERFORM pg_advisory_xact_lock(hashtextextended('question-week:' || p_user_id::text || ':' || week_start::text, 0));
+  FOR entry IN SELECT value FROM jsonb_array_elements(p_targets) ORDER BY value->>'date' LOOP
+    PERFORM public.set_question_target(p_user_id, p_subject_id, (entry->>'date')::date, (entry->>'target')::integer, 'day');
+    saved := saved + 1;
+  END LOOP;
+  RETURN jsonb_build_object('saved', saved);
+END;
+$$;
+REVOKE ALL ON FUNCTION public.save_question_week_targets(uuid, uuid, date, jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.save_question_week_targets(uuid, uuid, date, jsonb) TO authenticated;
+
+-- Admin-only, additive copy. Subject/exam names must resolve to exactly one owned target subject.
+-- Video/resource foreign IDs, solved counts, sessions and notes are never copied.
+CREATE OR REPLACE FUNCTION public.copy_question_week(
+  p_source_user_id uuid, p_target_user_id uuid, p_week_start date
+) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE
+  week_start date := date_trunc('week', p_week_start::timestamp)::date;
+  source_rows jsonb;
+  entry record;
+  candidates uuid[];
+  target_subject uuid;
+  inserted uuid;
+  copied integer := 0;
+  skipped integer := 0;
+BEGIN
+  IF auth.uid() IS NULL OR NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin') THEN
+    RAISE EXCEPTION 'Access denied' USING ERRCODE = '42501';
+  END IF;
+  IF p_source_user_id IS NULL OR p_target_user_id IS NULL OR p_source_user_id = p_target_user_id OR p_week_start IS NULL
+    OR NOT EXISTS (SELECT 1 FROM auth.users WHERE id = p_target_user_id) THEN
+    RAISE EXCEPTION 'Invalid copy target' USING ERRCODE = '22023';
+  END IF;
+  SELECT COALESCE(jsonb_agg(to_jsonb(g)), '[]'::jsonb) INTO source_rows FROM (
+    SELECT q.subject_id, q.date, q.period, s.name AS subject_name, e.name AS exam_name, sum(q.target_questions)::bigint AS target
+    FROM public.question_plans q
+    LEFT JOIN public.subjects s ON s.id = q.subject_id AND s.user_id = p_source_user_id
+    LEFT JOIN public.exams e ON e.id = s.exam_id AND e.user_id = p_source_user_id
+    WHERE q.user_id = p_source_user_id AND q.archived_at IS NULL AND q.target_questions > 0
+      AND q.date >= week_start AND q.date < week_start + 7
+    GROUP BY q.subject_id, q.date, q.period, s.name, e.name
+  ) AS g;
+  IF jsonb_array_length(source_rows) = 0 THEN RAISE EXCEPTION 'QUESTION_COPY_EMPTY' USING ERRCODE = '22023'; END IF;
+  IF EXISTS (
+    SELECT 1 FROM jsonb_to_recordset(source_rows) AS x(date date, period text, subject_name text, exam_name text)
+    GROUP BY date, period, lower(regexp_replace(btrim(subject_name), '\s+', ' ', 'g')),
+      upper(regexp_replace(btrim(exam_name), '^(MEB[- ]|E-)', '', 'i')) HAVING count(*) > 1
+  ) THEN RAISE EXCEPTION 'QUESTION_COPY_SOURCE_AMBIGUOUS' USING ERRCODE = '22023'; END IF;
+  PERFORM pg_advisory_xact_lock(hashtextextended('question-week:' || p_target_user_id::text || ':' || week_start::text, 0));
+  FOR entry IN SELECT * FROM jsonb_to_recordset(source_rows) AS x(subject_id uuid, date date, period text, subject_name text, exam_name text, target bigint)
+    ORDER BY date, subject_id, period LOOP
+    SELECT array_agg(s.id ORDER BY s.id) INTO candidates FROM public.subjects s JOIN public.exams e ON e.id = s.exam_id
+      WHERE s.user_id = p_target_user_id AND e.user_id = p_target_user_id
+        AND lower(regexp_replace(btrim(s.name), '\s+', ' ', 'g')) = lower(regexp_replace(btrim(entry.subject_name), '\s+', ' ', 'g'))
+        AND upper(regexp_replace(btrim(e.name), '^(MEB[- ]|E-)', '', 'i')) = upper(regexp_replace(btrim(entry.exam_name), '^(MEB[- ]|E-)', '', 'i'));
+    IF COALESCE(cardinality(candidates), 0) <> 1 THEN
+      RAISE EXCEPTION 'QUESTION_COPY_SUBJECT_MAPPING' USING ERRCODE = '22023',
+        DETAIL = jsonb_build_object('subject', COALESCE(entry.subject_name, 'Ders kaldırıldı'), 'exam', COALESCE(entry.exam_name, 'Sınav kaldırıldı'))::text;
+    END IF;
+    IF entry.target NOT BETWEEN 1 AND 100000 THEN RAISE EXCEPTION 'Invalid copy question count' USING ERRCODE = '22023'; END IF;
+    target_subject := candidates[1];
+    IF EXISTS (SELECT 1 FROM public.question_plans WHERE user_id = p_target_user_id AND subject_id = target_subject
+      AND date = entry.date AND period = entry.period AND archived_at IS NULL AND target_questions > 0) THEN
+      skipped := skipped + 1;
+      CONTINUE;
+    END IF;
+    inserted := NULL;
+    INSERT INTO public.question_plans AS existing(user_id, subject_id, date, kind, period, target_questions)
+      VALUES (p_target_user_id, target_subject, entry.date, 'extra', entry.period, entry.target::integer)
+      ON CONFLICT (user_id, subject_id, date, period) WHERE kind = 'extra'
+      DO UPDATE SET target_questions = EXCLUDED.target_questions, archived_at = NULL
+        WHERE existing.archived_at IS NOT NULL OR existing.target_questions IS NULL
+      RETURNING id INTO inserted;
+    IF inserted IS NULL THEN skipped := skipped + 1; ELSE copied := copied + 1; END IF;
+  END LOOP;
+  RETURN jsonb_build_object('copied', copied, 'skipped', skipped);
+END;
+$$;
+REVOKE ALL ON FUNCTION public.copy_question_week(uuid, uuid, date) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.copy_question_week(uuid, uuid, date) TO authenticated;
+
 NOTIFY pgrst, 'reload schema';
 COMMIT;

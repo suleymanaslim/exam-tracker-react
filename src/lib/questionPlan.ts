@@ -7,6 +7,7 @@ export interface QuestionPlan {
   resource_id: string | null
   date: string
   period?: 'day' | 'week'
+  kind?: 'video' | 'extra'
   archived_at?: string | null
   target_questions: number | null
   subjects?: { name: string; exam_id: string } | null
