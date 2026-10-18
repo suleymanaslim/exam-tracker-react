@@ -2,7 +2,7 @@ import './Dashboard.css'
 import QuestionProgress from '../components/QuestionProgress'
 import { localDayKey, mondayOf } from '../lib/statsPeriod'
 import { DailyProgress, WeeklyProgress, DashboardSummary } from '../components/DashboardProgress'
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
@@ -17,6 +17,8 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import { findWeeklyPlans } from '../lib/weeklyPlanDates'
 import { actualProfileName, profileNameLabel } from '../lib/profileName'
+import { communityBoard } from '../lib/communityVisibility'
+import type { CommunityEntry } from '../lib/communityVisibility'
 import { defaultVocabularyText } from '../lib/defaultVocabulary'
 import { getAvailableDays, extractDayContent } from '../lib/vocabularyHelper'
 
@@ -113,8 +115,12 @@ export default function Dashboard() {
   const [selectedVocabDay, setSelectedVocabDay] = useState<number | ''>('')
 
   // Leaderboard & Günlük Mesaj
-  const [leaderboard, setLeaderboard] = useState<any[]>([])
+  const [leaderboard, setLeaderboard] = useState<CommunityEntry[]>([])
+  const [communityAccess, setCommunityAccess] = useState<{ viewer: string | null; show: boolean; share: boolean } | null>(null)
+  const communityVisible = communityAccess?.viewer === impersonatedUserId && communityAccess.show
+  const communitySharing = communityAccess?.viewer === impersonatedUserId && communityAccess.share
   const [dailyMessage, setDailyMessage] = useState('')
+  const dailyMessageDirty = useRef(false)
   const [isSavingMessage, setIsSavingMessage] = useState(false)
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null)
 
@@ -276,62 +282,60 @@ export default function Dashboard() {
         .lte('started_at', yestEnd.toISOString())
         .then(r => r.data && setYesterdaySessions(r.data))
 
-      // ── Leaderboard (Günün Özeti) ─────────────────────────────────
-      const todayStart = new Date()
-      todayStart.setHours(0, 0, 0, 0)
-      const todayEnd = new Date()
-      todayEnd.setHours(23, 59, 59, 999)
 
-      Promise.all([
-        supabase.from('profiles').select('id, display_name, email, daily_message'),
-        supabase.from('study_sessions').select('user_id, duration_minutes, subject_id, resource_id')
-          .gte('started_at', todayStart.toISOString())
-          .lte('started_at', todayEnd.toISOString()),
-        supabase.from('subjects').select('id, name'),
-        supabase.from('resources').select('id, name')
-      ]).then(([profRes, sessRes, subRes, resRes]) => {
-        if (profRes.data && sessRes.data) {
-          const profs = profRes.data
-          const sess = sessRes.data
-          const subs = subRes.data || []
-          const resrcs = resRes.data || []
-
-          const subMap = Object.fromEntries(subs.map(s => [s.id, s.name]))
-          const resMap = Object.fromEntries(resrcs.map(r => [r.id, r.name]))
-
-          const myProf = profs.find(p => p.id === targetUid)
-          if (myProf && myProf.daily_message) setDailyMessage(myProf.daily_message)
-
-          const userGroups: Record<string, any> = {}
-          profs.forEach(p => {
-            userGroups[p.id] = { 
-              user_id: p.id, 
-              name: actualProfileName(p.display_name, p.id === user.id ? metadataName : null) || profileNameLabel(null, p.email), 
-              message: p.daily_message || '', 
-              total: 0, 
-              details: {} 
-            }
-          })
-
-          sess.forEach(s => {
-            if (!userGroups[s.user_id]) return
-            userGroups[s.user_id].total += s.duration_minutes
-            const subName = s.subject_id ? subMap[s.subject_id] : 'Bilinmeyen Ders'
-            const resName = s.resource_id ? resMap[s.resource_id] : 'Genel'
-            const key = `${subName} — ${resName}`
-            if (!userGroups[s.user_id].details[key]) userGroups[s.user_id].details[key] = 0
-            userGroups[s.user_id].details[key] += s.duration_minutes
-          })
-
-          const board = Object.values(userGroups)
-            .filter(u => u.total > 0 || u.message)
-            .sort((a, b) => b.total - a.total)
-          
-          setLeaderboard(board)
-        }
-      })
     })
   }, [impersonatedUserId, setIsAdmin])
+
+  useEffect(() => {
+    let cancelled = false
+    let requestId = 0
+    dailyMessageDirty.current = false
+    const refresh = async () => {
+      const request = ++requestId
+      try {
+        const { data: { user }, error: authError } = await supabase.auth.getUser()
+        if (authError) throw authError
+        if (!user || cancelled) return
+        const start = new Date()
+        start.setHours(0, 0, 0, 0)
+        const end = new Date(start)
+        end.setDate(end.getDate() + 1)
+        const { data, error } = await supabase.rpc('get_dashboard_community', {
+          p_viewer_id: impersonatedUserId || user.id, p_start: start.toISOString(), p_end: end.toISOString(),
+        })
+        if (error) throw error
+        const board = communityBoard(data, user.id, actualProfileName(user.user_metadata?.display_name, user.user_metadata?.full_name, user.user_metadata?.name))
+        if (cancelled || request !== requestId) return
+        setCommunityAccess({ viewer: impersonatedUserId, show: board.show_widget, share: board.share_statistics })
+        setLeaderboard(board.entries)
+        if (!dailyMessageDirty.current) setDailyMessage(board.daily_message)
+      } catch (error) {
+        if (cancelled || request !== requestId) return
+        // Do not fall back to unfiltered statistics when permissions/settings fail.
+        setCommunityAccess(null); setLeaderboard([])
+        console.error('Community settings could not be loaded:', error)
+      }
+    }
+    const onFocus = () => { void refresh() }
+    const onVisibility = () => { if (document.visibilityState === 'visible') void refresh() }
+    const onStorage = (event: StorageEvent) => { if (event.key === 'examtracker-community-updated') void refresh() }
+    void refresh()
+    const interval = window.setInterval(() => { if (document.visibilityState === 'visible') void refresh() }, 60000)
+    window.addEventListener('focus', onFocus)
+    window.addEventListener('community-visibility-updated', onFocus)
+    window.addEventListener('study-session-saved', onFocus)
+    window.addEventListener('storage', onStorage)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+      window.removeEventListener('focus', onFocus)
+      window.removeEventListener('community-visibility-updated', onFocus)
+      window.removeEventListener('study-session-saved', onFocus)
+      window.removeEventListener('storage', onStorage)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [impersonatedUserId])
 
   // Sınav geri sayımını localstorage'a kaydet
   useEffect(() => {
@@ -550,10 +554,13 @@ export default function Dashboard() {
   }
 
   const saveDailyMessage = async () => {
+    if (!communityVisible || !communitySharing) return
     setIsSavingMessage(true)
     const targetUid = impersonatedUserId || (await supabase.auth.getUser()).data.user?.id
     if (targetUid) {
-      await supabase.from('profiles').update({ daily_message: dailyMessage }).eq('id', targetUid)
+      const { error } = await supabase.from('profiles').update({ daily_message: dailyMessage }).eq('id', targetUid).select('id').single()
+      if (error) { setIsSavingMessage(false); void Swal.fire('Mesaj kaydedilemedi', 'Lütfen tekrar dene.', 'error'); return }
+      dailyMessageDirty.current = false
       setLeaderboard(prev => prev.map(p => p.user_id === targetUid ? { ...p, message: dailyMessage } : p))
     }
     setIsSavingMessage(false)
@@ -628,11 +635,11 @@ export default function Dashboard() {
         <section className="dash-panel"><div className="dash-section-head"><h3>Ders dağılımı</h3><span className="dash-muted">Bu hafta</span></div><div className="dash-subjects">{subjectBreakdown.length === 0 ? <p className="dash-empty-note">İlk çalışmandan sonra dağılımın burada görünecek.</p> : subjectBreakdown.map(s => <div key={s.subId}><div className="dash-subject-label"><span>{s.name}</span><b>{duration(s.mins)}</b></div><div className="dash-track"><span style={{ width: `${s.mins / Math.max(1, subjectBreakdown[0].mins) * 100}%` }} /></div></div>)}</div></section>
         <section className="dash-panel"><div className="dash-section-head"><h3>Sınavlara ayırdığın zaman</h3></div><div className="dash-exams">{exams.length === 0 ? <p className="dash-empty-note">Henüz sınav eklenmemiş.</p> : exams.map(ex => { const Icon = examMeta[ex.name]?.icon || Target; const mins = weekSessions.filter(s => subjectToExamMap[s.subject_id] === ex.id).reduce((sum, s) => sum + s.duration_minutes, 0); return <div key={ex.id} className="dash-exam"><span className="dash-exam-icon"><Icon size={18} /></span><div><span>{ex.name}</span><strong>{duration(mins)}</strong></div></div> })}</div></section>
       </div>
-      <div className="dash-overview-grid">
-        <section className="dash-panel"><div className="dash-section-head"><div><h3>Birlikte ilerliyoruz</h3><p className="dash-muted">Günün çalışma sıralaması</p></div><Trophy size={18} className="dash-muted" /></div>
+      <div className={`dash-overview-grid ${communityVisible ? '' : 'dash-overview-single'}`}>
+        {communityVisible && <section className="dash-panel"><div className="dash-section-head"><div><h3>Birlikte ilerliyoruz</h3><p className="dash-muted">Günün çalışma sıralaması</p></div><Trophy size={18} className="dash-muted" /></div>
           <div className="dash-community">{leaderboard.length === 0 ? <p className="dash-empty-note">Bugünün ilk çalışması henüz kaydedilmedi.</p> : leaderboard.map((u, i) => <div key={u.user_id}><button className="dash-community-row" aria-expanded={expandedUserId === u.user_id} onClick={() => setExpandedUserId(expandedUserId === u.user_id ? null : u.user_id)}><span className="dash-rank">{i + 1}</span><span className="dash-row-copy"><strong>{u.name}</strong>{u.message && <span>{u.message}</span>}</span><b>{duration(u.total)}</b><ChevronDown size={14} /></button>{expandedUserId === u.user_id && <div className="dash-user-details">{Object.entries(u.details).map(([k, mins]) => <div key={k}><span>{k}</span><b>{duration(Number(mins))}</b></div>)}</div>}</div>)}</div>
-          <form className="dash-message" onSubmit={e => { e.preventDefault(); saveDailyMessage() }}><input aria-label="Günlük durum mesajı" placeholder="Bugün için bir not bırak…" value={dailyMessage} onChange={e => setDailyMessage(e.target.value)} /><button className="dash-secondary" disabled={isSavingMessage} aria-label="Durum mesajını kaydet"><Check size={16} /></button></form>
-        </section>
+          {communitySharing && <form className="dash-message" onSubmit={e => { e.preventDefault(); saveDailyMessage() }}><input aria-label="Günlük durum mesajı" placeholder="Bugün için bir not bırak…" value={dailyMessage} onChange={e => { dailyMessageDirty.current = true; setDailyMessage(e.target.value) }} /><button className="dash-secondary" disabled={isSavingMessage} aria-label="Durum mesajını kaydet"><Check size={16} /></button></form>}
+        </section>}
         <section className="dash-panel"><div className="dash-section-head"><div><h3>Dünü hatırla</h3><p className="dash-muted">Kısa bir tekrar, kalıcı bir adım.</p></div><RotateCcw size={18} className="dash-muted" /></div><div className="dash-review">{yesterdayReview.length === 0 ? <p className="dash-empty-note">Dün için çalışma kaydı yok.</p> : yesterdayReview.map((r, i) => <button className="dash-plan-row" key={i} onClick={() => startReview(r.subjectId, r.resourceId)}><span className="dash-row-copy"><strong>{getSubjectName(r.subjectId) || 'Çalışma'}</strong><span>{getResourceName(r.resourceId)}</span></span><b className="dash-muted">{duration(r.mins)}</b><span className="dash-play"><Play size={14} /></span></button>)}</div></section>
       </div>
 

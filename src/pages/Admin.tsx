@@ -3,10 +3,12 @@ import { supabase } from '../lib/supabase'
 import { useAdminStore } from '../lib/adminStore'
 import { createClient, FunctionsHttpError } from '@supabase/supabase-js'
 import Swal from 'sweetalert2'
-import { Users, UserPlus, LogIn, XCircle, ShieldCheck, KeyRound, X } from 'lucide-react'
+import { Users, UserPlus, LogIn, XCircle, ShieldCheck, KeyRound, Eye, X } from 'lucide-react'
 import './Admin.css'
 import { profileNameLabel } from '../lib/profileName'
 import { useNavigate } from 'react-router-dom'
+import { communityPreferences, communitySettingsError } from '../lib/communityVisibility'
+import type { CommunityPreferences } from '../lib/communityVisibility'
 
 // Yeni kullanıcı oluşturmak için session bozmayan secondary client
 // Bu client sadece create işlemi için kullanılır.
@@ -32,6 +34,17 @@ export default function Admin() {
   const [confirmedPassword, setConfirmedPassword] = useState('')
   const [passwordError, setPasswordError] = useState('')
   const [changingPassword, setChangingPassword] = useState(false)
+  const [visibilityPreferences, setVisibilityPreferences] = useState<Record<string, CommunityPreferences>>({})
+  const [visibilityReady, setVisibilityReady] = useState(false)
+  const [visibilityLoadError, setVisibilityLoadError] = useState('')
+  const visibilityDialog = useRef<HTMLDialogElement>(null)
+  const visibilityTrigger = useRef<HTMLButtonElement | null>(null)
+  const visibilityBusy = useRef(false)
+  const [visibilityUser, setVisibilityUser] = useState<Profile | null>(null)
+  const [showCommunity, setShowCommunity] = useState(true)
+  const [shareStatistics, setShareStatistics] = useState(true)
+  const [visibilityError, setVisibilityError] = useState('')
+  const [savingVisibility, setSavingVisibility] = useState(false)
 
   // New user form
   const [newEmail, setNewEmail] = useState('')
@@ -47,11 +60,61 @@ export default function Admin() {
     loadProfiles()
   }, [isAdmin, navigate])
 
-  const loadProfiles = async () => {
+  async function loadProfiles() {
     setLoading(true)
-    const { data } = await supabase.from('profiles').select('*').order('role', { ascending: false }).order('display_name')
-    if (data) setProfiles(data)
-    setLoading(false)
+    setVisibilityReady(false); setVisibilityLoadError('')
+    try {
+      const [profileResult, preferences] = await Promise.all([
+        supabase.from('profiles').select('*').order('role', { ascending: false }).order('display_name'),
+        supabase.from('dashboard_community_preferences').select('user_id,show_widget,share_statistics'),
+      ])
+      if (profileResult.error) throw profileResult.error
+      if (profileResult.data) setProfiles(profileResult.data)
+      if (preferences.error) throw preferences.error
+      const rows = (preferences.data || []).map(communityPreferences)
+      setVisibilityPreferences(Object.fromEntries(rows.map(row => [row.user_id, row])))
+      setVisibilityReady(true)
+    } catch (error) { setVisibilityLoadError(communitySettingsError(error)) }
+    finally { setLoading(false) }
+  }
+
+  const openVisibilityDialog = (profile: Profile, trigger: HTMLButtonElement) => {
+    if (!visibilityReady) return
+    const settings = visibilityPreferences[profile.id]
+    visibilityTrigger.current = trigger
+    setVisibilityUser(profile); setShowCommunity(settings?.show_widget ?? true)
+    setShareStatistics(settings?.share_statistics ?? true); setVisibilityError('')
+    visibilityDialog.current?.showModal()
+  }
+  const closeVisibilityDialog = () => {
+    if (visibilityBusy.current) return
+    visibilityDialog.current?.close()
+    setVisibilityUser(null); setVisibilityError('')
+    visibilityTrigger.current?.focus()
+  }
+  const saveVisibility = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!visibilityUser || visibilityBusy.current) return
+    const userId = visibilityUser.id
+    visibilityBusy.current = true; setSavingVisibility(true); setVisibilityError('')
+    let success = false
+    try {
+      const { data, error } = await supabase.rpc('set_dashboard_community_preferences', {
+        p_user_id: userId, p_show_widget: showCommunity, p_share_statistics: shareStatistics,
+      })
+      if (error) throw error
+      const settings = communityPreferences(data)
+      if (settings.user_id !== userId || settings.show_widget !== showCommunity || settings.share_statistics !== shareStatistics) throw new Error('Save not confirmed')
+      setVisibilityPreferences(previous => ({ ...previous, [userId]: settings }))
+      window.dispatchEvent(new Event('community-visibility-updated'))
+      try { localStorage.setItem('examtracker-community-updated', String(Date.now())) } catch { /* Other tabs refresh on focus. */ }
+      success = true
+    } catch (error) { setVisibilityError(communitySettingsError(error)) }
+    finally { visibilityBusy.current = false; setSavingVisibility(false) }
+    if (success) {
+      closeVisibilityDialog()
+      void Swal.fire({ icon: 'success', title: 'Görünürlük güncellendi', toast: true, position: 'top-end', showConfirmButton: false, timer: 2000 })
+    }
   }
 
   const handleCreateUser = async (e: React.FormEvent) => {
@@ -175,6 +238,8 @@ export default function Admin() {
         )}
       </div>
 
+      {visibilityLoadError && <div className="admin-visibility-notice" role="alert"><span>{visibilityLoadError}</span><button type="button" onClick={() => void loadProfiles()} disabled={loading}>Yeniden dene</button></div>}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Sol Panel: Kullanıcı Ekleme */}
         <div className="lg:col-span-1 space-y-4">
@@ -229,8 +294,10 @@ export default function Admin() {
                         {isImpersonating && <span className="bg-red-100 text-red-600 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase">Şu anki</span>}
                       </div>
                       <p className="text-[11px] text-[#64748b]">{p.email}</p>
+                      {visibilityReady && <p className="admin-visibility-summary">{visibilityPreferences[p.id]?.show_widget === false ? 'Bölüm gizli' : 'Bölüm açık'} · {visibilityPreferences[p.id]?.share_statistics === false ? 'Sıralamada gizli' : 'Sıralamada görünüyor'}</p>}
                     </div>
                     <div className="admin-user-actions">
+                    <button type="button" disabled={!visibilityReady} onClick={event => openVisibilityDialog(p, event.currentTarget)} className="admin-password-button" aria-label={`${profileNameLabel(p.display_name, p.email)} için görünürlük ayarları`}><Eye size={15} /> Görünürlük</button>
                     {p.role === 'user' && <button onClick={event => openPasswordDialog(p, event.currentTarget)} className="admin-password-button" aria-label={`${p.display_name || p.email || 'Kullanıcı'} için şifre değiştir`}><KeyRound size={15} /> Şifre değiştir</button>}
                     {p.role !== 'admin' && !isImpersonating && (
                       <button onClick={() => handleImpersonate(p.id)} className="h-8 px-3 rounded-lg bg-[#f1f5f9] text-[#0f172a] text-[11px] font-bold hover:bg-[#e2e8f0] flex items-center gap-1.5 transition-all">
@@ -245,6 +312,15 @@ export default function Admin() {
           </div>
         </div>
       </div>
+      <dialog ref={visibilityDialog} className="admin-password-dialog admin-visibility-dialog" aria-labelledby="admin-visibility-title" onCancel={event => { event.preventDefault(); closeVisibilityDialog() }} onClick={event => { if (event.target === event.currentTarget) closeVisibilityDialog() }}>
+        <div className="admin-password-heading"><div><h2 id="admin-visibility-title">Birlikte ilerliyoruz</h2><p>{profileNameLabel(visibilityUser?.display_name, visibilityUser?.email)}</p></div><button type="button" onClick={closeVisibilityDialog} disabled={savingVisibility} aria-label="Kapat"><X size={19} /></button></div>
+        <form onSubmit={saveVisibility} aria-busy={savingVisibility}>
+          <label className="admin-visibility-option"><input autoFocus type="checkbox" checked={showCommunity} onChange={event => setShowCommunity(event.target.checked)} disabled={savingVisibility} /><span><strong>Bu kullanıcıya bölümü göster</strong><small>Kapalıysa kendi dashboard’unda bu bölümü görmez.</small></span></label>
+          <label className="admin-visibility-option"><input type="checkbox" checked={shareStatistics} onChange={event => setShareStatistics(event.target.checked)} disabled={savingVisibility} /><span><strong>Bu kullanıcıyı sıralamada göster</strong><small>Kapalıysa adı, mesajı ve çalışma istatistikleri herkesin listesinden gizlenir.</small></span></label>
+          {visibilityError && <p className="admin-password-error" role="alert">{visibilityError}</p>}
+          <div className="admin-password-actions"><button type="button" onClick={closeVisibilityDialog} disabled={savingVisibility}>İptal</button><button type="submit" disabled={savingVisibility}>{savingVisibility ? 'Kaydediliyor…' : 'Kaydet'}</button></div>
+        </form>
+      </dialog>
       <dialog ref={passwordDialog} className="admin-password-dialog" aria-labelledby="admin-password-title" onCancel={event => { event.preventDefault(); closePasswordDialog() }} onClick={event => { if (event.target === event.currentTarget) closePasswordDialog() }}>
         <div className="admin-password-heading"><div><h2 id="admin-password-title">Şifre değiştir</h2><p>{profileNameLabel(passwordUser?.display_name, passwordUser?.email)} · {passwordUser?.email}</p></div><button type="button" onClick={closePasswordDialog} disabled={changingPassword} aria-label="Kapat"><X size={19} /></button></div>
         <form onSubmit={changeUserPassword} aria-busy={changingPassword}>
