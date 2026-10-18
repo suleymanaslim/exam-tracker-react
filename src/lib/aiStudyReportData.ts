@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AIReportData } from './aiStudyReport.ts'
+import { fetchSharedTopics } from './sharedTopicsData.ts'
 
 export const AI_REPORT_TABLES = {
   exams: 'exams', subjects: 'subjects', resources: 'resources', sessions: 'study_sessions',
@@ -35,5 +36,20 @@ export async function readOwnedReportRows(client: SupabaseClient, table: string,
 
 export async function fetchAIReportData(client: SupabaseClient, userId: string): Promise<AIReportData> {
   const entries = await Promise.all(Object.entries(AI_REPORT_TABLES).map(async ([key, table]) => [key, await readOwnedReportRows(client, table, userId)]))
-  return Object.fromEntries(entries) as AIReportData
+  const report = Object.fromEntries(entries) as AIReportData
+  try {
+    const shared = await fetchSharedTopics(client, userId)
+    report.topics.push(...shared.topics.filter(topic => !topic.archived_at).map(topic => ({
+      id: `shared:${topic.id}`, subject_id: `shared:${topic.subject_id}`,
+      subject_name: shared.subjects.find(subject => subject.id === topic.subject_id)?.name || 'AGS dersi',
+      title: topic.title, source: 'shared_ags' as const,
+      is_completed: shared.progress.find(progress => progress.topic_id === topic.id)?.is_completed === true,
+    })))
+    report.sharedTopicsAvailability = 'available'
+  } catch (error) {
+    const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
+    if (!['42P01', '42703', 'PGRST204', 'PGRST205'].includes(code)) throw new Error('Ortak AGS konu verileri okunamadı. Eksik AI raporu oluşturulmadı; tekrar dene.')
+    report.sharedTopicsAvailability = 'not_installed'
+  }
+  return report
 }

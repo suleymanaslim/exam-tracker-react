@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAdminStore } from '../lib/adminStore'
 import { createClient, FunctionsHttpError } from '@supabase/supabase-js'
 import Swal from 'sweetalert2'
-import { Users, UserPlus, LogIn, XCircle, ShieldCheck, KeyRound, Eye, X } from 'lucide-react'
+import { Users, UserPlus, LogIn, XCircle, ShieldCheck, KeyRound, Eye, X, CalendarDays } from 'lucide-react'
 import './Admin.css'
 import { profileNameLabel } from '../lib/profileName'
 import { useNavigate } from 'react-router-dom'
@@ -231,6 +231,7 @@ export default function Admin() {
           </h1>
           <p className="text-[13px] text-[#64748b] mt-1">Kullanıcıları yönet, hesaplarına geçiş yap (impersonate).</p>
         </div>
+        <button type="button" onClick={() => navigate('/monthly-plan')} className="inline-flex items-center gap-2 rounded-xl border border-[#dce5ef] bg-white px-4 py-2 text-sm font-semibold text-[#4269a8]"><CalendarDays size={17} /> Aylık Plan</button>
         {impersonatedUserId && (
           <button onClick={stopImpersonating} className="flex items-center gap-2 bg-red-100 text-red-600 px-4 py-2 rounded-xl font-bold text-sm hover:bg-red-200 transition-all self-start md:self-auto">
             <XCircle className="h-4 w-4" /> Kendi Hesabıma Dön

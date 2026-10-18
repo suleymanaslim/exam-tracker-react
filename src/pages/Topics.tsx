@@ -1,4 +1,5 @@
 import './SuitePages.css'
+import SharedAgsTopics from '../components/SharedAgsTopics'
 import { useEffect, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import Swal from 'sweetalert2'
@@ -22,7 +23,7 @@ export default function Topics() {
   const [topics, setTopics]   = useState<Topic[]>([])
   const [openExam, setOpenExam]       = useState<string | null>(null)
   const [openSubject, setOpenSubject] = useState<string | null>(null)
-  const { impersonatedUserId } = useAdminStore()
+  const { impersonatedUserId, isAdmin } = useAdminStore()
 
   // Yeni konu ekleme
   const [addingTo, setAddingTo]   = useState<string | null>(null) // subject_id
@@ -154,6 +155,8 @@ export default function Topics() {
 
       {/* Exam accordion list */}
       <div className="flex-1 min-h-0 overflow-y-auto space-y-3">
+        {userId && <SharedAgsTopics key={userId} userId={userId} canManage={isAdmin && !impersonatedUserId} />}
+        <h2 className="text-sm font-semibold text-[#62748b] pt-2">Kişisel konu listelerin</h2>
         {exams.length === 0 && (
           <div className="flex items-center justify-center h-full text-[#718096] text-[15px]">
             Henüz sınav eklenmemiş. Ayarlar sayfasından başlayabilirsin.

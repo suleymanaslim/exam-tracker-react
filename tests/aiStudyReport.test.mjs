@@ -94,6 +94,14 @@ test('empty data and incomplete current week are valid without invented measurem
   assert.equal(report.ozetler.tum_gecmis.dogru, null)
   assert.doesNotThrow(() => JSON.stringify(report))
 })
+test('AI export includes the selected user shared AGS completion with its subject name and source', () => {
+  const source=data()
+  source.topics.push({id:'shared:t',subject_id:'shared:s',subject_name:'Tarih',title:'Ortak konu',is_completed:true,source:'shared_ags'})
+  source.sharedTopicsAvailability='available'
+  const report=buildAIStudyReport(source,now)
+  assert.deepEqual(report.ayrintilar.konular.at(-1),{ders:'Tarih',konu:'Ortak konu',tamamlandi:true,kaynak:'shared_ags'})
+  assert.match(report.veri_aciklamalari.ortak_ags_konulari,/dahil/)
+})
 test('future daily question goals are included in the current full-week target and early work retains its subject', () => {
   const source = data()
   source.questionPlans.push({ id: 'later-today', subject_id: 'math', date: '2026-10-18', target_questions: 20 })

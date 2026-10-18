@@ -6,7 +6,7 @@ import '@fontsource/source-sans-3/latin-600.css'
 import { Link, Outlet, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useState, useEffect, useRef } from 'react'
 import {
-  LayoutDashboard, Calendar, Timer, History,
+  LayoutDashboard, Calendar, CalendarDays, Timer, History,
   BarChart3, Settings, LogOut,
   BookMarked, Award, PlayCircle, BookOpenCheck
 } from 'lucide-react'
@@ -99,6 +99,7 @@ export default function AppLayout() {
         <nav className="app-nav" aria-label="Ana gezinme">
           <p className="app-nav-caption app-nav-label">ÇALIŞMA ALANI</p>
           {navItems.map(item => <Link key={item.href} to={item.href} title={item.label} aria-label={item.label} aria-current={location.pathname === item.href ? 'page' : undefined} className={`app-nav-link ${location.pathname === item.href ? 'is-active' : ''}`}><item.icon size={19} /><span className="app-nav-label">{item.label}</span></Link>)}
+          {isAdmin && <Link to="/monthly-plan" title="Aylık Plan" aria-label="Aylık Plan" aria-current={location.pathname === '/monthly-plan' ? 'page' : undefined} className={`app-nav-link app-admin-link ${location.pathname === '/monthly-plan' ? 'is-active' : ''}`}><CalendarDays size={19} /><span className="app-nav-label">Aylık Plan</span></Link>}
           {isAdmin && <Link to="/admin" title="Admin Paneli" aria-label="Admin Paneli" aria-current={location.pathname === '/admin' ? 'page' : undefined} className={`app-nav-link app-admin-link ${location.pathname === '/admin' ? 'is-active' : ''}`}><ShieldAlert size={19} /><span className="app-nav-label">Admin Paneli</span></Link>}
         </nav>
         <div className="app-sidebar-footer"><button onClick={handleLogout} title="Çıkış Yap" aria-label="Çıkış Yap" className="app-nav-link app-logout"><LogOut size={19} /><span className="app-nav-label">Çıkış Yap</span></button></div>

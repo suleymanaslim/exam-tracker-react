@@ -12,6 +12,7 @@ import History from './pages/History'
 import Stats from './pages/Stats'
 import Settings from './pages/Settings'
 import Topics from './pages/Topics'
+import MonthlyPlan from './pages/MonthlyPlan'
 import Admin from './pages/Admin'
 import Results from './pages/Results'
 import VideoPlan from './pages/VideoPlan'
@@ -67,6 +68,7 @@ function App() {
           <Route path="videos"    element={<VideoPlan />} />
           <Route path="questions" element={<QuestionPlan />} />
           <Route path="topics"    element={<Topics />} />
+          <Route path="monthly-plan" element={<MonthlyPlan />} />
           <Route path="settings"  element={<Settings />} />
           <Route path="admin"     element={<Admin />} />
         </Route>
