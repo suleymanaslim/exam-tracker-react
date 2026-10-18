@@ -35,6 +35,19 @@ export function monthlyPayload(topics: MonthlyTopic[], keys: string[], month: st
 export function monthlyTargetKey(target: MonthlyTarget) {
   return target.shared_topic_id ? `shared:${target.shared_topic_id}` : `personal:${target.personal_topic_id}`
 }
+export function groupMonthlyTargets(topics: MonthlyTopic[], targets: MonthlyTarget[], month: string) {
+  const lookup = new Map(topics.map(topic => [topic.key, topic]))
+  const groups = new Map<string, { key: string; subject: string; exam: string; items: { target: MonthlyTarget; topic?: MonthlyTopic }[] }>()
+  for (const target of targets) {
+    if (target.target_month.slice(0, 7) !== month) continue
+    const topic = lookup.get(monthlyTargetKey(target))
+    const key = topic?.subjectKey || 'unavailable'
+    const group = groups.get(key) || { key, subject: topic?.subject || 'Kaldırılan konular', exam: topic?.exam || '', items: [] }
+    group.items.push({ target, topic }); groups.set(key, group)
+  }
+  return [...groups.values()].sort((a, b) => a.exam.localeCompare(b.exam, 'tr') || a.subject.localeCompare(b.subject, 'tr') || a.key.localeCompare(b.key))
+    .map(group => ({ ...group, items: group.items.sort((a, b) => (a.topic?.title || '').localeCompare(b.topic?.title || '', 'tr', { numeric: true }) || a.target.id.localeCompare(b.target.id)) }))
+}
 export function sharedTopicsError(error: { code?: string } | unknown) {
   const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
   if (code === 'AGS_SOURCE_SETUP') return 'AGS liste seçimi için Supabase’de ags_topic_source.sql dosyasını çalıştırın.'

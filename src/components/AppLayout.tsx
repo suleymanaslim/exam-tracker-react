@@ -14,6 +14,7 @@ import { supabase } from '../lib/supabase'
 import { useTimerStore } from '../lib/timerStore'
 import { useAdminStore } from '../lib/adminStore'
 import { ShieldAlert } from 'lucide-react'
+import { useMonthlyPlanAccess } from '../lib/useMonthlyPlanAccess'
 
 const navItems = [
   { href: '/',          label: 'Dashboard',    icon: LayoutDashboard },
@@ -53,6 +54,8 @@ export default function AppLayout() {
   const { isAdmin, impersonatedUserId, setIsAdmin, setImpersonatedUserId } = useAdminStore()
 
   const [contextReady, setContextReady] = useState(false)
+  const { plans: monthlyPlans } = useMonthlyPlanAccess()
+  const canViewMonthlyPlan = isAdmin || monthlyPlans.length > 0
 
   useEffect(() => {
     let cancelled = false
@@ -99,7 +102,7 @@ export default function AppLayout() {
         <nav className="app-nav" aria-label="Ana gezinme">
           <p className="app-nav-caption app-nav-label">ÇALIŞMA ALANI</p>
           {navItems.map(item => <Link key={item.href} to={item.href} title={item.label} aria-label={item.label} aria-current={location.pathname === item.href ? 'page' : undefined} className={`app-nav-link ${location.pathname === item.href ? 'is-active' : ''}`}><item.icon size={19} /><span className="app-nav-label">{item.label}</span></Link>)}
-          {isAdmin && <Link to="/monthly-plan" title="Aylık Plan" aria-label="Aylık Plan" aria-current={location.pathname === '/monthly-plan' ? 'page' : undefined} className={`app-nav-link app-admin-link ${location.pathname === '/monthly-plan' ? 'is-active' : ''}`}><CalendarDays size={19} /><span className="app-nav-label">Aylık Plan</span></Link>}
+          {canViewMonthlyPlan && <Link to="/monthly-plan" title="Aylık Plan" aria-label="Aylık Plan" aria-current={location.pathname === '/monthly-plan' ? 'page' : undefined} className={`app-nav-link ${location.pathname === '/monthly-plan' ? 'is-active' : ''}`}><CalendarDays size={19} /><span className="app-nav-label">Aylık Plan</span></Link>}
           {isAdmin && <Link to="/admin" title="Admin Paneli" aria-label="Admin Paneli" aria-current={location.pathname === '/admin' ? 'page' : undefined} className={`app-nav-link app-admin-link ${location.pathname === '/admin' ? 'is-active' : ''}`}><ShieldAlert size={19} /><span className="app-nav-label">Admin Paneli</span></Link>}
         </nav>
         <div className="app-sidebar-footer"><button onClick={handleLogout} title="Çıkış Yap" aria-label="Çıkış Yap" className="app-nav-link app-logout"><LogOut size={19} /><span className="app-nav-label">Çıkış Yap</span></button></div>
@@ -158,6 +161,7 @@ export default function AppLayout() {
             </Link>
           )
         })}
+        {!isAdmin && monthlyPlans.length > 0 && <Link to="/monthly-plan" className={`flex flex-col items-center justify-center gap-1 px-1 rounded-xl transition-all min-w-0 flex-1 h-12 ${location.pathname === '/monthly-plan' ? 'text-[#4269a8] bg-[#edf2f8]' : 'text-[#617187]'}`}><CalendarDays className="h-5 w-5 shrink-0" /><span className="text-[10px] font-semibold leading-none whitespace-nowrap">Aylık Plan</span></Link>}
         {isAdmin && (
           <Link
             to="/admin"

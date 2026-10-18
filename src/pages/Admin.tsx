@@ -9,6 +9,7 @@ import { profileNameLabel } from '../lib/profileName'
 import { useNavigate } from 'react-router-dom'
 import { communityPreferences, communitySettingsError } from '../lib/communityVisibility'
 import type { CommunityPreferences } from '../lib/communityVisibility'
+import MonthlyPlanSharing from '../components/MonthlyPlanSharing'
 
 // Yeni kullanıcı oluşturmak için session bozmayan secondary client
 // Bu client sadece create işlemi için kullanılır.
@@ -269,6 +270,7 @@ export default function Admin() {
               </button>
             </form>
           </div>
+          <MonthlyPlanSharing profiles={profiles} />
         </div>
 
         {/* Sağ Panel: Kullanıcı Listesi */}
