@@ -22,7 +22,7 @@ type ExamMode = 'countdown' | 'stopwatch'
 
 interface ActiveMockExam {
   sessionId: string
-  subjectId: string
+  subjectId: string | null
   mode: ExamMode
   examId: string
   examName: string
@@ -36,7 +36,7 @@ interface ActiveMockExam {
 
 const STORAGE_PREFIX = 'studytracker-active-mock-exam:'
 
-function readActiveMockExam(value: unknown, fallbackSubjectId: string): ActiveMockExam | null {
+function readActiveMockExam(value: unknown, fallbackSubjectId: string | null): ActiveMockExam | null {
   if (!value || typeof value !== 'object') return null
   const item = value as Partial<ActiveMockExam>
   if (typeof item.examId !== 'string'
@@ -149,7 +149,7 @@ export default function TimedMockExam() {
         } else {
           const firstExam = availableExams[0]
           setSelectedExamId(firstExam?.id || '')
-          setSelectedSubjectId(availableSubjects.find(subject => subject.exam_id === firstExam?.id)?.id || '')
+          setSelectedSubjectId('')
         }
       } catch {
         localStorage.removeItem(STORAGE_PREFIX + targetUserId)
@@ -196,12 +196,12 @@ export default function TimedMockExam() {
     const elapsedMinutes = Math.round((elapsedMilliseconds / 60_000) * 1_000_000) / 1_000_000
 
     try {
-      if (!userId || !exam.subjectId) throw new Error('Bu deneme için çalışma kaydına bağlanacak ders bulunamadı.')
+      if (!userId) throw new Error('Kullanıcı oturumu bulunamadı. Lütfen tekrar giriş yap.')
       if (elapsedMinutes > 0) {
         const { error } = await supabase.from('study_sessions').upsert({
           id: exam.sessionId,
           user_id: userId,
-          subject_id: exam.subjectId,
+          subject_id: exam.subjectId || null,
           resource_id: null,
           session_type: 'mock_exam',
           started_at: new Date(exam.startedAt).toISOString(),
@@ -244,8 +244,8 @@ export default function TimedMockExam() {
       void Swal.fire({ icon: 'warning', title: 'Sınav seç', text: 'Denemeye başlamadan önce bir sınav seçmelisin.' })
       return
     }
-    if (!selectedSubjectId || !subjects.some(subject => subject.id === selectedSubjectId && subject.exam_id === selectedExam.id)) {
-      void Swal.fire({ icon: 'warning', title: 'Ders seç', text: 'Deneme süresini çalışma geçmişine kaydetmek için bu sınava ait bir ders seçmelisin.' })
+    if (selectedSubjectId && !subjects.some(subject => subject.id === selectedSubjectId && subject.exam_id === selectedExam.id)) {
+      void Swal.fire({ icon: 'warning', title: 'Ders seçimi geçersiz', text: 'Seçtiğin ders bu sınava ait değil.' })
       return
     }
 
@@ -259,7 +259,7 @@ export default function TimedMockExam() {
     const startedAt = Date.now()
     const nextExam: ActiveMockExam = {
       sessionId: crypto.randomUUID(),
-      subjectId: selectedSubjectId,
+      subjectId: selectedSubjectId || null,
       mode,
       examId: selectedExam.id,
       examName: selectedExam.name,
@@ -420,12 +420,12 @@ export default function TimedMockExam() {
                 </select>
               </label>
               <label className="flex flex-col gap-2 text-sm font-semibold text-[#526a87]">
-                Çalışma kaydının dersi
+                Ders (isteğe bağlı)
                 <select value={selectedSubjectId} onChange={event => setSelectedSubjectId(event.target.value)} disabled={!matchingSubjects.length} className="min-h-11 rounded-xl border border-[#dce5f0] bg-white px-3 font-medium text-[#24354a] outline-none focus:border-[#4269a8] focus:ring-2 focus:ring-[#4269a8]/15 disabled:bg-[#f8fafc]">
                   <option value="">Ders seç</option>
                   {matchingSubjects.map(subject => <option key={subject.id} value={subject.id}>{subject.name}</option>)}
                 </select>
-                <span className="text-xs font-normal text-[#8190a3]">{matchingSubjects.length ? 'Denemede geçirilen süre bu dersin çalışma geçmişine eklenecek.' : 'Bu sınav için önce Ayarlar bölümünden bir ders eklemelisin.'}</span>
+                <span className="text-xs font-normal text-[#8190a3]">{matchingSubjects.length ? 'Ders seçersen süre o dersle ilişkilendirilir; boş bırakırsan deneme süresi yalnızca genel çalışma geçmişine kaydedilir.' : 'Ders seçmeden de devam edebilir, süreyi genel çalışma geçmişine kaydedebilirsin.'}</span>
               </label>
               <fieldset className="flex flex-col gap-2 text-sm font-semibold text-[#526a87] md:col-span-2">
                 <legend className="mb-2">Sayaç türü</legend>
@@ -454,7 +454,7 @@ export default function TimedMockExam() {
                 <p className="mt-1 text-sm leading-6 text-[#718096]">{mode === 'countdown' ? 'Başlat düğmesine bastığında geri sayım başlayacak. Süre sonunda çalışma süren kaydedilecek ve doğru/yanlış girişine yönlendirileceksin.' : 'Kronometre hemen başlayacak; bitirdiğinde geçen süre Çalışma Geçmişi’ne kaydedilecek ve doğru/yanlış girişine yönlendirileceksin.'}</p>
               </div>
               <div className="md:col-span-2">
-                <button type="button" disabled={!selectedSubjectId} onClick={startExam} className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#4269a8] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#34578f] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto">
+                <button type="button" onClick={startExam} className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#4269a8] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#34578f] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto">
                   <Play size={17} fill="currentColor" /> Denemeyi başlat
                 </button>
               </div>
