@@ -6,7 +6,7 @@ import { useTimerStore } from '../lib/timerStore'
 import { saveTimerSession } from '../lib/useGlobalTimer'
 import { recoveryFor, isCountUp, recordedMinutes, canContinueRecovery } from '../lib/timerRecovery'
 import Swal from 'sweetalert2'
-import { AlarmClock, Plus } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { useAdminStore } from '../lib/adminStore'
 import FocusReset from '../components/FocusReset'
 import { playlistURL } from '../lib/playlist'
@@ -461,7 +461,6 @@ export default function Study() {
         <h1 className="text-xl font-semibold tracking-tight">Çalışma alanı</h1>
         {!isTimerActive && <div className="flex flex-wrap items-center gap-2">
           <FocusReset onOpen={() => { stopTimerAlarm(); if (isRunning && phase === 'focus') pauseTimer() }} />
-          <button type="button" className="study-button study-button-secondary" onClick={() => navigate('/timed-mock-exam')}><AlarmClock size={14} /> Deneme çöz</button>
           <button type="button" className="study-button study-button-secondary" onClick={() => setShowManualModal(true)}><Plus size={14} /> Çalışma ekle</button>
         </div>}
       </header>
@@ -473,7 +472,7 @@ export default function Study() {
           onSelectTask={id => { const item = todayPlan.find(task => task.id === id); if (item) loadPlanItem(item) }} onSelectQuestion={selectQuestion} />
         <section className="study-focus-panel flex min-w-0 flex-col" aria-label={mode === 'questions' ? 'Soru çözümü' : 'Odak oturumu'}>
           {!isTimerActive && <SessionSetup mode={mode} source={selectionSource} examId={selExam} subjectId={selSubject} resourceId={selResource} exams={exams} subjects={subjects} playlists={playlistResources} settings={settings} blocks={pomodoroCount}
-            onSource={changeSource} onMode={changeMode}
+            onSource={changeSource} onTimedMockExam={() => navigate('/timed-mock-exam')} onMode={changeMode}
             onExam={id => { setSelExam(id); setSelSubject(''); setSelResource(''); setSelectedTaskId(null) }}
             onSubject={id => { setSelSubject(id); setSelResource(''); setSelectedTaskId(null) }}
             onResource={setSelResource} onBlocks={setPomodoroCount} onSetting={(key, value) => setSettings(current => ({ ...current, [key]: value }))} />}
