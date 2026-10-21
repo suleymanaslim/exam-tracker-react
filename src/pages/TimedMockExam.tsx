@@ -36,7 +36,7 @@ interface ActiveMockExam {
 
 const STORAGE_PREFIX = 'studytracker-active-mock-exam:'
 
-function readActiveMockExam(value: unknown, fallbackSubjectId: string | null): ActiveMockExam | null {
+function readActiveMockExam(value: unknown): ActiveMockExam | null {
   if (!value || typeof value !== 'object') return null
   const item = value as Partial<ActiveMockExam>
   if (typeof item.examId !== 'string'
@@ -53,7 +53,7 @@ function readActiveMockExam(value: unknown, fallbackSubjectId: string | null): A
   const mode: ExamMode = item.mode === 'stopwatch' ? 'stopwatch' : 'countdown'
   return {
     sessionId: typeof item.sessionId === 'string' && item.sessionId ? item.sessionId : crypto.randomUUID(),
-    subjectId: typeof item.subjectId === 'string' ? item.subjectId : item.subjectId === null ? null : fallbackSubjectId,
+    subjectId: typeof item.subjectId === 'string' ? item.subjectId : null,
     mode,
     examId: item.examId,
     examName: item.examName,
@@ -415,7 +415,7 @@ export default function TimedMockExam() {
             <div className="grid gap-5 md:grid-cols-2">
               <label className="flex flex-col gap-2 text-sm font-semibold text-[#526a87]">
                 Sınav
-                <select value={selectedExamId} onChange={event => { const examId = event.target.value; setSelectedExamId(examId); setSelectedSubjectId(subjects.find(subject => subject.exam_id === examId)?.id || '') }} className="min-h-11 rounded-xl border border-[#dce5f0] bg-white px-3 font-medium text-[#24354a] outline-none focus:border-[#4269a8] focus:ring-2 focus:ring-[#4269a8]/15">
+                <select value={selectedExamId} onChange={event => { setSelectedExamId(event.target.value); setSelectedSubjectId('') }} className="min-h-11 rounded-xl border border-[#dce5f0] bg-white px-3 font-medium text-[#24354a] outline-none focus:border-[#4269a8] focus:ring-2 focus:ring-[#4269a8]/15">
                   {exams.map(exam => <option key={exam.id} value={exam.id}>{exam.name}</option>)}
                 </select>
               </label>
