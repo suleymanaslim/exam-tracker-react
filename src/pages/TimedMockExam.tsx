@@ -137,7 +137,7 @@ export default function TimedMockExam() {
           if (restored) {
             setActiveExam(restored)
             setSelectedExamId(restored.examId)
-            setSelectedSubjectId(restored.subjectId)
+            setSelectedSubjectId(restored.subjectId || '')
             setMode(restored.mode)
             // Persist upgrades (stable session ID and mode) for previously saved timers.
             localStorage.setItem(STORAGE_PREFIX + targetUserId, JSON.stringify(restored))
