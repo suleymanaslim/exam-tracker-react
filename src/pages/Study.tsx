@@ -1,11 +1,12 @@
 import './Study.css'
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useTimerStore } from '../lib/timerStore'
 import { saveTimerSession } from '../lib/useGlobalTimer'
 import { recoveryFor, isCountUp, recordedMinutes, canContinueRecovery } from '../lib/timerRecovery'
 import Swal from 'sweetalert2'
-import { Plus } from 'lucide-react'
+import { AlarmClock, Plus } from 'lucide-react'
 import { useAdminStore } from '../lib/adminStore'
 import FocusReset from '../components/FocusReset'
 import { playlistURL } from '../lib/playlist'
@@ -26,6 +27,7 @@ import ManualSessionDialog from '../components/study/ManualSessionDialog'
 import type { Exam, Subject, Resource, PomodoroSettings, PlanItem, SessionMode, SelectionSource, TaskRow } from '../components/study/types'
 
 export default function Study() {
+  const navigate = useNavigate()
   const { impersonatedUserId } = useAdminStore()
   // ── UI-only state ──────────────────────────────────────────────────
   const [userId, setUserId] = useState<string | null>(null)
@@ -459,6 +461,7 @@ export default function Study() {
         <h1 className="text-xl font-semibold tracking-tight">Çalışma alanı</h1>
         {!isTimerActive && <div className="flex flex-wrap items-center gap-2">
           <FocusReset onOpen={() => { stopTimerAlarm(); if (isRunning && phase === 'focus') pauseTimer() }} />
+          <button type="button" className="study-button study-button-secondary" onClick={() => navigate('/timed-mock-exam')}><AlarmClock size={14} /> Deneme çöz</button>
           <button type="button" className="study-button study-button-secondary" onClick={() => setShowManualModal(true)}><Plus size={14} /> Çalışma ekle</button>
         </div>}
       </header>
