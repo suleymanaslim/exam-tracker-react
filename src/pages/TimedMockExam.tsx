@@ -133,9 +133,7 @@ export default function TimedMockExam() {
         const saved = localStorage.getItem(STORAGE_PREFIX + targetUserId)
         if (saved) {
           const parsed: unknown = JSON.parse(saved)
-          const rawExamId = parsed && typeof parsed === 'object' && 'examId' in parsed && typeof parsed.examId === 'string' ? parsed.examId : ''
-          const fallbackSubject = availableSubjects.find(subject => subject.exam_id === rawExamId)?.id || ''
-          const restored = readActiveMockExam(parsed, fallbackSubject)
+          const restored = readActiveMockExam(parsed)
           if (restored) {
             setActiveExam(restored)
             setSelectedExamId(restored.examId)
