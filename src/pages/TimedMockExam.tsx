@@ -97,6 +97,7 @@ export default function TimedMockExam() {
   const [now, setNow] = useState(() => Date.now())
   const [saving, setSaving] = useState(false)
   const routedToResults = useRef(false)
+  const savingRef = useRef(false)
 
   useEffect(() => {
     let cancelled = false
@@ -180,8 +181,9 @@ export default function TimedMockExam() {
     : 0
 
   const routeToQuestionEntry = useCallback(async (exam: ActiveMockExam, requestedEndAt = Date.now()) => {
-    if (routedToResults.current || saving) return
+    if (routedToResults.current || savingRef.current) return
     routedToResults.current = true
+    savingRef.current = true
     setSaving(true)
     setRecordingError('')
 
@@ -223,9 +225,10 @@ export default function TimedMockExam() {
       routedToResults.current = false
       setRecordingError('Deneme süresi çalışma geçmişine kaydedilemedi. Bağlantını kontrol edip yeniden dene; sayaç kaydın korunuyor.')
     } finally {
+      savingRef.current = false
       setSaving(false)
     }
-  }, [navigate, saving, userId])
+  }, [navigate, userId]
 
   useEffect(() => {
     if (activeExam?.mode === 'countdown' && remainingSeconds === 0 && activeExam.endsAt !== null) {
