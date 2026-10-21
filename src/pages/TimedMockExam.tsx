@@ -343,14 +343,7 @@ export default function TimedMockExam() {
           <button type="button" onClick={() => navigate('/study')} className="mb-3 inline-flex items-center gap-2 text-sm font-semibold text-[#62748b] transition hover:text-[#24354a]">
             <ArrowLeft size={16} /> Çalışma alanına dön
           </button>
-          <p className="text-xs font-bold tracking-[0.16em] text-[#4269a8]">DENEME MODU</p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-[#24354a]">Deneme çöz</h1>
-          <p className="mt-1 max-w-2xl text-sm leading-6 text-[#62748b]">
-            Geri sayım veya kronometre seç. Denemeyi bitirdiğinde geçen süre çalışma geçmişine kaydedilir, ardından doğru ve yanlışlarını girebilirsin.
-          </p>
-        </div>
-        <div className="flex items-center gap-2 rounded-xl border border-[#e3e9f0] bg-white px-3 py-2 text-sm font-medium text-[#526a87] shadow-sm">
-          <AlarmClock size={17} /> Süre kaydı açık
+          <h1 className="text-2xl font-semibold tracking-tight text-[#24354a]">Deneme çöz</h1>
         </div>
       </header>
 
@@ -364,13 +357,6 @@ export default function TimedMockExam() {
               {activeExam.examName}
             </span>
             <h2 className="mt-4 text-xl font-semibold text-[#24354a]">{activeExam.title}</h2>
-            <p className="mt-2 text-sm text-[#718096]">
-              {activeExam.mode === 'stopwatch'
-                ? 'Kronometre çalışıyor. Bitirdiğinde toplam süre kaydedilecek.'
-                : countdownFinished
-                  ? 'Süre tamamlandı. Çalışma kaydın ve sonuç girişin hazırlanıyor.'
-                  : 'Süre dolduğunda çalışma süren kaydedilecek ve sonuç girişine geçeceksin.'}
-            </p>
             <div className={`my-8 flex items-center gap-3 rounded-2xl border px-5 py-5 sm:px-10 ${activeExam.mode === 'countdown' && remainingSeconds !== null && remainingSeconds <= 300 ? 'border-amber-200 bg-amber-50' : 'border-[#e3e9f0] bg-[#f8fafc]'}`}>
               <Clock3 className={activeExam.mode === 'countdown' && remainingSeconds !== null && remainingSeconds <= 300 ? 'text-amber-600' : 'text-[#4269a8]'} size={28} />
               <span aria-live="off" aria-label={`${activeExam.mode === 'stopwatch' ? 'Geçen süre' : 'Kalan süre'} ${formatDuration(activeExam.mode === 'stopwatch' ? elapsedSeconds : remainingSeconds ?? 0)}`} className={`font-mono text-4xl font-semibold tracking-tight tabular-nums sm:text-6xl ${activeExam.mode === 'countdown' && remainingSeconds !== null && remainingSeconds <= 300 ? 'text-amber-700' : 'text-[#24354a]'}`}>
@@ -393,15 +379,10 @@ export default function TimedMockExam() {
                 <RotateCcw size={16} /> İptal et
               </button>
             </div>
-            <p className="mt-4 text-xs leading-5 text-[#8190a3]">Sayfadan ayrılsan veya yenilesen bile sayaç çalışmaya devam eder. Tamamlandığında süre Çalışma Geçmişi'ne kaydedilir.</p>
           </div>
         </section>
       ) : (
         <section className="rounded-3xl border border-[#dce5f0] bg-white p-5 shadow-sm sm:p-8">
-          <div className="mb-6 flex items-start gap-3">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#edf3fb] text-[#4269a8]"><AlarmClock size={22} /></div>
-            <div><h2 className="text-lg font-semibold text-[#24354a]">Denemeni hazırla</h2><p className="mt-1 text-sm leading-6 text-[#718096]">Dilersen bir ders seçerek kaydı o dersle ilişkilendirebilirsin. Deneme süresi Çalışma Geçmişi'ne kaydedilir.</p></div>
-          </div>
           {exams.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-[#cbd7e6] bg-[#f8fafc] p-6 text-center">
               <AlertTriangle className="mx-auto mb-3 text-[#8190a3]" size={24} />
@@ -418,12 +399,11 @@ export default function TimedMockExam() {
                 </select>
               </label>
               <label className="flex flex-col gap-2 text-sm font-semibold text-[#526a87]">
-                Ders (isteğe bağlı)
+                Branş denemesi (isteğe bağlı)
                 <select value={selectedSubjectId} onChange={event => setSelectedSubjectId(event.target.value)} disabled={!matchingSubjects.length} className="min-h-11 rounded-xl border border-[#dce5f0] bg-white px-3 font-medium text-[#24354a] outline-none focus:border-[#4269a8] focus:ring-2 focus:ring-[#4269a8]/15 disabled:bg-[#f8fafc]">
-                  <option value="">Ders seç</option>
+                  <option value="">Branş seç</option>
                   {matchingSubjects.map(subject => <option key={subject.id} value={subject.id}>{subject.name}</option>)}
                 </select>
-                <span className="text-xs font-normal text-[#8190a3]">{matchingSubjects.length ? 'Ders seçersen süre o dersle ilişkilendirilir; boş bırakırsan deneme süresi yalnızca genel çalışma geçmişine kaydedilir.' : 'Ders seçmeden de devam edebilir, süreyi genel çalışma geçmişine kaydedebilirsin.'}</span>
               </label>
               <fieldset className="flex flex-col gap-2 text-sm font-semibold text-[#526a87] md:col-span-2">
                 <legend className="mb-2">Sayaç türü</legend>
@@ -438,19 +418,14 @@ export default function TimedMockExam() {
                   </button>
                 </div>
               </fieldset>
-              {mode === 'countdown' && <label className="flex flex-col gap-2 text-sm font-semibold text-[#526a87]">
+              {mode === 'countdown' && <label className="flex flex-col gap-2 text-sm font-semibold text-[#526a87] md:col-span-2">
                 Süre (dakika)
                 <input type="number" min="1" max="600" step="1" value={durationMinutes} onChange={event => setDurationMinutes(event.target.value)} inputMode="numeric" required className="min-h-11 rounded-xl border border-[#dce5f0] bg-white px-3 font-medium text-[#24354a] outline-none focus:border-[#4269a8] focus:ring-2 focus:ring-[#4269a8]/15" />
-                <span className="text-xs font-normal text-[#8190a3]">1–600 dakika arasında bir süre gir.</span>
               </label>}
-              <label className={`flex flex-col gap-2 text-sm font-semibold text-[#526a87] ${mode === 'stopwatch' ? 'md:col-span-2' : ''}`}>
+              <label className="flex flex-col gap-2 text-sm font-semibold text-[#526a87] md:col-span-2">
                 Deneme adı <span className="font-normal text-[#8190a3]">(isteğe bağlı)</span>
-                <input value={title} onChange={event => setTitle(event.target.value)} maxLength={100} placeholder={selectedExam ? `${selectedExam.name} Denemesi` : 'Örn. Yayın adı / deneme numarası'} className="min-h-11 rounded-xl border border-[#dce5f0] bg-white px-3 font-medium text-[#24354a] outline-none focus:border-[#4269a8] focus:ring-2 focus:ring-[#4269a8]/15" />
+                <input value={title} onChange={event => setTitle(event.target.value)} maxLength={100} placeholder={selectedExam ? `${selectedExam.name} Denemesi` : 'Deneme adı'} className="min-h-11 rounded-xl border border-[#dce5f0] bg-white px-3 font-medium text-[#24354a] outline-none focus:border-[#4269a8] focus:ring-2 focus:ring-[#4269a8]/15" />
               </label>
-              <div className="rounded-2xl bg-[#f8fafc] p-4 md:col-span-2">
-                <p className="flex items-center gap-2 text-sm font-semibold text-[#24354a]"><Clock3 size={16} className="text-[#4269a8]" /> Başlamaya hazır mısın?</p>
-                <p className="mt-1 text-sm leading-6 text-[#718096]">{mode === 'countdown' ? 'Başlat düğmesine bastığında geri sayım başlayacak. Süre sonunda çalışma süren kaydedilecek ve doğru/yanlış girişine yönlendirileceksin.' : 'Kronometre hemen başlayacak; bitirdiğinde geçen süre Çalışma Geçmişi’ne kaydedilecek ve doğru/yanlış girişine yönlendirileceksin.'}</p>
-              </div>
               <div className="md:col-span-2">
                 <button type="button" onClick={startExam} className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#4269a8] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#34578f] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto">
                   <Play size={17} fill="currentColor" /> Denemeyi başlat
