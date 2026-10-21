@@ -26,6 +26,7 @@ const typeLabels: Record<string, string> = {
   pomodoro_long: 'Uzun Pomodoro',
   pomodoro_short: 'Kısa Pomodoro',
   manual: 'Manuel',
+  mock_exam: 'Deneme çözme',
 }
 
 interface EditState {
@@ -318,6 +319,7 @@ export default function History() {
 
                       <div className="min-w-0">
                         <p className="font-semibold text-[#24354a] break-words">{getSubjectName(s.subject_id)}</p>
+                        {s.session_type === 'mock_exam' && s.note && <p className="mt-0.5 truncate text-xs text-[#8190a3]" title={s.note}>{s.note}</p>}
                       </div>
 
                       <div className="min-w-0">
@@ -326,7 +328,7 @@ export default function History() {
 
                       <span>
                         <span className={`px-1.5 py-0.5 rounded text-[12px] font-medium ${
-                          s.session_type === 'manual' ? 'bg-amber-50 text-amber-600' : 'bg-blue-50 text-blue-600'
+                          s.session_type === 'mock_exam' ? 'bg-violet-50 text-violet-600' : s.session_type === 'manual' ? 'bg-amber-50 text-amber-600' : 'bg-blue-50 text-blue-600'
                         }`}>
                           {typeLabels[s.session_type] ?? s.session_type}
                         </span>
