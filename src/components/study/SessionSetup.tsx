@@ -30,9 +30,9 @@ export default function SessionSetup({ mode, source, examId, subjectId, resource
       <div className="study-source-picker flex items-center gap-1" role="group" aria-label="Çalışma kaynağı">
         {([{ key: 'plan', label: 'Planlı görev' }, { key: 'free', label: 'Serbest çalışma' }] as const).map(option => <button type="button" key={option.key} aria-pressed={source === option.key} onClick={() => onSource(option.key)} className={source === option.key ? 'is-selected' : ''}>{option.label}</button>)}
       </div>
-      <div className="study-segments flex items-center rounded-lg p-0.5" role="group" aria-label="Sayaç türü">
+      <div className="study-segments flex items-center rounded-lg p-0.5" role="group" aria-label="Çalışma modu">
         {([{ key: 'focus', label: 'Odak' }, { key: 'stopwatch', label: 'Kronometre' }, { key: 'questions', label: 'Soru çöz' }] as const).map(option => <button type="button" key={option.key} aria-pressed={family === option.key} onClick={() => { if (family !== option.key) onMode(option.key === 'focus' ? 'pomodoro_short' : option.key) }} className={family === option.key ? 'is-selected' : ''}>{option.label}</button>)}
-        <button type="button" aria-pressed={false} onClick={onTimedMockExam}>Deneme çöz</button>
+        <button type="button" onClick={onTimedMockExam}>Deneme çöz</button>
       </div>
     </div>
     {family === 'focus' && <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
