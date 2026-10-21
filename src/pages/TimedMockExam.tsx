@@ -5,7 +5,6 @@ import Swal from 'sweetalert2'
 import { supabase } from '../lib/supabase'
 import { useAdminStore } from '../lib/adminStore'
 import { localDayKey } from '../lib/statsPeriod'
-import { recordedMinutes } from '../lib/timerRecovery'
 
 interface MockExamOption {
   id: string
@@ -98,6 +97,7 @@ export default function TimedMockExam() {
   const [saving, setSaving] = useState(false)
   const routedToResults = useRef(false)
   const savingRef = useRef(false)
+  const pendingEndAt = useRef<number | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -191,7 +191,9 @@ export default function TimedMockExam() {
       requestedEndAt,
       exam.mode === 'countdown' && exam.endsAt !== null ? exam.endsAt : requestedEndAt,
     ))
-    const elapsedMinutes = recordedMinutes((endAt - exam.startedAt) / 60_000)
+    pendingEndAt.current = endAt
+    const elapsedMilliseconds = Math.max(0, endAt - exam.startedAt)
+    const elapsedMinutes = Math.round((elapsedMilliseconds / 60_000) * 1_000_000) / 1_000_000
 
     try {
       if (!userId || !exam.subjectId) throw new Error('Bu deneme için çalışma kaydına bağlanacak ders bulunamadı.')
@@ -213,6 +215,7 @@ export default function TimedMockExam() {
       }
 
       localStorage.removeItem(STORAGE_PREFIX + userId)
+      pendingEndAt.current = null
       const params = new URLSearchParams({
         mockExam: '1',
         examId: exam.examId,
@@ -285,6 +288,10 @@ export default function TimedMockExam() {
 
   const finishExam = async () => {
     if (!activeExam || saving) return
+    if (recordingError && pendingEndAt.current !== null) {
+      await routeToQuestionEntry(activeExam, pendingEndAt.current)
+      return
+    }
     if (activeExam.mode === 'countdown' && remainingSeconds === 0) {
       await routeToQuestionEntry(activeExam, activeExam.endsAt ?? Date.now())
       return
