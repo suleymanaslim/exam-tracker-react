@@ -400,7 +400,7 @@ export default function TimedMockExam() {
         <section className="rounded-3xl border border-[#dce5f0] bg-white p-5 shadow-sm sm:p-8">
           <div className="mb-6 flex items-start gap-3">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#edf3fb] text-[#4269a8]"><AlarmClock size={22} /></div>
-            <div><h2 className="text-lg font-semibold text-[#24354a]">Denemeni hazırla</h2><p className="mt-1 text-sm leading-6 text-[#718096]">Çalışma süresi seçtiğin ders altında geçmişe kaydedilir; sınav soru türleri mevcut sınav kayıtlarından alınır.</p></div>
+            <div><h2 className="text-lg font-semibold text-[#24354a]">Denemeni hazırla</h2><p className="mt-1 text-sm leading-6 text-[#718096]">Dilersen bir ders seçerek kaydı o dersle ilişkilendirebilirsin. Deneme süresi Çalışma Geçmişi'ne kaydedilir.</p></div>
           </div>
           {exams.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-[#cbd7e6] bg-[#f8fafc] p-6 text-center">
