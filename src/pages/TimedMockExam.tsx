@@ -53,7 +53,7 @@ function readActiveMockExam(value: unknown, fallbackSubjectId: string | null): A
   const mode: ExamMode = item.mode === 'stopwatch' ? 'stopwatch' : 'countdown'
   return {
     sessionId: typeof item.sessionId === 'string' && item.sessionId ? item.sessionId : crypto.randomUUID(),
-    subjectId: typeof item.subjectId === 'string' ? item.subjectId : fallbackSubjectId,
+    subjectId: typeof item.subjectId === 'string' ? item.subjectId : item.subjectId === null ? null : fallbackSubjectId,
     mode,
     examId: item.examId,
     examName: item.examName,
