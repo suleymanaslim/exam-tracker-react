@@ -231,7 +231,7 @@ export default function TimedMockExam() {
       savingRef.current = false
       setSaving(false)
     }
-  }, [navigate, userId]
+  }, [navigate, userId])
 
   useEffect(() => {
     if (activeExam?.mode === 'countdown' && remainingSeconds === 0 && activeExam.endsAt !== null) {
