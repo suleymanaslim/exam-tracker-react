@@ -410,12 +410,10 @@ export default function TimedMockExam() {
                 <div className="grid gap-3 sm:grid-cols-2">
                   <button type="button" aria-pressed={mode === 'countdown'} onClick={() => setMode('countdown')} className={`rounded-xl border p-4 text-left transition ${mode === 'countdown' ? 'border-[#4269a8] bg-[#edf3fb] text-[#24354a] ring-2 ring-[#4269a8]/10' : 'border-[#dce5f0] bg-white text-[#62748b] hover:bg-[#f8fafc]'}`}>
                     <span className="flex items-center gap-2 font-semibold"><AlarmClock size={17} /> Geri sayım</span>
-                    <span className="mt-1 block text-xs font-normal leading-5">Süre dolunca otomatik olarak sonuç girişine geçer.</span>
-                  </button>
+                                      </button>
                   <button type="button" aria-pressed={mode === 'stopwatch'} onClick={() => setMode('stopwatch')} className={`rounded-xl border p-4 text-left transition ${mode === 'stopwatch' ? 'border-[#4269a8] bg-[#edf3fb] text-[#24354a] ring-2 ring-[#4269a8]/10' : 'border-[#dce5f0] bg-white text-[#62748b] hover:bg-[#f8fafc]'}`}>
                     <span className="flex items-center gap-2 font-semibold"><Clock3 size={17} /> Kronometre</span>
-                    <span className="mt-1 block text-xs font-normal leading-5">Dakika girmen gerekmez; bitirdiğinde geçen süre kaydedilir.</span>
-                  </button>
+                                      </button>
                 </div>
               </fieldset>
               {mode === 'countdown' && <label className="flex flex-col gap-2 text-sm font-semibold text-[#526a87] md:col-span-2">
