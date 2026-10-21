@@ -88,7 +88,7 @@
   cursor: pointer;
   transition: color 200ms, background 200ms;
 }
-.study-source-picker button:hover, .study-focus-length button:hover { color: var(--study-ink); background: var(--study-soft); }
+.study-source-picker button:hover, .study-segments button:hover, .study-focus-length button:hover { color: var(--study-ink); background: var(--study-soft); }
 .study-source-picker button.is-selected { color: var(--study-ink); font-weight: 600; }
 .study-segments { background: var(--study-soft); }
 .study-segments button.is-selected { color: var(--study-ink); background: var(--study-surface); box-shadow: 0 1px 3px #0000000c; }

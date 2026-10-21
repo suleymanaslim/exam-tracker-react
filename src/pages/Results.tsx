@@ -1,7 +1,8 @@
 import './SuitePages.css'
 import './Results.css'
 import { examHasPoints, examScoreLabel } from '../lib/examTemplates'
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { Plus, Trash2, Calendar, Award, List, X, Edit3, Eye } from 'lucide-react'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ReferenceLine, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts'
@@ -19,6 +20,9 @@ interface ResultDetail { id: string; result_id: string; question_type_id: string
 type Tab = 'list' | 'stats'
 
 export default function Results() {
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const mockExamPrefillApplied = useRef(false)
   const [userId, setUserId] = useState<string | null>(null)
   const [exams, setExams] = useState<Exam[]>([])
   const [questionTypes, setQuestionTypes] = useState<QuestionType[]>([])
@@ -67,6 +71,32 @@ export default function Results() {
       }
     })
   }, [impersonatedUserId])
+
+  // Timed mock exams hand off their details through the URL so this existing
+  // result-entry wizard can be reused without creating a separate scoring path.
+  useEffect(() => {
+    if (loading || mockExamPrefillApplied.current || searchParams.get('mockExam') !== '1') return
+    mockExamPrefillApplied.current = true
+
+    const requestedExamId = searchParams.get('examId') || ''
+    const matchedExam = exams.find(exam => exam.id === requestedExamId)
+    const targetExamId = matchedExam ? requestedExamId : ''
+    const initialScores: Record<string, { correct: number | ''; incorrect: number | '' }> = {}
+    questionTypes
+      .filter(type => type.exam_id === targetExamId)
+      .forEach(type => { initialScores[type.id] = { correct: '', incorrect: '' } })
+
+    setTab('list')
+    setShowForm(true)
+    setFormStep(0)
+    setFormError('')
+    setEditingResultId(null)
+    setFormExamId(targetExamId)
+    setFormTitle(searchParams.get('title') || (matchedExam ? `${matchedExam.name} Denemesi` : ''))
+    setFormDate(searchParams.get('date') || new Date().toISOString().split('T')[0])
+    setFormScores(initialScores)
+    navigate('/results', { replace: true })
+  }, [loading, searchParams, exams, questionTypes, navigate])
 
   const handleExamChange = (examId: string) => {
     setFormStep(0)

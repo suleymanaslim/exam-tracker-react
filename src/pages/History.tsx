@@ -22,10 +22,23 @@ interface Resource { id: string; subject_id: string; name: string }
 const examIcons: Record<string, LucideIcon> = {
   AGS: Shield, YDS: Globe, IELTS: BookOpen, ALES: Calculator,
 }
+function mockExamDisplayTitle(note: string | null) {
+  if (!note?.trim()) return ''
+  const separatorIndex = note.indexOf(' · ')
+  return (separatorIndex >= 0 ? note.slice(separatorIndex + 3) : note).trim()
+}
+
+function mockExamDisplayExam(note: string | null) {
+  if (!note?.trim()) return ''
+  const separatorIndex = note.indexOf(' · ')
+  return separatorIndex > 0 ? note.slice(0, separatorIndex).trim() : ''
+}
+
 const typeLabels: Record<string, string> = {
   pomodoro_long: 'Uzun Pomodoro',
   pomodoro_short: 'Kısa Pomodoro',
   manual: 'Manuel',
+  mock_exam: 'Deneme çözme',
 }
 
 interface EditState {
@@ -276,7 +289,7 @@ export default function History() {
             {/* Header row */}
             <div className="grid grid-cols-[36px_1fr_1fr_90px_80px_90px_60px] gap-3 px-4 py-2.5 border-b border-[#e3e9f0] bg-[#f8fafc] text-[12px] font-semibold uppercase tracking-wider text-[#718096] shrink-0">
           <span></span>
-          <span>Ders</span>
+          <span>Ders / Deneme</span>
           <span>Kaynak</span>
           <span>Tür</span>
           <span>Süre</span>
@@ -317,7 +330,8 @@ export default function History() {
                       </div>
 
                       <div className="min-w-0">
-                        <p className="font-semibold text-[#24354a] break-words">{getSubjectName(s.subject_id)}</p>
+                        <p className="font-semibold text-[#24354a] break-words">{s.session_type === 'mock_exam' ? (mockExamDisplayTitle(s.note) || 'Deneme') : getSubjectName(s.subject_id)}</p>
+                        {s.session_type === 'mock_exam' && (mockExamDisplayExam(s.note) || s.subject_id) && <p className="mt-0.5 truncate text-xs text-[#8190a3]" title={s.note || undefined}>{mockExamDisplayExam(s.note) || getSubjectName(s.subject_id)}</p>}
                       </div>
 
                       <div className="min-w-0">
@@ -326,7 +340,7 @@ export default function History() {
 
                       <span>
                         <span className={`px-1.5 py-0.5 rounded text-[12px] font-medium ${
-                          s.session_type === 'manual' ? 'bg-amber-50 text-amber-600' : 'bg-blue-50 text-blue-600'
+                          s.session_type === 'mock_exam' ? 'bg-violet-50 text-violet-600' : s.session_type === 'manual' ? 'bg-amber-50 text-amber-600' : 'bg-blue-50 text-blue-600'
                         }`}>
                           {typeLabels[s.session_type] ?? s.session_type}
                         </span>

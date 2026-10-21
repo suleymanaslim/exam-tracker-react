@@ -1,5 +1,6 @@
 import './Study.css'
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useTimerStore } from '../lib/timerStore'
 import { saveTimerSession } from '../lib/useGlobalTimer'
@@ -26,6 +27,7 @@ import ManualSessionDialog from '../components/study/ManualSessionDialog'
 import type { Exam, Subject, Resource, PomodoroSettings, PlanItem, SessionMode, SelectionSource, TaskRow } from '../components/study/types'
 
 export default function Study() {
+  const navigate = useNavigate()
   const { impersonatedUserId } = useAdminStore()
   // ── UI-only state ──────────────────────────────────────────────────
   const [userId, setUserId] = useState<string | null>(null)
@@ -470,7 +472,7 @@ export default function Study() {
           onSelectTask={id => { const item = todayPlan.find(task => task.id === id); if (item) loadPlanItem(item) }} onSelectQuestion={selectQuestion} />
         <section className="study-focus-panel flex min-w-0 flex-col" aria-label={mode === 'questions' ? 'Soru çözümü' : 'Odak oturumu'}>
           {!isTimerActive && <SessionSetup mode={mode} source={selectionSource} examId={selExam} subjectId={selSubject} resourceId={selResource} exams={exams} subjects={subjects} playlists={playlistResources} settings={settings} blocks={pomodoroCount}
-            onSource={changeSource} onMode={changeMode}
+            onSource={changeSource} onTimedMockExam={() => navigate('/timed-mock-exam')} onMode={changeMode}
             onExam={id => { setSelExam(id); setSelSubject(''); setSelResource(''); setSelectedTaskId(null) }}
             onSubject={id => { setSelSubject(id); setSelResource(''); setSelectedTaskId(null) }}
             onResource={setSelResource} onBlocks={setPomodoroCount} onSetting={(key, value) => setSettings(current => ({ ...current, [key]: value }))} />}
