@@ -70,6 +70,30 @@ function readActiveMockExam(value: unknown): ActiveMockExam | null {
   }
 }
 
+function mockExamTitleFromNote(note: string | null) {
+  if (!note?.trim()) return ''
+  const separatorIndex = note.indexOf(' · ')
+  return (separatorIndex >= 0 ? note.slice(separatorIndex + 3) : note).trim()
+}
+
+async function nextMockExamTitle(userId: string) {
+  const { data, error } = await supabase
+    .from('study_sessions')
+    .select('note')
+    .eq('user_id', userId)
+    .eq('session_type', 'mock_exam')
+
+  if (error) throw error
+
+  const highestNumber = (data || []).reduce((highest, session) => {
+    const existingTitle = mockExamTitleFromNote(session.note)
+    const match = /^Deneme\s*-\s*(\d+)$/i.exec(existingTitle)
+    return match ? Math.max(highest, Number(match[1])) : highest
+  }, 0)
+
+  return `Deneme - ${highestNumber + 1}`
+}
+
 function formatDuration(totalSeconds: number) {
   const safe = Math.max(0, Math.floor(totalSeconds))
   const hours = Math.floor(safe / 3600)
@@ -237,7 +261,7 @@ export default function TimedMockExam() {
     }
   }, [activeExam, remainingSeconds, routeToQuestionEntry])
 
-  const startExam = () => {
+  const startExam = async () => {
     if (!selectedExam) {
       void Swal.fire({ icon: 'warning', title: 'Sınav seç', text: 'Denemeye başlamadan önce bir sınav seçmelisin.' })
       return
@@ -254,6 +278,21 @@ export default function TimedMockExam() {
     }
     if (!userId) return
 
+    let sessionTitle = title.trim()
+    if (!sessionTitle) {
+      try {
+        sessionTitle = await nextMockExamTitle(userId)
+      } catch (error) {
+        console.error('Could not determine the next mock exam title:', error)
+        void Swal.fire({
+          icon: 'error',
+          title: 'Deneme adı oluşturulamadı',
+          text: 'Geçmiş kayıtları okunamadı. Lütfen tekrar dene.',
+        })
+        return
+      }
+    }
+
     const startedAt = Date.now()
     const nextExam: ActiveMockExam = {
       sessionId: crypto.randomUUID(),
@@ -262,7 +301,7 @@ export default function TimedMockExam() {
       examId: selectedExam.id,
       examName: selectedExam.name,
       examColor: selectedExam.color || '#4269a8',
-      title: title.trim() || `${selectedExam.name} Denemesi`,
+      title: sessionTitle,
       durationMinutes: mode === 'countdown' ? minutes : 0,
       startedAt,
       endsAt: mode === 'countdown' ? startedAt + minutes * 60_000 : null,
@@ -295,15 +334,14 @@ export default function TimedMockExam() {
       return
     }
 
+    const isEarlyFinish = activeExam.mode === 'countdown' && remainingSeconds !== null && remainingSeconds > 0
     const confirmation = await Swal.fire({
-      title: 'Denemeyi bitirmek istiyor musun?',
-      text: activeExam.mode === 'stopwatch'
-        ? 'Geçen süre çalışma geçmişine kaydedilecek ve ardından soru girişine geçeceksin.'
-        : 'Geçen süre çalışma geçmişine kaydedilecek ve ardından soru girişine geçeceksin.',
+      title: isEarlyFinish ? 'Erken bitirmek istediğinize emin misiniz?' : 'Denemeyi bitirmek istediğinize emin misiniz?',
+      text: 'Geçen süre çalışma geçmişine kaydedilecek ve ardından soru girişine geçeceksin.',
       icon: 'question',
       showCancelButton: true,
-      confirmButtonText: 'Bitir ve soruları gir',
-      cancelButtonText: 'Denemeye dön',
+      confirmButtonText: 'Evet',
+      cancelButtonText: 'Hayır',
       confirmButtonColor: '#4269a8',
       reverseButtons: true,
     })
