@@ -13,6 +13,7 @@ interface Props {
   settings: PomodoroSettings
   blocks: number
   onSource: (source: SelectionSource) => void
+  onTimedMockExam: () => void
   onMode: (mode: SessionMode) => void
   onExam: (id: string) => void
   onSubject: (id: string) => void
@@ -21,7 +22,7 @@ interface Props {
   onSetting: (key: keyof PomodoroSettings, value: number) => void
 }
 
-export default function SessionSetup({ mode, source, examId, subjectId, resourceId, exams, subjects, playlists, settings, blocks, onSource, onMode, onExam, onSubject, onResource, onBlocks, onSetting }: Props) {
+export default function SessionSetup({ mode, source, examId, subjectId, resourceId, exams, subjects, playlists, settings, blocks, onSource, onMode, onExam, onSubject, onResource, onBlocks, onSetting, onTimedMockExam }: Props) {
   const family = mode === 'questions' ? 'questions' : mode === 'stopwatch' ? 'stopwatch' : 'focus'
   const subject = subjects.find(item => item.id === subjectId)
   return <div className="study-session-setup">
@@ -31,6 +32,7 @@ export default function SessionSetup({ mode, source, examId, subjectId, resource
       </div>
       <div className="study-segments flex items-center rounded-lg p-0.5" role="group" aria-label="Sayaç türü">
         {([{ key: 'focus', label: 'Odak' }, { key: 'stopwatch', label: 'Kronometre' }, { key: 'questions', label: 'Soru çöz' }] as const).map(option => <button type="button" key={option.key} aria-pressed={family === option.key} onClick={() => { if (family !== option.key) onMode(option.key === 'focus' ? 'pomodoro_short' : option.key) }} className={family === option.key ? 'is-selected' : ''}>{option.label}</button>)}
+        <button type="button" aria-pressed={false} onClick={onTimedMockExam}>Deneme çöz</button>
       </div>
     </div>
     {family === 'focus' && <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
