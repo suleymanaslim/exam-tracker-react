@@ -233,7 +233,7 @@ export default function Dashboard() {
           if (pi) items = [...items, ...pi]
         }
         if (vpiRes.data) {
-          const vpis = vpiRes.data.map((v: any) => {
+          const vpis = vpiRes.data.filter((v: any) => !v.completion_week).map((v: any) => {
             const dateObj = new Date(`${v.date}T00:00:00`)
             const dayOfWeek = dateObj.getDay() === 0 ? 7 : dateObj.getDay()
             const res = v.resources || {}

@@ -8,7 +8,16 @@
     <title>ExamTracker</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><main style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;background:#f5f7fb;color:#24354a;font-family:Arial,sans-serif;text-align:center"><div><p>StudyTracker açılıyor…</p><div id="startup-help" hidden><p>Sayfa yüklenemedi. Bağlantını kontrol edip yeniden dene.</p><p style="font-size:14px">Sorun sürerse güncel Chrome veya Safari ile açabilirsin.</p><button type="button" onclick="window.location.reload()" style="padding:10px 16px;border:0;border-radius:8px;background:#4269a8;color:white;font:inherit;cursor:pointer">Yeniden dene</button></div></div></main></div>
+    <script>
+      (function () {
+        function help() { var node = document.getElementById('startup-help'); if (node) node.hidden = false; }
+        var timer = window.setTimeout(help, 12000);
+        window.addEventListener('error', help, true);
+        window.addEventListener('app:ready', function () { window.clearTimeout(timer); window.removeEventListener('error', help, true); });
+      })();
+    </script>
+    <noscript>StudyTracker için tarayıcında JavaScript açık olmalı.</noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

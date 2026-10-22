@@ -4,13 +4,14 @@ import { resetVideoProgress, videoProgressResetError } from '../src/lib/videoPro
 
 function mock(options = {}) {
   const calls = []
-  const client = { from(table) {
+  const client = { rpc(name, args) { calls.push(['rpc', name, args]); return Promise.resolve({ error: options.writeError || null }) }, from(table) {
     calls.push(['from', table])
     let kind = ''
     const query = {
       update(values) { kind = 'update'; calls.push(['update', values]); return query },
       select(columns, settings) { kind = 'verify'; calls.push(['select', columns, settings]); return query },
       eq(key, value) { calls.push([kind, 'eq', key, value]); return query },
+      is(key, value) { calls.push(['is', key, value]); return query },
       or(filter) { calls.push(['or', filter]); return query },
       then(resolve, reject) { return Promise.resolve(kind === 'update' ? { error: options.writeError || null } : { error: options.readError || null, count: options.remaining === undefined ? 0 : options.remaining }).then(resolve, reject) },
     }
@@ -21,14 +22,15 @@ function mock(options = {}) {
 test('only one owner/resource watch state is reset; plans and study data are untouched', async () => {
   const { client, calls } = mock()
   await resetVideoProgress(client, 'alice', 'video-a')
-  assert.deepEqual(calls.filter(c => c[0] === 'from'), [['from','video_plan_items'],['from','video_plan_items']])
-  assert.deepEqual(calls.find(c => c[0] === 'update'), ['update',{ watched_count: 0, is_completed: false }])
-  for (const kind of ['update','verify']) {
+  assert.deepEqual(calls.filter(c => c[0] === 'from'), [['from','video_plan_items']])
+  assert.deepEqual(calls.find(c => c[0] === 'rpc'), ['rpc', 'reset_video_watch_progress', { p_user_id: 'alice', p_resource_id: 'video-a' }])
+  for (const kind of ['verify']) {
     assert.ok(calls.some(c => JSON.stringify(c) === JSON.stringify([kind,'eq','user_id','alice'])))
     assert.ok(calls.some(c => JSON.stringify(c) === JSON.stringify([kind,'eq','resource_id','video-a'])))
   }
   assert.deepEqual(calls.find(c => c[0] === 'select'), ['select','id',{ head: true, count: 'exact' }])
-  assert.deepEqual(calls.at(-1), ['or','watched_count.gt.0,is_completed.eq.true'])
+  assert.deepEqual(calls.find(c => c[0] === 'is'), ['is', 'completion_week', null])
+  assert.deepEqual(calls.at(-1), ['or','watched_count.gt.0,is_completed.eq.true,watch_parts_done.gt.0'])
 })
 test('missing ownership/resource identifiers cannot issue an unscoped update', async () => {
   for (const [owner, resource] of [['','video-a'],['alice','']]) {
@@ -40,7 +42,7 @@ test('missing ownership/resource identifiers cannot issue an unscoped update', a
 test('permission failures never claim success or continue to verification', async () => {
   const denied = { code: '42501' }, { client, calls } = mock({ writeError: denied })
   await assert.rejects(resetVideoProgress(client,'alice','video-a'), error => error === denied)
-  assert.equal(calls.filter(c => c[0] === 'from').length,1)
+  assert.equal(calls.filter(c => c[0] === 'from').length,0)
 })
 test('a silent RLS denial or incomplete reset fails verification instead of clearing the UI', async () => {
   for (const remaining of [1, 1500, null]) {

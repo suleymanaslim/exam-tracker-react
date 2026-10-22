@@ -17,24 +17,34 @@ function TimerRuntime({ userId }: { userId: string | null }) {
 function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
+  const [sessionError, setSessionError] = useState(false)
 
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    let active = true
+    window.dispatchEvent(new Event('app:ready'))
+    const timeout = window.setTimeout(() => { if (active) setSessionError(true) }, 12000)
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      if (!active) return
+      window.clearTimeout(timeout)
+      if (error) { setSessionError(true); return }
       setSession(session)
       setLoading(false)
-    })
+    }).catch(() => { if (active) { window.clearTimeout(timeout); setSessionError(true) } })
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!active) return
+      window.clearTimeout(timeout); setSessionError(false)
       setSession(session)
       setLoading(false)
     })
 
-    return () => subscription.unsubscribe()
+    return () => { active = false; window.clearTimeout(timeout); subscription.unsubscribe() }
   }, [])
 
+  if (sessionError) return <div className="route-error" role="alert"><p>Oturum yüklenemedi. Bağlantını kontrol edip tekrar dene.</p><button type="button" onClick={() => window.location.reload()}>Yeniden dene</button></div>
   if (loading) {
     return <div className="flex h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-950 text-zinc-500">Yükleniyor...</div>
   }

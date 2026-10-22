@@ -1,0 +1,10 @@
+# Revalidate the entry document and current SPA routes.
+/
+  Cache-Control: no-cache
+
+/:page
+  Cache-Control: no-cache
+
+# Vite assets have content hashes in their filenames.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

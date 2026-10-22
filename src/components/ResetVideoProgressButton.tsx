@@ -21,7 +21,7 @@ export default function ResetVideoProgressButton({ userId, resourceId, resourceN
     try {
       const result = await Swal.fire({
         title: 'İzlenme sayısını sıfırlamak istediğine emin misin?',
-        text: `${resourceName} kaynağının tüm günlerdeki izlenme sayıları ve tamamlandı işaretleri sıfırlanacak. Planlar ve çalışma süreleri korunacak.`,
+        text: `${resourceName} kaynağının düzenlenebilir izleme ilerlemesi sıfırlanacak. Pazartesiye kaydedilmiş tamamlanan videolar korunur; onları yalnızca kaydın sil düğmesiyle kaldırabilirsin. Planlar ve çalışma süreleri korunacak.`,
         icon: 'warning', width: 420, showCancelButton: true,
         confirmButtonText: 'Evet, sıfırla', cancelButtonText: 'Vazgeç', confirmButtonColor: '#b6454e',
         showLoaderOnConfirm: true, allowOutsideClick: () => !Swal.isLoading(), allowEscapeKey: () => !Swal.isLoading(),

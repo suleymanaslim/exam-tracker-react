@@ -159,8 +159,8 @@ export default function Plan() {
       day_of_week: selectedDay,
       subject_id: res?.subject_id || null,
       resource_id: v.resource_id,
-      title: `${cleanName} ${v.video_count}`,
-      planned_minutes: v.video_count * (res?.avg_video_duration || 0),
+      title: v.completion_week ? `${cleanName} · 1 video izlendi` : `${cleanName} ${v.video_count}`,
+      planned_minutes: v.completion_week ? 0 : v.video_count * (res?.avg_video_duration || 0),
       sort_order: -1,
       isVideo: true,
       originalId: v.id
@@ -208,9 +208,10 @@ export default function Plan() {
 
   // Delete item
   const handleDelete = async (id: string, isVideo?: boolean) => {
+    const video = videoItems.find(item => item.id === id.replace('vpi_', ''))
     const res = await Swal.fire({
       title: 'Planı Sil',
-      text: 'Bu plan maddesini silmek istediğinize emin misiniz?',
+      text: video?.completion_week ? 'İzlediğiniz video kaydedildi. Silerseniz bu kayıt ve izlenen 1 video toplamdan çıkarılacak.' : 'Bu plan maddesini silmek istediğinize emin misiniz?',
       icon: 'warning',
       showCancelButton: true,
       confirmButtonColor: '#ef4444',
@@ -222,7 +223,8 @@ export default function Plan() {
     
     if (isVideo || id.startsWith('vpi_')) {
       const originalId = id.replace('vpi_', '')
-      await supabase.from('video_plan_items').delete().eq('id', originalId)
+      const { error } = await supabase.from('video_plan_items').delete().eq('id', originalId)
+      if (error) { void Swal.fire('Silinemedi', 'Video kaydı silinemedi. Tekrar deneyin.', 'error'); return }
       setVideoItems(prev => prev.filter(i => i.id !== originalId))
     } else {
       await supabase.from('plan_items').delete().eq('id', id)

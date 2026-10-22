@@ -58,12 +58,27 @@ export function questionCompletionOptions(initial = '', correct?: number | null,
         for (const note of notes) {
           const option = document.createElement('option'); option.value = note; list?.append(option)
         }
-        notes.slice(0, 5).forEach(note => {
+        notes.forEach((note, index) => {
           const button = document.createElement('button')
           button.type = 'button'; button.textContent = note; button.title = note
+          button.hidden = index >= 3
+          if (index >= 3) button.dataset.olderNote = 'true'
           button.addEventListener('click', () => { if (!noteInput.readOnly) { noteInput.value = note; noteInput.focus() } })
           history?.append(button)
         })
+        if (notes.length > 3 && history) {
+          const toggle = document.createElement('button')
+          toggle.type = 'button'; toggle.className = 'question-notes-toggle'
+          toggle.textContent = `Önceki notlar (${notes.length - 3})`
+          toggle.setAttribute('aria-expanded', 'false')
+          toggle.addEventListener('click', () => {
+            const expanded = toggle.getAttribute('aria-expanded') !== 'true'
+            history.querySelectorAll<HTMLButtonElement>('[data-older-note]').forEach(button => { button.hidden = !expanded })
+            toggle.setAttribute('aria-expanded', String(expanded))
+            toggle.textContent = expanded ? 'Daha az göster' : `Önceki notlar (${notes.length - 3})`
+          })
+          history.append(toggle)
+        }
       }).catch(() => { /* A failed suggestion lookup never prevents entering a note. */ })
     }
   }, html: options.html
