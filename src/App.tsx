@@ -15,7 +15,6 @@ import Topics from './pages/Topics'
 import MonthlyPlan from './pages/MonthlyPlan'
 import Admin from './pages/Admin'
 import Results from './pages/Results'
-import TimedMockExam from './pages/TimedMockExam'
 import VideoPlan from './pages/VideoPlan'
 import QuestionPlan from './pages/QuestionPlan'
 import AppLayout from './components/AppLayout'
@@ -63,7 +62,7 @@ function App() {
           <Route index element={<Dashboard />} />
           <Route path="plan" element={<Plan />} />
           <Route path="study" element={<Study />} />
-          <Route path="timed-mock-exam" element={<TimedMockExam />} />
+          <Route path="timed-mock-exam" element={<Study mockExam />} />
           <Route path="history" element={<History />} />
           <Route path="stats"     element={<Stats />} />
           <Route path="results"   element={<Results />} />

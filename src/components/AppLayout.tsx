@@ -15,6 +15,9 @@ import { useTimerStore } from '../lib/timerStore'
 import { useAdminStore } from '../lib/adminStore'
 import { ShieldAlert } from 'lucide-react'
 import { useMonthlyPlanAccess } from '../lib/useMonthlyPlanAccess'
+import { useMockExamRuntime } from '../lib/useMockExamRuntime'
+import { useMockExamStore } from '../lib/mockExamStore'
+import { formatMockDuration, mockExamTime } from '../lib/mockExamSession'
 
 const navItems = [
   { href: '/',          label: 'Dashboard',    icon: LayoutDashboard },
@@ -54,6 +57,11 @@ export default function AppLayout() {
   const { isAdmin, impersonatedUserId, setIsAdmin, setImpersonatedUserId } = useAdminStore()
 
   const [contextReady, setContextReady] = useState(false)
+  const [authenticatedUserId, setAuthenticatedUserId] = useState<string | null>(null)
+  const { active: mockExam, now: mockNow } = useMockExamStore()
+  useMockExamRuntime(contextReady && authenticatedUserId ? impersonatedUserId || authenticatedUserId : null)
+  const mockTime = mockExam ? mockExamTime(mockExam, mockNow) : null
+  const navPath = location.pathname === '/timed-mock-exam' ? '/study' : location.pathname
   const { plans: monthlyPlans } = useMonthlyPlanAccess()
   const canViewMonthlyPlan = isAdmin || monthlyPlans.length > 0
 
@@ -61,6 +69,7 @@ export default function AppLayout() {
     let cancelled = false
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (user) {
+        setAuthenticatedUserId(user.id)
         supabase.from('profiles').select('role').eq('id', user.id).single().then(r => {
           if (cancelled) return
           const isUserAdmin = r.data?.role === 'admin'
@@ -101,7 +110,7 @@ export default function AppLayout() {
         {isRunning && <Link to="/study" className="app-timer" aria-label={`Çalışmaya dön, ${mode === 'stopwatch' ? 'çalışılan süre' : 'kalan süre'} ${timerMM}:${timerSS}`}><span className="app-timer-dot" /><span>{timerMM}:{timerSS}</span></Link>}
         <nav className="app-nav" aria-label="Ana gezinme">
           <p className="app-nav-caption app-nav-label">ÇALIŞMA ALANI</p>
-          {navItems.map(item => <Link key={item.href} to={item.href} title={item.label} aria-label={item.label} aria-current={location.pathname === item.href ? 'page' : undefined} className={`app-nav-link ${location.pathname === item.href ? 'is-active' : ''}`}><item.icon size={19} /><span className="app-nav-label">{item.label}</span></Link>)}
+          {navItems.map(item => <Link key={item.href} to={item.href} title={item.label} aria-label={item.label} aria-current={navPath === item.href ? 'page' : undefined} className={`app-nav-link ${navPath === item.href ? 'is-active' : ''}`}><item.icon size={19} /><span className="app-nav-label">{item.label}</span></Link>)}
           {canViewMonthlyPlan && <Link to="/monthly-plan" title="Aylık Plan" aria-label="Aylık Plan" aria-current={location.pathname === '/monthly-plan' ? 'page' : undefined} className={`app-nav-link ${location.pathname === '/monthly-plan' ? 'is-active' : ''}`}><CalendarDays size={19} /><span className="app-nav-label">Aylık Plan</span></Link>}
           {isAdmin && <Link to="/admin" title="Admin Paneli" aria-label="Admin Paneli" aria-current={location.pathname === '/admin' ? 'page' : undefined} className={`app-nav-link app-admin-link ${location.pathname === '/admin' ? 'is-active' : ''}`}><ShieldAlert size={19} /><span className="app-nav-label">Admin Paneli</span></Link>}
         </nav>
@@ -135,10 +144,16 @@ export default function AppLayout() {
               <button className="min-h-9 rounded-lg border border-indigo-200 bg-white px-3 font-semibold text-indigo-700" onClick={() => { setImpersonatedUserId(null); navigate('/admin') }}>Kendi hesabıma dön</button>
             </div>
             <nav aria-label="Kullanıcı hesabı sayfaları" className="mt-2 flex flex-wrap gap-1">
-              {navItems.filter(item => item.href !== '/settings' && item.href !== '/study').map(item => <Link key={item.href} to={item.href} className={`rounded-lg px-3 py-2 text-xs font-medium ${location.pathname === item.href ? 'bg-indigo-600 text-white' : 'text-indigo-700 hover:bg-indigo-100'}`}>{item.label}</Link>)}
+              {navItems.filter(item => item.href !== '/settings' && item.href !== '/study').map(item => <Link key={item.href} to={item.href} className={`rounded-lg px-3 py-2 text-xs font-medium ${navPath === item.href ? 'bg-indigo-600 text-white' : 'text-indigo-700 hover:bg-indigo-100'}`}>{item.label}</Link>)}
             </nav>
           </div>
         )}
+        {mockExam && mockTime && location.pathname !== '/timed-mock-exam' && !(mockExam.recorded && location.pathname === '/results') && <Link to={mockExam.recorded ? '/results' : '/timed-mock-exam'} className="app-mock-return" aria-label={`${mockExam.title}, ${mockExam.recorded ? 'sonuçları gir' : 'denemeye dön'}`}>
+          <Timer size={17} aria-hidden="true" />
+          <span className="app-mock-return-title"><strong>{mockExam.title}</strong><span>{mockExam.recorded ? 'Sonuç girişi bekliyor' : mockExam.finishedAt !== undefined ? 'Süre kaydı bekliyor' : 'Deneme devam ediyor'}</span></span>
+          <span className="app-mock-return-clock">{formatMockDuration(mockExam.mode === 'countdown' ? mockTime.remaining ?? 0 : mockTime.elapsed)}</span>
+          <span className="app-mock-return-action">{mockExam.recorded ? 'Sonuçları gir' : 'Denemeye dön'}</span>
+        </Link>}
         <div className="flex-1 overflow-auto p-4 md:p-5 pb-20 md:pb-5">
           <>{contextReady ? <Outlet key={impersonatedUserId || 'self'} /> : <p className="p-4 text-sm text-slate-500">Hesap yükleniyor…</p>}</>
         </div>
@@ -147,7 +162,7 @@ export default function AppLayout() {
       {/* ── Mobile Bottom Navigation ──────────────────────────────── */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 app-mobile-nav flex items-center justify-around px-1 py-1.5 z-50" style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 6px)' }}>
         {mobileNavItems.map((item) => {
-          const isActive = location.pathname === item.href
+          const isActive = navPath === item.href
           return (
             <Link
               key={item.href}

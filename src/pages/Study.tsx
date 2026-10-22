@@ -23,10 +23,13 @@ import TaskSidebar from '../components/study/TaskSidebar'
 import SessionSetup from '../components/study/SessionSetup'
 import FocusTimer from '../components/study/FocusTimer'
 import TimerControls from '../components/study/TimerControls'
+import TimedMockExam from './TimedMockExam'
+import { useMockExamStore } from '../lib/mockExamStore'
 import ManualSessionDialog from '../components/study/ManualSessionDialog'
 import type { Exam, Subject, Resource, PomodoroSettings, PlanItem, SessionMode, SelectionSource, TaskRow } from '../components/study/types'
 
-export default function Study() {
+export default function Study({ mockExam = false }: { mockExam?: boolean }) {
+  const mockActive = useMockExamStore(state => state.active)
   const navigate = useNavigate()
   const { impersonatedUserId } = useAdminStore()
   // ── UI-only state ──────────────────────────────────────────────────
@@ -197,7 +200,7 @@ export default function Study() {
   // ── Toggle timer ───────────────────────────────────────────────────
   const toggleTimer = () => {
     const current = useTimerStore.getState()
-    if (!current.selSubject || !userId || current.ownerId !== userId || current.recovery || current.isFinishing) return
+    if (mockActive || !current.selSubject || !userId || current.ownerId !== userId || current.recovery || current.isFinishing) return
     if (current.isRunning) current.pauseTimer()
     else {
       unlockTimerAlarm()
@@ -426,7 +429,7 @@ export default function Study() {
   }
   const selectQuestion = (id: string) => {
     const task = questionPlans.find(item => item.id === id)
-    if (!task?.subject_id || !task.subjects?.exam_id || isTimerActive || isFinishing || ownerId !== userId) return
+    if (mockActive || !task?.subject_id || !task.subjects?.exam_id || isTimerActive || isFinishing || ownerId !== userId) return
     setSelectionSource('plan'); setSelectedTaskId(id)
     stopTimerAlarm(); unlockTimerAlarm()
     startQuestions({ examId: task.subjects.exam_id, subjectId: task.subject_id, resourceId: task.resource_id, planId: task.id, target: task.target_questions, date: task.date })
@@ -456,10 +459,10 @@ export default function Study() {
   const savedTodayMinutes = todaySessions.reduce((sum, session) => sum + Number(session.duration_minutes || 0), 0)
 
   return (
-    <div className={`study-page ${isTimerActive ? 'is-zen' : ''}`}>
+    <div className={`study-page ${(mockExam ? !!mockActive : isTimerActive) ? 'is-zen' : ''}`}>
       <header className="study-header flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold tracking-tight">Çalışma alanı</h1>
-        {!isTimerActive && <div className="flex flex-wrap items-center gap-2">
+        {!mockExam && !isTimerActive && <div className="flex flex-wrap items-center gap-2">
           <FocusReset onOpen={() => { stopTimerAlarm(); if (isRunning && phase === 'focus') pauseTimer() }} />
           <button type="button" className="study-button study-button-secondary" onClick={() => setShowManualModal(true)}><Plus size={14} /> Çalışma ekle</button>
         </div>}
@@ -467,10 +470,11 @@ export default function Study() {
 
       {recovery && <div className="study-recovery-banner flex flex-wrap items-center justify-between gap-2" role="status"><span>Önceki oturumun onay bekliyor.</span><button type="button" className="study-utility" onClick={() => useTimerStore.setState({ recovery: { ...recovery } })}>Oturumu değerlendir</button></div>}
 
-      <div className={`study-workspace ${isTimerActive ? 'is-focus' : ''}`}>
-        <TaskSidebar tasks={taskRows} questions={questionRows} selectedId={questionPlanId || selectedTaskId} todayDuration={formatDuration(savedTodayMinutes)} busy={isTimerActive} error={questionError}
-          onSelectTask={id => { const item = todayPlan.find(task => task.id === id); if (item) loadPlanItem(item) }} onSelectQuestion={selectQuestion} />
-        <section className="study-focus-panel flex min-w-0 flex-col" aria-label={mode === 'questions' ? 'Soru çözümü' : 'Odak oturumu'}>
+      <div className={`study-workspace ${(mockExam ? !!mockActive : isTimerActive) ? 'is-focus' : ''}`}>
+        <TaskSidebar tasks={taskRows} questions={questionRows} selectedId={questionPlanId || selectedTaskId} todayDuration={formatDuration(savedTodayMinutes)} busy={mockExam ? !!mockActive : isTimerActive} error={questionError}
+          onSelectTask={id => { const item = todayPlan.find(task => task.id === id); if (item) { loadPlanItem(item); if (mockExam) navigate('/study') } }} onSelectQuestion={id => { selectQuestion(id); if (mockExam) navigate('/study') }} />
+        <section className="study-focus-panel flex min-w-0 flex-col" aria-label={mockExam ? 'Deneme oturumu' : mode === 'questions' ? 'Soru çözümü' : 'Odak oturumu'}>
+          {mockExam ? <TimedMockExam userId={userId} exams={exams} subjects={subjects} /> : <>
           {!isTimerActive && <SessionSetup mode={mode} source={selectionSource} examId={selExam} subjectId={selSubject} resourceId={selResource} exams={exams} subjects={subjects} playlists={playlistResources} settings={settings} blocks={pomodoroCount}
             onSource={changeSource} onTimedMockExam={() => navigate('/timed-mock-exam')} onMode={changeMode}
             onExam={id => { setSelExam(id); setSelSubject(''); setSelResource(''); setSelectedTaskId(null) }}
@@ -478,13 +482,14 @@ export default function Study() {
             onResource={setSelResource} onBlocks={setPomodoroCount} onSetting={(key, value) => setSettings(current => ({ ...current, [key]: value }))} />}
           <FocusTimer subject={selectedSubject?.name || ''} playlist={activePlaylistURL} seconds={secondsLeft} countUp={isCountUp(mode)} isBreak={isBreak} active={isTimerActive} running={isRunning} detail={timerDetail} videoCount={selectedVideoCount} progress={progress}>
             <TimerControls running={isRunning} started={!!startedAt} isBreak={isBreak} saving={isFinishing}
-              disabled={!selSubject || !userId || ownerId !== userId || !!recovery || isFinishing || (mode === 'questions' && !!questionError)}
+              disabled={!!mockActive || !selSubject || !userId || ownerId !== userId || !!recovery || isFinishing || (mode === 'questions' && !!questionError)}
               onToggle={toggleTimer} onFinish={() => void endEarly()} onReset={() => void handleReset()} onSkipBreak={skipBreak} />
             {!selSubject && !isTimerActive && <p className="mt-2 text-xs text-[var(--study-muted)]">{selectionSource === 'plan' ? 'Planından bir görev seç.' : 'Başlamak için ders seç.'}</p>}
           </FocusTimer>
           {isTimerActive && !isRunning && !isBreak && !recovery && <div className="study-paused-utility flex justify-center pb-4">
             <FocusReset onOpen={stopTimerAlarm} />
           </div>}
+          </>}
         </section>
       </div>
       {showManualModal && <ManualSessionDialog exams={exams} subjects={subjects} examId={manualExamId} subjectId={manualSubjectId} duration={manualDuration} date={manualDate} note={manualNote} saving={manualSaving}

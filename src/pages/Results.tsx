@@ -10,6 +10,7 @@ import Swal from 'sweetalert2'
 import CustomSelect from '../components/CustomSelect'
 import { useAdminStore } from '../lib/adminStore'
 import { answerLimit, readAnswerInput, validateAnswers } from '../lib/resultAnswers'
+import { clearMockExamResult, useMockExamStore } from '../lib/mockExamStore'
 import { examTrend, questionComparison, groupQuestionChanges } from '../lib/examAnalytics'
 
 interface Exam { id: string; name: string; color: string; wrong_penalty: number | null; point_per_net: number; base_template_key?: string | null }
@@ -22,7 +23,8 @@ type Tab = 'list' | 'stats'
 export default function Results() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const mockExamPrefillApplied = useRef(false)
+  const mockExamPrefillApplied = useRef<string | null>(null)
+  const pendingMock = useMockExamStore(state => state.active?.recorded ? state.active : null)
   const [userId, setUserId] = useState<string | null>(null)
   const [exams, setExams] = useState<Exam[]>([])
   const [questionTypes, setQuestionTypes] = useState<QuestionType[]>([])
@@ -75,28 +77,33 @@ export default function Results() {
   // Timed mock exams hand off their details through the URL so this existing
   // result-entry wizard can be reused without creating a separate scoring path.
   useEffect(() => {
-    if (loading || mockExamPrefillApplied.current || searchParams.get('mockExam') !== '1') return
-    mockExamPrefillApplied.current = true
+    if (loading || (!pendingMock && searchParams.get('mockExam') !== '1')) return
+    const prefillKey = pendingMock?.sessionId || searchParams.toString()
+    if (mockExamPrefillApplied.current === prefillKey) return
+    mockExamPrefillApplied.current = prefillKey
 
-    const requestedExamId = searchParams.get('examId') || ''
+    const requestedExamId = pendingMock?.examId || searchParams.get('examId') || ''
     const matchedExam = exams.find(exam => exam.id === requestedExamId)
     const targetExamId = matchedExam ? requestedExamId : ''
     const initialScores: Record<string, { correct: number | ''; incorrect: number | '' }> = {}
     questionTypes
       .filter(type => type.exam_id === targetExamId)
-      .forEach(type => { initialScores[type.id] = { correct: '', incorrect: '' } })
+      .forEach(type => {
+        const saved = pendingMock ? details.find(detail => detail.result_id === pendingMock.sessionId && detail.question_type_id === type.id) : null
+        initialScores[type.id] = { correct: saved?.correct_count ?? '', incorrect: saved?.incorrect_count ?? '' }
+      })
 
     setTab('list')
     setShowForm(true)
     setFormStep(0)
     setFormError('')
-    setEditingResultId(null)
+    setEditingResultId(pendingMock && results.some(result => result.id === pendingMock.sessionId) ? pendingMock.sessionId : null)
     setFormExamId(targetExamId)
-    setFormTitle(searchParams.get('title') || (matchedExam ? `${matchedExam.name} Denemesi` : ''))
-    setFormDate(searchParams.get('date') || new Date().toISOString().split('T')[0])
+    setFormTitle(pendingMock?.title || searchParams.get('title') || (matchedExam ? `${matchedExam.name} Denemesi` : ''))
+    setFormDate(pendingMock?.date || searchParams.get('date') || new Date().toISOString().split('T')[0])
     setFormScores(initialScores)
     navigate('/results', { replace: true })
-  }, [loading, searchParams, exams, questionTypes, navigate])
+  }, [loading, searchParams, exams, questionTypes, navigate, pendingMock, details, results])
 
   const handleExamChange = (examId: string) => {
     setFormStep(0)
@@ -127,10 +134,10 @@ export default function Results() {
     if (error) { setFormError(error); return }
     setSaving(true); setFormError('')
     try {
-      const resultId = editingResultId || crypto.randomUUID()
+      const resultId = editingResultId || pendingMock?.sessionId || crypto.randomUUID()
       const response = editingResultId
         ? await supabase.from('exam_results').update({ title: formTitle.trim(), date: formDate }).eq('id', resultId).select().single()
-        : await supabase.from('exam_results').insert({ id: resultId, user_id: userId, exam_id: formExamId, title: formTitle.trim(), date: formDate, is_draft: true }).select().single()
+        : await supabase.from('exam_results')[pendingMock ? 'upsert' : 'insert']({ id: resultId, user_id: userId, exam_id: formExamId, title: formTitle.trim(), date: formDate, is_draft: true }).select().single()
       if (response.error) throw response.error
       setEditingResultId(resultId)
       setResults(prev => [response.data, ...prev.filter(r => r.id !== resultId)])
@@ -148,6 +155,7 @@ export default function Results() {
       const finalized = await supabase.from('exam_results').update({ is_draft: saveAsDraft }).eq('id', resultId).select().single()
       if (finalized.error) throw finalized.error
       setResults(prev => [finalized.data, ...prev.filter(r => r.id !== resultId)].sort((a, b) => b.date.localeCompare(a.date)))
+      if (pendingMock && !saveAsDraft) clearMockExamResult(userId, pendingMock.sessionId)
       setShowForm(false); setFormTitle(''); setFormScores({}); setEditingResultId(null); setFormStep(0)
       void Swal.fire({ title: saveAsDraft ? 'Taslak kaydedildi' : 'Deneme kaydedildi', icon: 'success', toast: true, position: 'top-end', showConfirmButton: false, timer: 1500 })
     } catch (e) {
@@ -242,10 +250,10 @@ export default function Results() {
           </h1>
           <p className="text-[15px] text-[#62748b] mt-1">Sınav ve deneme sonuçlarını kaydet, gelişimini takip et.</p>
         </div>
-        <button onClick={() => { setShowForm(!showForm); setFormStep(0); setFormError(''); if (!showForm) { setEditingResultId(null); setFormTitle(''); setFormExamId(''); setFormScores({}) } }} className="bg-[#4269a8] hover:bg-blue-600 text-white font-medium text-sm px-4 py-2 rounded-lg transition-all flex items-center gap-2 self-start md:self-auto">
+        {!pendingMock && <button onClick={() => { setShowForm(!showForm); setFormStep(0); setFormError(''); if (!showForm) { setEditingResultId(null); setFormTitle(''); setFormExamId(''); setFormScores({}) } }} className="bg-[#4269a8] hover:bg-blue-600 text-white font-medium text-sm px-4 py-2 rounded-lg transition-all flex items-center gap-2 self-start md:self-auto">
           {showForm ? <List className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
           {showForm ? 'Listeye Dön' : 'Yeni Sonuç Ekle'}
-        </button>
+        </button>}
       </div>
 
       {!showForm && (
@@ -270,7 +278,7 @@ export default function Results() {
               {currentType.question_count > 0 && <p>Boş: {Math.max(0, currentType.question_count - Number(formScores[currentType.id]?.correct || 0) - Number(formScores[currentType.id]?.incorrect || 0))}</p>}
             </div> : <div className="result-review"><h3>{formTitle}</h3>{formTypes.map((type, i) => <button type="button" key={type.id} onClick={() => setFormStep(i + 1)}><span>{type.name}</span><strong>{formScores[type.id]?.correct || 0} D · {formScores[type.id]?.incorrect || 0} Y</strong></button>)}</div>}
             {formError && <p className="result-error" role="alert">{formError}</p>}
-            <fieldset disabled={saving} className="result-wizard-actions"><button type="button" disabled={formStep === 0} onClick={() => { setFormStep(step => step - 1); setFormError('') }}>Geri</button><button type="button" disabled={!formTitle.trim() || !formExamId || !formDate} onClick={() => void saveResult(true)}>Taslak</button><button type="submit" className="result-primary">{saving ? 'Kaydediliyor…' : formStep > formTypes.length ? 'Kaydet' : 'Devam'}</button></fieldset>
+            <fieldset disabled={saving} className="result-wizard-actions"><button type="button" disabled={formStep === 0} onClick={() => { setFormStep(step => step - 1); setFormError('') }}>Geri</button>{!pendingMock && <button type="button" disabled={!formTitle.trim() || !formExamId || !formDate} onClick={() => void saveResult(true)}>Taslak</button>}<button type="submit" className="result-primary">{saving ? 'Kaydediliyor…' : formStep > formTypes.length ? 'Kaydet' : 'Devam'}</button></fieldset>
           </form>
         ) : tab === 'list' ? (
           <div className="space-y-6">
