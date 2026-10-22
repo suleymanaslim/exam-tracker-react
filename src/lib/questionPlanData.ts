@@ -57,7 +57,6 @@ export async function fetchQuestionNotes(userId: string, subjectId: string): Pro
     if (error) throw error
     const page = data || []
     notes.push(...page.map(row => row.note as string))
-    const suggestions = questionNoteSuggestions(notes)
-    if (suggestions.length >= 50 || page.length < 500) return suggestions
+    if (page.length < 500) return questionNoteSuggestions(notes, Number.POSITIVE_INFINITY)
   }
 }

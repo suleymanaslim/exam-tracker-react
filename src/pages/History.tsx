@@ -1,5 +1,5 @@
 import './SuitePages.css'
-import { useEffect, useState, useMemo } from 'react'
+import { useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import { supabase, getCurrentUser } from '../lib/supabase'
 import Swal from 'sweetalert2'
 import {
@@ -9,12 +9,13 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import { useAdminStore } from '../lib/adminStore'
 import { recordedMinutes } from '../lib/timerRecovery'
+import { fetchQuestionData, questionPlanError } from '../lib/questionPlanData'
+import { questionCompletionOptions, readQuestionAnswers } from '../lib/questionDialogs'
+import { mergeHistoryEntries } from '../lib/historyEntries'
+import type { HistoryEntry, StudyHistorySession } from '../lib/historyEntries'
+import type { QuestionLog, QuestionPlan } from '../lib/questionPlan'
+import './QuestionPlan.css'
 
-interface Session {
-  id: string; subject_id: string | null; resource_id: string | null
-  session_type: string; started_at: string; ended_at: string
-  duration_minutes: number; note: string | null; is_edited: boolean
-}
 interface Subject { id: string; exam_id: string; name: string }
 interface Exam { id: string; name: string; color: string }
 interface Resource { id: string; subject_id: string; name: string }
@@ -39,6 +40,7 @@ const typeLabels: Record<string, string> = {
   pomodoro_short: 'Kısa Pomodoro',
   manual: 'Manuel',
   mock_exam: 'Deneme çözme',
+  question_solve: 'Soru çözümü',
 }
 
 interface EditState {
@@ -50,7 +52,13 @@ interface EditState {
 }
 
 export default function History() {
-  const [sessions, setSessions] = useState<Session[]>([])
+  const [studySessions, setSessions] = useState<StudyHistorySession[]>([])
+  const [questionPlans, setQuestionPlans] = useState<QuestionPlan[]>([])
+  const [questionLogs, setQuestionLogs] = useState<QuestionLog[]>([])
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(true)
+  const ownerRef = useRef<string | null>(null)
+  const requestVersion = useRef(0)
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [exams, setExams] = useState<Exam[]>([])
   const [resources, setResources] = useState<Resource[]>([])
@@ -58,22 +66,40 @@ export default function History() {
 
   const { impersonatedUserId } = useAdminStore()
 
+  const loadHistory = useCallback(async (uid: string) => {
+    const version = ++requestVersion.current
+    try {
+      const [history, questions, exams, subjects, resources] = await Promise.all([
+        supabase.from('study_sessions').select('*').eq('user_id', uid).order('started_at', { ascending: false }).limit(100),
+        fetchQuestionData(uid),
+        supabase.from('exams').select('*').eq('user_id', uid),
+        supabase.from('subjects').select('*').eq('user_id', uid),
+        supabase.from('resources').select('*').eq('user_id', uid),
+      ])
+      for (const response of [history, exams, subjects, resources]) if (response.error) throw response.error
+      if (ownerRef.current !== uid || requestVersion.current !== version) return
+      setSessions(history.data || []); setQuestionPlans(questions.plans); setQuestionLogs(questions.logs)
+      setExams(exams.data || []); setSubjects(subjects.data || []); setResources(resources.data || []); setError('')
+    } catch (failure) {
+      if (ownerRef.current === uid && requestVersion.current === version) setError(questionPlanError(failure as { code?: string }))
+    } finally { if (ownerRef.current === uid && requestVersion.current === version) setLoading(false) }
+  }, [])
   useEffect(() => {
-    getCurrentUser().then(({ data: { user } }) => {
-      if (user) {
-        const targetUid = impersonatedUserId || user.id
-        loadSessions(targetUid)
-        supabase.from('exams').select('*').eq('user_id', targetUid).then(r => { if (r.data) setExams(r.data as Exam[]) })
-        supabase.from('subjects').select('*').eq('user_id', targetUid).then(r => { if (r.data) setSubjects(r.data as Subject[]) })
-        supabase.from('resources').select('*').eq('user_id', targetUid).then(r => { if (r.data) setResources(r.data as Resource[]) })
-      }
+    let active = true
+    ownerRef.current = null; requestVersion.current++
+    setSessions([]); setQuestionPlans([]); setQuestionLogs([]); setEdit(null); setLoading(true); setError('')
+    void getCurrentUser().then(({ data: { user } }) => {
+      if (!active) return
+      if (!user) { setLoading(false); return }
+      ownerRef.current = impersonatedUserId || user.id
+      void loadHistory(ownerRef.current)
     })
-  }, [impersonatedUserId])
-
-  const loadSessions = async (uid: string) => {
-    const { data } = await supabase.from('study_sessions').select('*').eq('user_id', uid).order('started_at', { ascending: false }).limit(100)
-    if (data) setSessions(data as Session[])
-  }
+    const refresh = () => { if (ownerRef.current) void loadHistory(ownerRef.current) }
+    window.addEventListener('question-data-changed', refresh)
+    window.addEventListener('study-session-saved', refresh)
+    return () => { active = false; ownerRef.current = null; requestVersion.current++; window.removeEventListener('question-data-changed', refresh); window.removeEventListener('study-session-saved', refresh) }
+  }, [impersonatedUserId, loadHistory])
+  const sessions = useMemo(() => mergeHistoryEntries(studySessions, questionPlans, questionLogs), [studySessions, questionPlans, questionLogs])
 
   const subjectToExam = useMemo(() => {
     const map: Record<string, string> = {}
@@ -94,10 +120,11 @@ export default function History() {
     return resourcesById.get(id)?.name ?? '-'
   }
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (entry: HistoryEntry) => {
+    const questionOnly = entry.session_type === 'question_solve'
     const res = await Swal.fire({
       title: 'Kaydı Sil',
-      text: 'Bu çalışma kaydını silmek istediğinize emin misiniz?',
+      text: questionOnly ? 'Bu soru çözümü kaydı silinecek ve soru toplamlarından çıkarılacak.' : entry.question ? 'Çalışma süresi ve bu oturuma bağlı soru çözümü birlikte silinecek.' : 'Bu çalışma kaydını silmek istediğinize emin misiniz?',
       icon: 'warning',
       showCancelButton: true,
       confirmButtonColor: '#ef4444',
@@ -106,11 +133,33 @@ export default function History() {
       cancelButtonText: 'İptal'
     })
     if (!res.isConfirmed) return
-    await supabase.from('study_sessions').delete().eq('id', id)
-    setSessions(prev => prev.filter(s => s.id !== id))
+    const result = questionOnly
+      ? await supabase.rpc('remove_question_result', { p_entry_id: entry.question!.id })
+      : await supabase.from('study_sessions').delete().eq('id', entry.id)
+    if (result.error) { void Swal.fire('Silinemedi', questionPlanError(result.error), 'error'); return }
+    window.dispatchEvent(new Event('question-data-changed'))
   }
 
-  const startEdit = (s: Session) => {
+  const editQuestions = async (entry: HistoryEntry) => {
+    const log = entry.question
+    if (!log || !ownerRef.current) return
+    const owner = ownerRef.current
+    const result = await Swal.fire({
+      ...questionCompletionOptions(String(log.solved_questions), log.correct_questions, log.wrong_questions, false, undefined, { note: log.note, ownerId: owner, subjectId: entry.subject_id }),
+      title: 'Çözüm kaydını düzenle', showCancelButton: true, confirmButtonText: 'Kaydet', cancelButtonText: 'Vazgeç',
+      showLoaderOnConfirm: true, allowOutsideClick: () => !Swal.isLoading(),
+      preConfirm: async value => {
+        const answers = readQuestionAnswers(value)
+        if (!answers || ownerRef.current !== owner) return false
+        const response = await supabase.rpc('update_question_result', { p_entry_id: log.id, p_questions: answers.solved_questions, p_correct: answers.correct_questions, p_wrong: answers.wrong_questions, p_note: answers.note })
+        if (response.error) { Swal.showValidationMessage(questionPlanError(response.error)); return false }
+        return true
+      },
+    })
+    if (result.isConfirmed) window.dispatchEvent(new Event('question-data-changed'))
+  }
+  const startEdit = (s: HistoryEntry) => {
+    if (s.session_type === 'question_solve') { void editQuestions(s); return }
     setEdit({
       id: s.id,
       duration_minutes: recordedMinutes(s.duration_minutes),
@@ -130,7 +179,7 @@ export default function History() {
     if (!session) return
 
     const newEnd = new Date(new Date(session.started_at).getTime() + edit.duration_minutes * 60000)
-    await supabase.from('study_sessions').update({
+    const { error: saveError } = await supabase.from('study_sessions').update({
       duration_minutes: edit.duration_minutes,
       ended_at: newEnd.toISOString(),
       note: edit.note || null,
@@ -138,6 +187,8 @@ export default function History() {
       resource_id: edit.resource_id || null,
       is_edited: true,
     }).eq('id', edit.id)
+
+    if (saveError) { void Swal.fire('Kaydedilemedi', 'Çalışma kaydı güncellenemedi. Tekrar deneyin.', 'error'); return }
 
     setSessions(prev => prev.map(s => s.id === edit.id ? {
       ...s,
@@ -164,9 +215,9 @@ export default function History() {
 
   // Grupla: tarihe göre
   const grouped = useMemo(() => {
-    const groups: Record<string, Session[]> = {}
+    const groups: Record<string, HistoryEntry[]> = {}
     sessions.forEach(s => {
-      const d = s.started_at.split('T')[0]
+      const d = new Date(s.started_at).toLocaleDateString('sv-SE')
       if (!groups[d]) groups[d] = []
       groups[d].push(s)
     })
@@ -183,6 +234,8 @@ export default function History() {
         </h1>
         <p className="text-[14px] text-[#62748b]">Tüm çalışma kayıtlarını incele, ders/kaynak düzenle veya sil.</p>
       </div>
+
+      {error && <div role="alert" className="question-error">{error}<button onClick={() => ownerRef.current && void loadHistory(ownerRef.current)}>Tekrar dene</button></div>}
 
       {/* Edit Modal */}
       {edit && (
@@ -295,7 +348,7 @@ export default function History() {
           <span>Ders / Deneme</span>
           <span>Kaynak</span>
           <span>Tür</span>
-          <span>Süre</span>
+          <span>Süre / Soru</span>
           <span>Tarih</span>
           <span></span>
         </div>
@@ -305,7 +358,7 @@ export default function History() {
           {sessions.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-[#718096] text-[15px]">
               <Clock className="h-8 w-8 mb-2 opacity-40" />
-              Henüz çalışma kaydı yok.
+              {loading ? 'Yükleniyor…' : error ? 'Kayıtlar yüklenemedi.' : 'Henüz çalışma kaydı yok.'}
             </div>
           ) : (
             grouped.map(([date, dateSessions]) => (
@@ -335,6 +388,8 @@ export default function History() {
                       <div className="min-w-0">
                         <p className="font-semibold text-[#24354a] break-words">{s.session_type === 'mock_exam' ? (mockExamDisplayTitle(s.note) || 'Deneme') : getSubjectName(s.subject_id)}</p>
                         {s.session_type === 'mock_exam' && (mockExamDisplayExam(s.note) || s.subject_id) && <p className="mt-0.5 truncate text-xs text-[#8190a3]" title={s.note || undefined}>{mockExamDisplayExam(s.note) || getSubjectName(s.subject_id)}</p>}
+                        {s.question?.note && <p className="mt-0.5 text-xs text-[#62748b] break-words">{s.question.note}</p>}
+                        {s.question && (s.question.correct_questions != null || s.question.wrong_questions != null) && <p className="mt-0.5 text-xs text-[#62748b]">{[s.question.correct_questions != null ? `${s.question.correct_questions} doğru` : '', s.question.wrong_questions != null ? `${s.question.wrong_questions} yanlış` : ''].filter(Boolean).join(' · ')}</p>}
                       </div>
 
                       <div className="min-w-0">
@@ -345,12 +400,13 @@ export default function History() {
                         <span className={`px-1.5 py-0.5 rounded text-[12px] font-medium ${
                           s.session_type === 'mock_exam' ? 'bg-violet-50 text-violet-600' : s.session_type === 'manual' ? 'bg-amber-50 text-amber-600' : 'bg-blue-50 text-blue-600'
                         }`}>
-                          {typeLabels[s.session_type] ?? s.session_type}
+                          {s.question ? 'Soru çözümü' : typeLabels[s.session_type] ?? s.session_type}
                         </span>
                       </span>
 
                       <span className="font-semibold text-[#24354a]">
-                        {recordedMinutes(s.duration_minutes)} dk
+                        {s.duration_minutes > 0 && <span className="block">{recordedMinutes(s.duration_minutes)} dk</span>}
+                        {s.question && <button type="button" className="block text-xs text-[#4269a8] underline decoration-dotted" onClick={() => void editQuestions(s)} title="Soru çözümünü düzenle">{s.question.solved_questions} soru</button>}
                         {s.is_edited && <span className="text-[11px] text-orange-400 ml-1">✎</span>}
                       </span>
 
@@ -359,14 +415,14 @@ export default function History() {
                       <div className="flex items-center gap-1 justify-end">
                         <button
                           onClick={() => startEdit(s)}
-                          className="opacity-0 group-hover:opacity-100 h-7 w-7 flex items-center justify-center rounded-lg text-[#62748b] hover:bg-[#edf2f8] hover:text-[#4269a8] transition-all"
+                          className="h-7 w-7 flex items-center justify-center rounded-lg text-[#62748b] hover:bg-[#edf2f8] hover:text-[#4269a8] transition-all"
                           title="Düzenle"
                         >
                           <Pencil className="h-3 w-3" />
                         </button>
                         <button
-                          onClick={() => handleDelete(s.id)}
-                          className="opacity-0 group-hover:opacity-100 h-7 w-7 flex items-center justify-center rounded-lg text-red-400 hover:bg-red-50 transition-all"
+                          onClick={() => handleDelete(s)}
+                          className="h-7 w-7 flex items-center justify-center rounded-lg text-red-400 hover:bg-red-50 transition-all"
                           title="Sil"
                         >
                           <Trash2 className="h-3 w-3" />

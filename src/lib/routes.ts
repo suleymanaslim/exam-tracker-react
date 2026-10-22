@@ -1,4 +1,20 @@
-import { lazy } from 'react'
+import { lazy, type ComponentType } from 'react'
+import { shouldRefreshRoute } from './routeRecovery'
+
+function page<P extends object>(load: () => Promise<{ default: ComponentType<P> }>) {
+  return lazy(async () => {
+    try { return await load() }
+    catch (error) {
+      let retry = false
+      try { retry = shouldRefreshRoute(error, window.sessionStorage, import.meta.url, navigator.onLine) } catch { /* Storage may be blocked. */ }
+      if (retry) {
+        window.location.reload()
+        return new Promise<never>(() => {})
+      }
+      throw error
+    }
+  })
+}
 
 const loaders = {
   '/': () => import('../pages/Dashboard'),
@@ -15,19 +31,19 @@ const loaders = {
   '/videos': () => import('../pages/VideoPlan'),
   '/questions': () => import('../pages/QuestionPlan'),
 }
-export const Dashboard = lazy(loaders['/'])
-export const Login = lazy(loaders['/login'])
-export const Plan = lazy(loaders['/plan'])
-export const Study = lazy(loaders['/study'])
-export const History = lazy(loaders['/history'])
-export const Stats = lazy(loaders['/stats'])
-export const Settings = lazy(loaders['/settings'])
-export const Topics = lazy(loaders['/topics'])
-export const MonthlyPlan = lazy(loaders['/monthly-plan'])
-export const Admin = lazy(loaders['/admin'])
-export const Results = lazy(loaders['/results'])
-export const VideoPlan = lazy(loaders['/videos'])
-export const QuestionPlan = lazy(loaders['/questions'])
+export const Dashboard = page(loaders['/'])
+export const Login = page(loaders['/login'])
+export const Plan = page(loaders['/plan'])
+export const Study = page(loaders['/study'])
+export const History = page(loaders['/history'])
+export const Stats = page(loaders['/stats'])
+export const Settings = page(loaders['/settings'])
+export const Topics = page(loaders['/topics'])
+export const MonthlyPlan = page(loaders['/monthly-plan'])
+export const Admin = page(loaders['/admin'])
+export const Results = page(loaders['/results'])
+export const VideoPlan = page(loaders['/videos'])
+export const QuestionPlan = page(loaders['/questions'])
 
 // Load code on navigation intent, without fetching any account data or mounting a page.
 export function preloadRoute(path: string) {

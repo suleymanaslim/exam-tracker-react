@@ -7,9 +7,10 @@ Sınav hazırlığını tek çalışma alanında yönetmek için geliştirilen w
 - **Çalışma alanı:** Pomodoro, kronometre, kesintisiz odak ve soru çözümü oturumları; sekme yenilendiğinde oturum kurtarma.
 - **Deneme çözümü:** 80/180 dakika ve özel süre seçenekleri, kronometre, otomatik numaralı adlar, sekme kapandıktan sonra süreyi geri yükleme ve sonuç girişine geçiş.
 - **Planlama:** Haftalık çalışma planı, günlük ve haftalık soru hedefleri, video ders takvimi ve aylık konu hedefleri.
-- **Gelişim takibi:** Çalışma geçmişi, ders dağılımı, deneme sonuçları, net değişimleri ve soru istatistikleri.
+- **Gelişim takibi:** Süreli ve süresiz soru çözümlerini birlikte gösteren çalışma geçmişi, ders dağılımı, deneme sonuçları, net değişimleri ve soru istatistikleri.
 - **Konu yönetimi:** Kişisel listeler ve hesap bazında seçilen ortak AGS konuları.
 - **Yönetim:** Kullanıcı yönetimi, izinlerle kontrol edilen aylık plan paylaşımı ve topluluk görünürlüğü.
+- **Parçalı video izleme:** Tek videolu görevlerde 2, 3 veya 4 parçalı ilerleme; solda devam listesi ve tamamlanınca izlenen haftanın pazartesisine sabit 1 video kaydı.
 - **Dışa aktarma:** Çalışma raporları ve yazdırılabilir video planları.
 
 ## Teknolojiler
@@ -49,6 +50,7 @@ Test, gerçek kullanıcı verisi yerine sahte Supabase yanıtları kullanır. Sa
 npx playwright install chromium
 VITE_SUPABASE_URL=https://exam-test.supabase.co VITE_SUPABASE_ANON_KEY=fixture npm run build
 npm run test:browser
+npm run test:plans
 ```
 
 Önceki sürümün aynı değişkenlerle üretilmiş `dist` klasörünü `PERF_BASELINE_DIST` ortam değişkeniyle verirseniz aynı gecikmeler altında önce/sonra karşılaştırması da yapılır. Bu testteki süreler canlı ağın veya Supabase sunucusunun performans garantisi değildir.
@@ -62,6 +64,18 @@ Cloudflare Git entegrasyonunda build komutu `npm run build`, çıktı klasörü 
 `supabase/migrations/` altındaki SQL dosyaları ilgili özelliklerin şemasını, fonksiyonlarını ve RLS politikalarını içerir. Frontend dağıtımı bu SQL dosyalarını veritabanında otomatik çalıştırmaz. Yönetici parola işleminin kurulum ayrıntıları `supabase/functions/admin-change-password/README.md` içindedir.
 
 Arayüz, mevcut oturum bilgisini kullanarak tekrar eden kimlik isteklerini azaltır; veri erişimini Supabase JWT ve RLS politikaları doğrular. Başarılı veri okumaları yalnızca açık sekmenin belleğinde kısa süre tutulur. Yazma işlemleri, hesap değişimi ve ilgili güncelleme olayları önbelleği temizler. Erişim kontrolü yapan RPC yanıtları kalıcı olarak önbelleğe alınmaz.
+
+## Parçalı video için veritabanı güncellemesi
+
+Bu branch'i canlıya almadan önce Supabase SQL Editor'de `supabase/migrations/video_watch_parts.sql` dosyasının tamamını çalıştırın. Mevcut planlar ve izlenme sayıları korunur. Cloudflare dağıtımı SQL dosyasını kendiliğinden çalıştırmaz.
+
+Kısmi izleme hesapta saklanır; 1/2, 1/3 veya 1/4 izleme, izlenmiş video sayısına eklenmez. Tamamlandığında Türkiye saatine göre o haftanın pazartesisine 1 video yazılır ve önceki plan tarihi ayrıca korunur. Bu kayıt taşınamaz, düzenlenemez veya sıfırlanamaz; yalnızca uyarı onaylandıktan sonra silinir. Çok videolu görevler mevcut adet takibini kullanır.
+
+`npm test`, migration'ı geçici PostgreSQL ortamında (PGlite) çalıştırarak hesap izinlerini, tekrar denemeleri, pazartesi kaydını ve değişiklik kilidini de doğrular; canlı veritabanına bağlanmaz.
+
+## Cihazlarda açılma sorunu
+
+Yeni yayın sonrası eski sayfa dosyalarının yüklenememesi için bir kez otomatik yenileme ve başlangıçta hata görünümü bulunur. HTML yeniden doğrulanır, içerik adı değişen Vite dosyaları uzun süre saklanır. Bu düzenlemeler tarayıcının DNS/SSL veya “siteye ulaşılamıyor” hatasını çözmez; o durumda kullanılan tam adres, hata kodu ve cihaz/ağ bilgisiyle Cloudflare alan adı erişimi incelenmelidir. Arayüzün kullandığı Tailwind 4 için Safari 16.4+, Chrome 111+ ve Firefox 128+ gerekir.
 
 ## Proje yapısı
 
