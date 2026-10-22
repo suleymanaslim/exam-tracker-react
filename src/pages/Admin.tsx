@@ -66,7 +66,7 @@ export default function Admin() {
     setVisibilityReady(false); setVisibilityLoadError('')
     try {
       const [profileResult, preferences] = await Promise.all([
-        supabase.from('profiles').select('*').order('role', { ascending: false }).order('display_name'),
+        supabase.from('profiles').select('id,display_name,email,role').order('role', { ascending: false }).order('display_name'),
         supabase.from('dashboard_community_preferences').select('user_id,show_widget,share_statistics'),
       ])
       if (profileResult.error) throw profileResult.error

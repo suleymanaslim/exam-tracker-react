@@ -1,6 +1,6 @@
 import './SuitePages.css'
 import { useEffect, useState, useMemo } from 'react'
-import { supabase } from '../lib/supabase'
+import { supabase, getCurrentUser } from '../lib/supabase'
 import Swal from 'sweetalert2'
 import {
   History as HistoryIcon, Pencil, Trash2, Check,
@@ -59,7 +59,7 @@ export default function History() {
   const { impersonatedUserId } = useAdminStore()
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
+    getCurrentUser().then(({ data: { user } }) => {
       if (user) {
         const targetUid = impersonatedUserId || user.id
         loadSessions(targetUid)
@@ -81,14 +81,17 @@ export default function History() {
     return map
   }, [subjects])
 
+  const examsById = useMemo(() => new Map(exams.map(exam => [exam.id, exam])), [exams])
+  const subjectsById = useMemo(() => new Map(subjects.map(subject => [subject.id, subject])), [subjects])
+  const resourcesById = useMemo(() => new Map(resources.map(resource => [resource.id, resource])), [resources])
   const getExam = (subjectId: string | null) => {
     if (!subjectId) return null
-    return exams.find(e => e.id === subjectToExam[subjectId]) ?? null
+    return examsById.get(subjectToExam[subjectId]) ?? null
   }
-  const getSubjectName = (id: string | null) => subjects.find(s => s.id === id)?.name ?? '-'
+  const getSubjectName = (id: string | null) => subjectsById.get(id || '')?.name ?? '-'
   const getResourceName = (id: string | null) => {
     if (!id) return '-'
-    return resources.find(r => r.id === id)?.name ?? '-'
+    return resourcesById.get(id)?.name ?? '-'
   }
 
   const handleDelete = async (id: string) => {

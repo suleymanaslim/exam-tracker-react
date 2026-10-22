@@ -59,7 +59,7 @@ const initial = {
 export const useTimerStore = create<TimerState>((set, get) => ({
   ...initial,
   setIsRunning: value => set({ isRunning: value }),
-  setSecondsLeft: value => set({ secondsLeft: value }),
+  setSecondsLeft: value => set(state => state.secondsLeft === value ? state : { secondsLeft: value }),
   setTotalSeconds: value => set({ totalSeconds: value, ...(get().phase === 'focus' && !get().startedAt ? { focusSeconds: value } : {}) }),
   setStartedAt: value => set({ startedAt: value, sessionId: value ? get().sessionId || crypto.randomUUID() : null }),
   setMode: value => set({ mode: value, ...(value !== 'questions' ? { previousStudyMode: value } : {}), questionPlanId: null, questionDate: null, questionTarget: null }), setPhase: value => set({ phase: value }),

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { BookOpenCheck, Check, ChevronLeft, ChevronRight, Plus, RefreshCw, Play, Pencil, Trash2, Copy } from 'lucide-react'
 import Swal from 'sweetalert2'
-import { supabase } from '../lib/supabase'
+import { supabase, getCurrentUser } from '../lib/supabase'
 import { useAdminStore } from '../lib/adminStore'
 import { questionCount, completedVideo } from '../lib/questionPlan'
 import type { QuestionPlan as QuestionTask, QuestionVideo, QuestionLog } from '../lib/questionPlan'
@@ -63,7 +63,7 @@ export default function QuestionPlan() {
     loadVersion.current++
     ownerRef.current = null; setCopyScope(null)
     setPlans([]); setLessons([]); setLogs([]); setSubjects([]); setUserId(null); setError(''); setLoading(true)
-    void supabase.auth.getUser().then(({ data: { user } }) => {
+    void getCurrentUser().then(({ data: { user } }) => {
       if (cancelled) return
       if (!user) { setLoading(false); return }
       const uid = impersonatedUserId || user.id

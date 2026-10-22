@@ -1,7 +1,7 @@
 import './Study.css'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { supabase } from '../lib/supabase'
+import { supabase, getCurrentUser } from '../lib/supabase'
 import { useTimerStore } from '../lib/timerStore'
 import { saveTimerSession } from '../lib/useGlobalTimer'
 import { recoveryFor, isCountUp, recordedMinutes, canContinueRecovery } from '../lib/timerRecovery'
@@ -27,6 +27,8 @@ import TimedMockExam from './TimedMockExam'
 import { useMockExamStore } from '../lib/mockExamStore'
 import ManualSessionDialog from '../components/study/ManualSessionDialog'
 import type { Exam, Subject, Resource, PomodoroSettings, PlanItem, SessionMode, SelectionSource, TaskRow } from '../components/study/types'
+
+const formatDuration = (minutes: number) => { const value = Math.max(0, Math.round(minutes)); return `${Math.floor(value / 60) ? `${Math.floor(value / 60)} sa ` : ''}${value % 60} dk` }
 
 export default function Study({ mockExam = false }: { mockExam?: boolean }) {
   const mockActive = useMockExamStore(state => state.active)
@@ -99,7 +101,7 @@ export default function Study({ mockExam = false }: { mockExam?: boolean }) {
   }
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
+    getCurrentUser().then(({ data: { user } }) => {
       if (user) {
         const targetUid = impersonatedUserId || user.id
         setUserId(targetUid)
@@ -404,11 +406,9 @@ export default function Study({ mockExam = false }: { mockExam?: boolean }) {
 
   const isTimerActive = isRunning || !!startedAt || phase === 'break' || !!recovery
 
-  const getSubjectName = (id: string | null) => subjects.find(s => s.id === id)?.name ?? ''
 
   // Mola teması
   const isBreak = phase === 'break'
-  const formatDuration = (minutes: number) => { const value = Math.max(0, Math.round(minutes)); return `${Math.floor(value / 60) ? `${Math.floor(value / 60)} sa ` : ''}${value % 60} dk` }
   const selectedSubject = subjects.find(subject => subject.id === selSubject)
   const selectedResource = resources.find(resource => resource.id === selResource)
   const selectedPlanTask = selectionSource === 'plan' ? todayPlan.find(item => item.id === selectedTaskId) : null
@@ -434,9 +434,21 @@ export default function Study({ mockExam = false }: { mockExam?: boolean }) {
     stopTimerAlarm(); unlockTimerAlarm()
     startQuestions({ examId: task.subjects.exam_id, subjectId: task.subject_id, resourceId: task.resource_id, planId: task.id, target: task.target_questions, date: task.date })
   }
-  const studiedToday = (subjectId: string | null) => Math.round(todaySessions.filter(session => session.subject_id === subjectId).reduce((sum, session) => sum + Number(session.duration_minutes || 0), 0))
-  const taskRows: TaskRow[] = todayPlan.map(item => {
-    const studied = todaySessions.filter(session => session.subject_id === item.subject_id && (!item.resource_id || session.resource_id === item.resource_id)).reduce((sum, session) => sum + Number(session.duration_minutes || 0), 0)
+  const todayTotals = useMemo(() => {
+    const subjects = new Map<string | null, number>(), resources = new Map<string, number>()
+    let total = 0
+    for (const session of todaySessions) {
+      const minutes = Number(session.duration_minutes || 0)
+      subjects.set(session.subject_id, (subjects.get(session.subject_id) || 0) + minutes)
+      const key = `${session.subject_id}|${session.resource_id}`
+      resources.set(key, (resources.get(key) || 0) + minutes)
+      total += minutes
+    }
+    return { subjects, resources, total }
+  }, [todaySessions])
+  const subjectsById = useMemo(() => new Map(subjects.map(subject => [subject.id, subject])), [subjects])
+  const taskRows = useMemo<TaskRow[]>(() => todayPlan.map(item => {
+    const studied = item.resource_id ? todayTotals.resources.get(`${item.subject_id}|${item.resource_id}`) || 0 : todayTotals.subjects.get(item.subject_id) || 0
     const videoCount = item.video_count
     const isVideo = videoCount != null
     const detail = isVideo
@@ -446,17 +458,17 @@ export default function Study({ mockExam = false }: { mockExam?: boolean }) {
       ? (videoCount > 0 && (item.watched_count || 0) >= videoCount) || !!item.is_completed
       : item.planned_minutes > 0 && studied >= item.planned_minutes
     return {
-      id: item.id, name: getSubjectName(item.subject_id) || 'Çalışma', detail,
-      todayMinutes: studiedToday(item.subject_id), kind: isVideo ? 'video' : 'study', done,
-      disabled: !item.subject_id || !subjects.some(subject => subject.id === item.subject_id) || ownerId !== userId,
+      id: item.id, name: subjectsById.get(item.subject_id || '')?.name || 'Çalışma', detail,
+      todayMinutes: Math.round(todayTotals.subjects.get(item.subject_id) || 0), kind: isVideo ? 'video' : 'study', done,
+      disabled: !item.subject_id || !subjectsById.has(item.subject_id) || ownerId !== userId,
     }
-  })
-  const questionRows: TaskRow[] = questionPlans.map(task => ({ id: task.id, name: task.subjects?.name || 'Ders kaldırıldı', detail: `${task.solved_questions} / ${task.target_questions} soru${task.period === 'week' ? ' · Haftalık' : task.date < todayKey ? ' · Bekleyen' : ''}`, todayMinutes: studiedToday(task.subject_id), kind: 'questions', done: task.target_questions != null && task.solved_questions >= task.target_questions, disabled: !task.subject_id || !task.subjects?.exam_id || ownerId !== userId || !!questionError }))
+  }), [todayPlan, todayTotals, subjectsById, ownerId, userId])
+  const questionRows = useMemo<TaskRow[]>(() => questionPlans.map(task => ({ id: task.id, name: task.subjects?.name || 'Ders kaldırıldı', detail: `${task.solved_questions} / ${task.target_questions} soru${task.period === 'week' ? ' · Haftalık' : task.date < todayKey ? ' · Bekleyen' : ''}`, todayMinutes: Math.round(todayTotals.subjects.get(task.subject_id) || 0), kind: 'questions', done: task.target_questions != null && task.solved_questions >= task.target_questions, disabled: !task.subject_id || !task.subjects?.exam_id || ownerId !== userId || !!questionError })), [questionPlans, todayKey, todayTotals, ownerId, userId, questionError])
   const activeQuestion = questionPlans.find(task => task.id === (questionPlanId || selectedTaskId))
   const timerDetail = mode === 'questions'
     ? activeQuestion ? `${activeQuestion.solved_questions} / ${activeQuestion.target_questions} soru` : 'Ek soru çözümü'
     : selectedVideoCount != null ? '' : mode === 'manual' ? `${focusMinutes} dk kesintisiz odak` : ''
-  const savedTodayMinutes = todaySessions.reduce((sum, session) => sum + Number(session.duration_minutes || 0), 0)
+  const savedTodayMinutes = todayTotals.total
 
   return (
     <div className={`study-page ${(mockExam ? !!mockActive : isTimerActive) ? 'is-zen' : ''}`}>

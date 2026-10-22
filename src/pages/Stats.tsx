@@ -2,7 +2,7 @@ import './Stats.css'
 import QuestionProgress from '../components/QuestionProgress'
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, BarChart3 } from 'lucide-react'
-import { supabase } from '../lib/supabase'
+import { supabase, getCurrentUser } from '../lib/supabase'
 import { useAdminStore } from '../lib/adminStore'
 import { localDayKey, mondayOf, weekBounds } from '../lib/statsPeriod'
 import { analyzeStudy, minutesLabel, type StudyRecord } from '../lib/studyAnalytics'
@@ -23,7 +23,7 @@ export default function Stats() {
     setLoading(true); setError('')
     async function load() {
       try {
-        const { data: { user }, error: authError } = await supabase.auth.getUser()
+        const { data: { user }, error: authError } = await getCurrentUser()
         if (authError || !user) throw new Error('Oturum bulunamadı.')
         const uid = impersonatedUserId || user.id
         const readSessions = async () => {
@@ -52,12 +52,12 @@ export default function Stats() {
   const shift = (direction: number) => { const next = new Date(start); next.setDate(next.getDate() + direction * 7); setWeek(localDayKey(next)) }
   const max = Math.max(1, ...data.buckets.map(b => b.minutes))
   const difference = data.previous === null ? null : data.total - data.previous
-  if (loading) return <div className="analytics-state" role="status">İstatistikler yükleniyor…</div>
   if (error) return <div className="analytics-state" role="alert"><p>{error}</p><button onClick={() => setRetry(r => r + 1)}>Tekrar dene</button></div>
   return <main className="analytics">
     <header className="analytics-header"><h1><BarChart3 size={24} /> İstatistikler</h1><div className="analytics-period" aria-label="Dönem">{(['all', 'week'] as const).map(p => <button key={p} aria-pressed={period === p} onClick={() => setPeriod(p)}>{p === 'all' ? 'Tüm zamanlar' : 'Haftalık'}</button>)}</div></header>
     <div className="analytics-dates"><p aria-live="polite">{period === 'all' ? 'İlk çalışma kaydından bugüne' : `${date(start)} – ${date(last)}`}</p>{period === 'week' && <div><button onClick={() => shift(-1)} aria-label="Önceki hafta"><ChevronLeft size={18} /></button><input type="date" aria-label="Hafta seç" value={week} onChange={e => { if (e.target.value) setWeek(localDayKey(mondayOf(new Date(`${e.target.value}T00:00:00`)))) }} /><button onClick={() => shift(1)} aria-label="Sonraki hafta"><ChevronRight size={18} /></button><button onClick={() => setWeek(localDayKey(mondayOf(new Date())))}>Bu hafta</button></div>}</div>
     <QuestionProgress week={period === 'week' ? week : null} />
+    {loading ? <div className="analytics-state" role="status">İstatistikler yükleniyor…</div> : <>
     <section className="analytics-kpis">{[
       ['Toplam süre', minutesLabel(data.total), period === 'week' && difference !== null && data.days > 0 ? `${difference >= 0 ? '+' : '−'}${minutesLabel(Math.abs(difference))} · önceki haftanın aynı günleri` : `${data.selected.length} oturum`],
       ['Çalışılan gün', `${data.active} / ${data.days}`, 'Geçen takvim günleri'],
@@ -67,5 +67,6 @@ export default function Stats() {
     <section className="analytics-card analytics-trend"><h2>{period === 'week' ? 'Günlük çalışma' : 'Son 12 hafta'}<span>{period === 'week' ? '7 gün' : 'Haftalık toplamlar'}</span></h2><div className={`analytics-bars ${period === 'all' ? 'analytics-bars-long' : ''}`}>{data.buckets.map(b => <div className="analytics-bar" key={b.key}><span>{minutesLabel(b.minutes)}</span><div><i style={{ height: `${b.minutes / max * 100}%` }} /></div><strong>{b.label}</strong></div>)}</div></section>
     <div className="analytics-details"><section className="analytics-card"><h2>Ders dağılımı<span>Süre · oturum · pay</span></h2>{data.bySubject.length === 0 ? <p className="analytics-empty">Bu dönemde çalışma kaydı yok.</p> : data.bySubject.map(row => { const subject = subjects.find(s => s.id === row.id); const exam = exams.find(e => e.id === subject?.exam_id); const share = data.total ? row.minutes / data.total * 100 : 0; return <div className="analytics-subject" key={row.id}><div><strong>{subject?.name || 'Ders belirtilmemiş'}</strong><span>{exam?.name || 'Diğer'}</span></div><div><strong>{minutesLabel(row.minutes)}</strong><span>{row.count} oturum · %{Math.round(share)}</span></div><div className="analytics-meter"><i style={{ width: `${share}%`, background: exam?.color || '#4269a8' }} /></div></div> })}</section>
     <section className="analytics-card"><h2>Çalışma saatleri</h2>{['Gece · 00–06', 'Sabah · 06–12', 'Öğle · 12–18', 'Akşam · 18–24'].map((label, i) => <div className="analytics-time" key={label}><div><span>{label}</span><strong>{minutesLabel(data.timeOfDay[i])}</strong></div><div className="analytics-meter"><i style={{ width: `${data.total ? data.timeOfDay[i] / data.total * 100 : 0}%` }} /></div></div>)}<p className="analytics-caption">Oturumun başladığı saate göre</p></section></div>
+    </>}
   </main>
 }

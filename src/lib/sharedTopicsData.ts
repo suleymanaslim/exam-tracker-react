@@ -24,19 +24,23 @@ export async function fetchSharedTopics(client: SupabaseClient, userId: string) 
     progress: progress as unknown as SharedTopicProgress[] }
 }
 export async function fetchMonthlyData(client: SupabaseClient, ownerId: string) {
-  const agsTopicSource = await readAgsTopicSource(client, ownerId)
-  const [shared, personal, subjects, exams, targets] = await Promise.all([
-    agsTopicSource === 'shared' ? fetchSharedTopics(client, ownerId) : Promise.resolve({ subjects: [], topics: [], progress: [] }), readTopicPages(client, 'topics', { field: 'user_id', id: ownerId }),
+  const source = readAgsTopicSource(client, ownerId)
+  const [agsTopicSource, shared, personal, subjects, exams, targets] = await Promise.all([
+    source, source.then(value => value === 'shared' ? fetchSharedTopics(client, ownerId) : { subjects: [], topics: [], progress: [] }), readTopicPages(client, 'topics', { field: 'user_id', id: ownerId }),
     readTopicPages(client, 'subjects', { field: 'user_id', id: ownerId }), readTopicPages(client, 'exams', { field: 'user_id', id: ownerId }),
     readTopicPages(client, 'monthly_topic_targets', { field: 'owner_id', id: ownerId }),
   ])
+  const sharedSubjects = new Map(shared.subjects.map(subject => [subject.id, subject]))
+  const sharedProgress = new Map(shared.progress.map(progress => [progress.topic_id, progress]))
+  const subjectById = new Map(subjects.map(subject => [subject.id, subject]))
+  const examById = new Map(exams.map(exam => [exam.id, exam]))
   const topics: MonthlyTopic[] = [
     ...shared.topics.map(topic => ({ key: `shared:${topic.id}`, id: topic.id, kind: 'shared' as const,
-      subjectKey: `shared:${topic.subject_id}`, subject: shared.subjects.find(subject => subject.id === topic.subject_id)?.name || 'Ders', exam: 'AGS · Ortak', title: topic.title,
-      completed: shared.progress.find(progress => progress.topic_id === topic.id)?.is_completed === true, archived: !!topic.archived_at, isAgs: true })),
+      subjectKey: `shared:${topic.subject_id}`, subject: sharedSubjects.get(topic.subject_id)?.name || 'Ders', exam: 'AGS · Ortak', title: topic.title,
+      completed: sharedProgress.get(topic.id)?.is_completed === true, archived: !!topic.archived_at, isAgs: true })),
     ...personal.map(topic => {
-      const subject = subjects.find(subject => subject.id === topic.subject_id)
-      const exam = exams.find(exam => exam.id === subject?.exam_id)
+      const subject = subjectById.get(topic.subject_id)
+      const exam = examById.get(subject?.exam_id)
       return { key: `personal:${topic.id}`, id: String(topic.id), kind: 'personal' as const, subjectKey: `personal:${topic.subject_id}`,
         subject: String(subject?.name || 'Ders kaldırıldı'), exam: String(exam?.name || 'Kişisel'),
         title: String(topic.title), completed: topic.is_completed === true, archived: false,

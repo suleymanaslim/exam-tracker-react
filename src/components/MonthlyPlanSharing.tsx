@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { CalendarDays, RefreshCw } from 'lucide-react'
-import { supabase } from '../lib/supabase'
+import { supabase, getCurrentUser } from '../lib/supabase'
 import { profileNameLabel } from '../lib/profileName'
 import { monthlyPlanAccessError, notifyMonthlyPlanAccessChanged } from '../lib/monthlyPlanAccess'
 import './MonthlyPlanSharing.css'
@@ -20,7 +20,7 @@ export default function MonthlyPlanSharing({ profiles }: { profiles: Profile[] }
     let active = true
     void (async () => {
       try {
-        const { data: { user }, error: authError } = await supabase.auth.getUser()
+        const { data: { user }, error: authError } = await getCurrentUser()
         if (authError || !user) throw authError || new Error('Oturum yok')
         const { data, error } = await supabase.from('monthly_plan_viewers').select('viewer_id').eq('plan_owner_id', user.id)
         if (error) throw error

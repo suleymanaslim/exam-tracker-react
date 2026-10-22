@@ -4,13 +4,15 @@ import '@fontsource/source-sans-3/latin-ext-600.css'
 import '@fontsource/source-sans-3/latin-400.css'
 import '@fontsource/source-sans-3/latin-600.css'
 import { Link, Outlet, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
-import { useState, useEffect, useRef } from 'react'
+import { Suspense, useState, useEffect, useRef } from 'react'
 import {
   LayoutDashboard, Calendar, CalendarDays, Timer, History,
   BarChart3, Settings, LogOut,
   BookMarked, Award, PlayCircle, BookOpenCheck
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { preloadRoute } from '../lib/routes'
+import RouteBoundary from './RouteBoundary'
 import { useTimerStore } from '../lib/timerStore'
 import { useAdminStore } from '../lib/adminStore'
 import { ShieldAlert } from 'lucide-react'
@@ -42,7 +44,34 @@ const mobileNavItems = [
   { href: '/settings',  label: 'Ayarlar',       icon: Settings },
 ]
 
-export default function AppLayout() {
+function MockRuntime({ ownerId }: { ownerId: string | null }) {
+  useMockExamRuntime(ownerId)
+  return null
+}
+
+function StudyTimerBadge({ mobile = false }: { mobile?: boolean }) {
+  const isRunning = useTimerStore(state => state.isRunning)
+  const secondsLeft = useTimerStore(state => state.secondsLeft)
+  const mode = useTimerStore(state => state.mode)
+  if (!isRunning) return null
+  const label = `${String(Math.floor(secondsLeft / 60)).padStart(2, '0')}:${String(secondsLeft % 60).padStart(2, '0')}`
+  return <Link to="/study" className={mobile ? 'app-timer app-timer-mobile' : 'app-timer'} aria-label={`Çalışmaya dön, ${mode === 'stopwatch' ? 'çalışılan süre' : 'kalan süre'} ${label}`}><span className="app-timer-dot" /><span>{label}</span></Link>
+}
+
+function MockExamBadge() {
+  const { active: mockExam, now } = useMockExamStore()
+  const { pathname } = useLocation()
+  if (!mockExam || pathname === '/timed-mock-exam' || (mockExam.recorded && pathname === '/results')) return null
+  const time = mockExamTime(mockExam, now)
+  return <Link to={mockExam.recorded ? '/results' : '/timed-mock-exam'} className="app-mock-return" aria-label={`${mockExam.title}, ${mockExam.recorded ? 'sonuçları gir' : 'denemeye dön'}`}>
+    <Timer size={17} aria-hidden="true" />
+    <span className="app-mock-return-title"><strong>{mockExam.title}</strong><span>{mockExam.recorded ? 'Sonuç girişi bekliyor' : mockExam.finishedAt !== undefined ? 'Süre kaydı bekliyor' : 'Deneme devam ediyor'}</span></span>
+    <span className="app-mock-return-clock">{formatMockDuration(mockExam.mode === 'countdown' ? time.remaining ?? 0 : time.elapsed)}</span>
+    <span className="app-mock-return-action">{mockExam.recorded ? 'Sonuçları gir' : 'Denemeye dön'}</span>
+  </Link>
+}
+
+export default function AppLayout({ userId }: { userId: string }) {
   const location = useLocation()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -53,44 +82,29 @@ export default function AppLayout() {
     sidebarTimer.current = setTimeout(() => setExpanded(open), delay)
   }
   useEffect(() => () => { if (sidebarTimer.current) clearTimeout(sidebarTimer.current) }, [])
-  const { isRunning, secondsLeft, mode } = useTimerStore()
-  const { isAdmin, impersonatedUserId, setIsAdmin, setImpersonatedUserId } = useAdminStore()
+  const { isAdmin: storedIsAdmin, impersonatedUserId, setIsAdmin, setImpersonatedUserId } = useAdminStore()
 
-  const [contextReady, setContextReady] = useState(false)
-  const [authenticatedUserId, setAuthenticatedUserId] = useState<string | null>(null)
-  const { active: mockExam, now: mockNow } = useMockExamStore()
-  useMockExamRuntime(contextReady && authenticatedUserId ? impersonatedUserId || authenticatedUserId : null)
-  const mockTime = mockExam ? mockExamTime(mockExam, mockNow) : null
+  const requestedImpersonation = searchParams.get('impersonate')
+  const [roleAccount, setRoleAccount] = useState<string | null>(null)
+  const isAdmin = roleAccount === userId && storedIsAdmin
+  // Only impersonation/admin routes need a role check before mounting their contents.
+  const contextReady = roleAccount === userId || (!impersonatedUserId && !requestedImpersonation && location.pathname !== '/admin')
   const navPath = location.pathname === '/timed-mock-exam' ? '/study' : location.pathname
   const { plans: monthlyPlans } = useMonthlyPlanAccess()
   const canViewMonthlyPlan = isAdmin || monthlyPlans.length > 0
 
   useEffect(() => {
     let cancelled = false
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) {
-        setAuthenticatedUserId(user.id)
-        supabase.from('profiles').select('role').eq('id', user.id).single().then(r => {
-          if (cancelled) return
-          const isUserAdmin = r.data?.role === 'admin'
-          setIsAdmin(isUserAdmin)
-          
-          if (!isUserAdmin) setImpersonatedUserId(null)
-          if (isUserAdmin) {
-            const impId = searchParams.get('impersonate')
-            if (impId) {
-              setImpersonatedUserId(impId)
-            }
-          }
-          setContextReady(true)
-        })
-      } else {
-        setImpersonatedUserId(null)
-        setContextReady(true)
-      }
+    void supabase.from('profiles').select('id,role,display_name,email').eq('id', userId).maybeSingle().then(result => {
+      if (cancelled) return
+      const admin = !result.error && result.data?.role === 'admin'
+      setIsAdmin(admin)
+      if (!admin) setImpersonatedUserId(null)
+      else if (requestedImpersonation) setImpersonatedUserId(requestedImpersonation)
+      setRoleAccount(userId)
     })
     return () => { cancelled = true }
-  }, [setIsAdmin, searchParams, setImpersonatedUserId])
+  }, [userId, requestedImpersonation, setIsAdmin, setImpersonatedUserId])
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -99,18 +113,16 @@ export default function AppLayout() {
     navigate('/login')
   }
 
-  const timerMM = String(Math.floor(secondsLeft / 60)).padStart(2, '0')
-  const timerSS = String(secondsLeft % 60).padStart(2, '0')
-
   return (
     <div className="app-shell flex h-dvh w-full overflow-hidden bg-[#f0f4f8]">
+      <MockRuntime ownerId={contextReady ? impersonatedUserId || userId : null} />
       <aside className={`app-sidebar ${expanded ? 'is-expanded' : 'is-collapsed'}`} onMouseEnter={() => scheduleSidebar(true, 120)} onMouseLeave={() => scheduleSidebar(false, 320)} onFocus={() => scheduleSidebar(true, 0)} onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) scheduleSidebar(false, 320) }}>
         <div className="app-brand"><img className="app-brand-image" src="/studytracker-logo.png" alt="StudyTracker logosu" width="36" height="36" /><div className="app-nav-label"><strong>StudyTracker</strong><span>Çalışma alanın</span></div></div>
 
-        {isRunning && <Link to="/study" className="app-timer" aria-label={`Çalışmaya dön, ${mode === 'stopwatch' ? 'çalışılan süre' : 'kalan süre'} ${timerMM}:${timerSS}`}><span className="app-timer-dot" /><span>{timerMM}:{timerSS}</span></Link>}
+        <StudyTimerBadge />
         <nav className="app-nav" aria-label="Ana gezinme">
           <p className="app-nav-caption app-nav-label">ÇALIŞMA ALANI</p>
-          {navItems.map(item => <Link key={item.href} to={item.href} title={item.label} aria-label={item.label} aria-current={navPath === item.href ? 'page' : undefined} className={`app-nav-link ${navPath === item.href ? 'is-active' : ''}`}><item.icon size={19} /><span className="app-nav-label">{item.label}</span></Link>)}
+          {navItems.map(item => <Link key={item.href} to={item.href} onMouseEnter={() => preloadRoute(item.href)} onFocus={() => preloadRoute(item.href)} title={item.label} aria-label={item.label} aria-current={navPath === item.href ? 'page' : undefined} className={`app-nav-link ${navPath === item.href ? 'is-active' : ''}`}><item.icon size={19} /><span className="app-nav-label">{item.label}</span></Link>)}
           {canViewMonthlyPlan && <Link to="/monthly-plan" title="Aylık Plan" aria-label="Aylık Plan" aria-current={location.pathname === '/monthly-plan' ? 'page' : undefined} className={`app-nav-link ${location.pathname === '/monthly-plan' ? 'is-active' : ''}`}><CalendarDays size={19} /><span className="app-nav-label">Aylık Plan</span></Link>}
           {isAdmin && <Link to="/admin" title="Admin Paneli" aria-label="Admin Paneli" aria-current={location.pathname === '/admin' ? 'page' : undefined} className={`app-nav-link app-admin-link ${location.pathname === '/admin' ? 'is-active' : ''}`}><ShieldAlert size={19} /><span className="app-nav-label">Admin Paneli</span></Link>}
         </nav>
@@ -128,12 +140,7 @@ export default function AppLayout() {
               </div>
               <span className="text-[16px] font-semibold text-[#24354a]">StudyTracker</span>
             </div>
-            {isRunning && (
-              <div className="flex items-center gap-1.5 bg-blue-500/20 border border-blue-400/30 rounded-lg px-2.5 py-1">
-                <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-                <span className="text-blue-300 text-[12px] font-mono font-bold">{timerMM}:{timerSS}</span>
-              </div>
-            )}
+            <StudyTimerBadge mobile />
           </div>
         )}
 
@@ -144,18 +151,13 @@ export default function AppLayout() {
               <button className="min-h-9 rounded-lg border border-indigo-200 bg-white px-3 font-semibold text-indigo-700" onClick={() => { setImpersonatedUserId(null); navigate('/admin') }}>Kendi hesabıma dön</button>
             </div>
             <nav aria-label="Kullanıcı hesabı sayfaları" className="mt-2 flex flex-wrap gap-1">
-              {navItems.filter(item => item.href !== '/settings' && item.href !== '/study').map(item => <Link key={item.href} to={item.href} className={`rounded-lg px-3 py-2 text-xs font-medium ${navPath === item.href ? 'bg-indigo-600 text-white' : 'text-indigo-700 hover:bg-indigo-100'}`}>{item.label}</Link>)}
+              {navItems.filter(item => item.href !== '/settings' && item.href !== '/study').map(item => <Link key={item.href} to={item.href} onMouseEnter={() => preloadRoute(item.href)} onFocus={() => preloadRoute(item.href)} className={`rounded-lg px-3 py-2 text-xs font-medium ${navPath === item.href ? 'bg-indigo-600 text-white' : 'text-indigo-700 hover:bg-indigo-100'}`}>{item.label}</Link>)}
             </nav>
           </div>
         )}
-        {mockExam && mockTime && location.pathname !== '/timed-mock-exam' && !(mockExam.recorded && location.pathname === '/results') && <Link to={mockExam.recorded ? '/results' : '/timed-mock-exam'} className="app-mock-return" aria-label={`${mockExam.title}, ${mockExam.recorded ? 'sonuçları gir' : 'denemeye dön'}`}>
-          <Timer size={17} aria-hidden="true" />
-          <span className="app-mock-return-title"><strong>{mockExam.title}</strong><span>{mockExam.recorded ? 'Sonuç girişi bekliyor' : mockExam.finishedAt !== undefined ? 'Süre kaydı bekliyor' : 'Deneme devam ediyor'}</span></span>
-          <span className="app-mock-return-clock">{formatMockDuration(mockExam.mode === 'countdown' ? mockTime.remaining ?? 0 : mockTime.elapsed)}</span>
-          <span className="app-mock-return-action">{mockExam.recorded ? 'Sonuçları gir' : 'Denemeye dön'}</span>
-        </Link>}
+        <MockExamBadge />
         <div className="flex-1 overflow-auto p-4 md:p-5 pb-20 md:pb-5">
-          <>{contextReady ? <Outlet key={impersonatedUserId || 'self'} /> : <p className="p-4 text-sm text-slate-500">Hesap yükleniyor…</p>}</>
+          <RouteBoundary key={location.pathname}><Suspense fallback={<div className="route-loading" role="status">Sayfa hazırlanıyor…</div>}>{contextReady ? <Outlet key={impersonatedUserId || userId} /> : <p className="p-4 text-sm text-slate-500">Hesap yükleniyor…</p>}</Suspense></RouteBoundary>
         </div>
       </main>
 
@@ -166,7 +168,7 @@ export default function AppLayout() {
           return (
             <Link
               key={item.href}
-              to={item.href}
+              to={item.href} onMouseEnter={() => preloadRoute(item.href)} onFocus={() => preloadRoute(item.href)}
               className={`flex flex-col items-center justify-center gap-1 px-1 rounded-xl transition-all min-w-0 flex-1 h-12 ${
                 isActive ? 'text-[#4269a8] bg-[#edf2f8]' : 'text-[#617187] hover:text-[#4269a8]'
               }`}

@@ -8,10 +8,16 @@ export function answerNet(correct: number, incorrect: number, penalty: number | 
 }
 export function examTrend(results: ExamEntry[], details: AnswerEntry[], exam: ExamRule | undefined, questionType: string = '') {
   if (!exam) return []
+  const byResult = new Map<string, AnswerEntry[]>()
+  for (const detail of details) {
+    if (questionType && detail.question_type_id !== questionType) continue
+    const group = byResult.get(detail.result_id) || []
+    group.push(detail); byResult.set(detail.result_id, group)
+  }
   return results.filter(r => r.exam_id === exam.id && !r.is_draft)
     .sort((a, b) => a.date.localeCompare(b.date) || a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id))
     .map((result, index) => {
-      const answers = details.filter(d => d.result_id === result.id && (!questionType || d.question_type_id === questionType))
+      const answers = byResult.get(result.id) || []
       const correct = answers.reduce((sum, d) => sum + d.correct_count, 0)
       const incorrect = answers.reduce((sum, d) => sum + d.incorrect_count, 0)
       const net = answers.length ? (questionType ? answerNet(correct, incorrect, exam.wrong_penalty) : Math.max(0, answerNet(correct, incorrect, exam.wrong_penalty))) : null

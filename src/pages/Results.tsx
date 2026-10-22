@@ -1,17 +1,18 @@
 import './SuitePages.css'
 import './Results.css'
 import { examHasPoints, examScoreLabel } from '../lib/examTemplates'
-import { useEffect, useState, useMemo, useRef } from 'react'
+import { lazy, Suspense, useEffect, useState, useMemo, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { supabase } from '../lib/supabase'
+import { supabase, getCurrentUser } from '../lib/supabase'
 import { Plus, Trash2, Calendar, Award, List, X, Edit3, Eye } from 'lucide-react'
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ReferenceLine, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts'
 import Swal from 'sweetalert2'
 import CustomSelect from '../components/CustomSelect'
 import { useAdminStore } from '../lib/adminStore'
 import { answerLimit, readAnswerInput, validateAnswers } from '../lib/resultAnswers'
 import { clearMockExamResult, useMockExamStore } from '../lib/mockExamStore'
 import { examTrend, questionComparison, groupQuestionChanges } from '../lib/examAnalytics'
+
+const ExamHistoryChart = lazy(() => import('../components/ExamHistoryChart'))
 
 interface Exam { id: string; name: string; color: string; wrong_penalty: number | null; point_per_net: number; base_template_key?: string | null }
 interface QuestionType { id: string; exam_id: string; name: string; sort_order: number; question_count: number }
@@ -41,6 +42,7 @@ export default function Results() {
   const [formError, setFormError] = useState('')
   const [saving, setSaving] = useState(false)
   const [metric, setMetric] = useState<'net' | 'points'>('net')
+  const [historyOpen, setHistoryOpen] = useState(false)
   const [chartRange, setChartRange] = useState<'10' | 'all'>('10')
   const [chartQuestion, setChartQuestion] = useState('')
   const [focusedResult, setFocusedResult] = useState<string | null>(null)
@@ -53,7 +55,7 @@ export default function Results() {
   const [selectedDetailResult, setSelectedDetailResult] = useState<ExamResult | null>(null)
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
+    getCurrentUser().then(({ data: { user } }) => {
       if (user) {
         const targetUid = impersonatedUserId || user.id
         setUserId(targetUid)
@@ -195,11 +197,16 @@ export default function Results() {
     }
   }
 
+  const detailsByResult = useMemo(() => {
+    const groups = new Map<string, ResultDetail[]>()
+    for (const detail of details) { const group = groups.get(detail.result_id) || []; group.push(detail); groups.set(detail.result_id, group) }
+    return groups
+  }, [details])
   const calculateScore = (examId: string, resultId: string) => {
     const exam = exams.find(e => e.id === examId)
     if (!exam) return { net: 0, points: 0, totalCorrect: 0, totalIncorrect: 0 }
     
-    const resDetails = details.filter(d => d.result_id === resultId)
+    const resDetails = detailsByResult.get(resultId) || []
     let correct = 0; let incorrect = 0;
     resDetails.forEach(d => { correct += d.correct_count; incorrect += d.incorrect_count })
     
@@ -396,7 +403,7 @@ export default function Results() {
               ] as const).map(group => <section key={group.kind} className={`result-change-group is-${group.kind}`}><header><h3>{group.title}</h3><span>{group.rows.length} konu</span></header>{group.rows.length === 0 ? <p className="result-change-empty">{group.empty}</p> : group.rows.map(row => <article className="result-change-card" key={row.id}><div className="result-change-main"><h4>{row.name}</h4><strong>{signedChange(row.change!)}<small>net</small></strong></div><div className="result-change-before-after"><span>Önceki <b>{formatNumber(row.previousNet)}</b></span><span aria-hidden="true">→</span><span>Son <b>{formatNumber(row.latestNet)}</b></span></div><p>Son deneme: {row.correct} doğru · {row.incorrect} yanlış</p></article>)}</section>)}</div>}
               {changeGroups.unchanged.length > 0 && <details className="result-other-changes"><summary>Değişmeyen konular <span>{changeGroups.unchanged.length}</span></summary><div>{changeGroups.unchanged.map(row => <article key={row.id}><strong>{row.name}</strong><b>0 <small>net</small></b><span>{formatNumber(row.previousNet)} → {formatNumber(row.latestNet)} net</span></article>)}</div></details>}
               {changeGroups.unavailable.length > 0 && <details className="result-other-changes"><summary>Karşılaştırma için kayıt eksik <span>{changeGroups.unavailable.length}</span></summary><div>{changeGroups.unavailable.map(row => <article key={row.id}><strong>{row.name}</strong><span>Önceki: {formatNumber(row.previousNet)} net · Son: {formatNumber(row.latestNet)} net</span></article>)}</div></details>}
-              <details className="result-history-details"><summary>Deneme geçmişi ve çizgi grafiği</summary><div className="result-analysis-toolbar"><label>Soru türü<CustomSelect value={chartQuestion} onChange={value => { setChartQuestion(value); setFocusedResult(null) }} options={[{ value: '', label: 'Tüm soru türleri' }, ...questionTypes.filter(q => q.exam_id === selectedExamId).map(q => ({ value: q.id, label: q.name }))]} /></label><div className="result-chart-toggle" aria-label="Grafik ölçüsü">{(examHasPoints(selectedExam) ? ['net', 'points'] as const : ['net'] as const).map(value => <button key={value} aria-pressed={chartMetric === value} onClick={() => setMetric(value)}>{value === 'net' ? 'Net' : examScoreLabel(selectedExam)}</button>)}</div></div>
+              <details className="result-history-details" onToggle={event => setHistoryOpen(event.currentTarget.open)}><summary>Deneme geçmişi ve çizgi grafiği</summary><div className="result-analysis-toolbar"><label>Soru türü<CustomSelect value={chartQuestion} onChange={value => { setChartQuestion(value); setFocusedResult(null) }} options={[{ value: '', label: 'Tüm soru türleri' }, ...questionTypes.filter(q => q.exam_id === selectedExamId).map(q => ({ value: q.id, label: q.name }))]} /></label><div className="result-chart-toggle" aria-label="Grafik ölçüsü">{(examHasPoints(selectedExam) ? ['net', 'points'] as const : ['net'] as const).map(value => <button key={value} aria-pressed={chartMetric === value} onClick={() => setMetric(value)}>{value === 'net' ? 'Net' : examScoreLabel(selectedExam)}</button>)}</div></div>
               <div className="result-kpis">{[
                 ['Son sonuç', formatNumber(latest?.[chartMetric])],
                 ['Ortalama', measured.length ? formatNumber(average) : '—'],
@@ -406,15 +413,7 @@ export default function Results() {
               <section className="result-chart result-history-chart">
                 <div className="result-chart-heading"><div><h3>{chartMetric === 'net' ? 'Net gelişimi' : `${examScoreLabel(selectedExam)} gelişimi`}</h3><p>{chartQuestion ? questionTypes.find(q => q.id === chartQuestion)?.name : selectedExam?.name} · {measured.length} sonuç</p></div><div className="result-chart-toggle" aria-label="Grafik aralığı"><button aria-pressed={chartRange === '10'} onClick={() => setChartRange('10')}>Son 10</button><button aria-pressed={chartRange === 'all'} onClick={() => setChartRange('all')}>Tümü</button></div></div>
                 <div className="result-chart-legend"><span><i />{chartMetric === 'net' ? 'Net' : examScoreLabel(selectedExam)}</span><span><i className="is-average" />Ortalama {formatNumber(average)}</span></div>
-                {measured.length === 0 ? <p className="result-empty">Bu soru türüne ait kayıt yok.</p> : <div className="result-history-canvas"><ResponsiveContainer width="100%" height="100%"><AreaChart data={displayedChart} margin={{ top: 18, right: 16, left: -14, bottom: 2 }} onClick={event => { const index = event?.activeTooltipIndex; if (index != null) { const row = displayedChart[Number(index)]; if (row) setFocusedResult(row.id) } }}>
-                  <defs><linearGradient id="exam-history-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#6a8cbf" stopOpacity={.25} /><stop offset="100%" stopColor="#6a8cbf" stopOpacity={.02} /></linearGradient></defs>
-                  <CartesianGrid vertical={false} stroke="#edf1f6" strokeDasharray="3 4" />
-                  <XAxis dataKey="order" tick={{ fontSize: 12, fill: '#62748b' }} axisLine={false} tickLine={false} minTickGap={22} tickFormatter={n => `${n}.`} />
-                  <YAxis width={48} domain={['auto', 'auto']} tick={{ fontSize: 12, fill: '#62748b' }} tickFormatter={n => formatNumber(n)} axisLine={false} tickLine={false} />
-                  <ReferenceLine y={average} stroke="#9baabd" strokeDasharray="5 5" />
-                  <RechartsTooltip cursor={{ stroke: '#c6d4e7', strokeDasharray: '3 4' }} content={({ active, payload }) => { const row = payload?.[0]?.payload; if (!active || !row) return null; return <div className="result-history-tooltip"><strong>{row.name}</strong><span>{chartDate(row.date)}</span><b>{formatNumber(row[chartMetric])} {chartMetric === 'net' ? 'net' : 'puan'}</b><small>{row.correct} doğru · {row.incorrect} yanlış</small></div> }} />
-                  <Area type="linear" dataKey={chartMetric} connectNulls={false} stroke="#4269a8" fill="url(#exam-history-fill)" strokeWidth={2.5} dot={displayedChart.length <= 30 ? { r: 4, fill: '#fff', stroke: '#4269a8', strokeWidth: 2 } : false} activeDot={{ r: 6, fill: '#4269a8', stroke: '#fff', strokeWidth: 3 }} />
-                </AreaChart></ResponsiveContainer></div>}
+                {measured.length === 0 ? <p className="result-empty">Bu soru türüne ait kayıt yok.</p> : historyOpen && <Suspense fallback={<div className="result-history-canvas route-loading" role="status">Grafik hazırlanıyor…</div>}><ExamHistoryChart rows={displayedChart} metric={chartMetric} average={average} onSelect={setFocusedResult} /></Suspense>}
                 {focused && <div className="result-focused" aria-live="polite"><div><strong>{focused.name}</strong><span>{chartDate(focused.date)} · {focused.order}. deneme</span></div><div><span className="result-up">{focused.correct} doğru</span><span className="result-down">{focused.incorrect} yanlış</span><strong>{formatNumber(focused[chartMetric])} {chartMetric === 'net' ? 'net' : 'puan'}</strong><button onClick={() => setSelectedDetailResult(results.find(r => r.id === focused.id) || null)}>Detay</button></div></div>}
               </section>
               </details>

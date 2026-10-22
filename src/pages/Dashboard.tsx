@@ -4,9 +4,8 @@ import QuestionProgress from '../components/QuestionProgress'
 import { localDayKey, mondayOf } from '../lib/statsPeriod'
 import { DailyProgress, WeeklyProgress, DashboardSummary } from '../components/DashboardProgress'
 import { useEffect, useState, useMemo, useRef } from 'react'
-import { supabase } from '../lib/supabase'
+import { supabase, getCurrentUser } from '../lib/supabase'
 import { useNavigate } from 'react-router-dom'
-import { motion } from 'framer-motion'
 import { useTimerStore } from '../lib/timerStore'
 import { useAdminStore } from '../lib/adminStore'
 import Swal from 'sweetalert2'
@@ -77,8 +76,14 @@ function duration(minutes: number) {
 
 export default function Dashboard() {
   const navigate = useNavigate()
-  const { setSelExam, setSelSubject, setSelResource, setMode, setSecondsLeft, setTotalSeconds, resetTimer } = useTimerStore()
-  const { impersonatedUserId, setIsAdmin, isAdmin } = useAdminStore()
+  const setSelExam = useTimerStore(state => state.setSelExam)
+  const setSelSubject = useTimerStore(state => state.setSelSubject)
+  const setSelResource = useTimerStore(state => state.setSelResource)
+  const setMode = useTimerStore(state => state.setMode)
+  const setSecondsLeft = useTimerStore(state => state.setSecondsLeft)
+  const setTotalSeconds = useTimerStore(state => state.setTotalSeconds)
+  const resetTimer = useTimerStore(state => state.resetTimer)
+  const { impersonatedUserId, isAdmin } = useAdminStore()
   
   const [questionWeek] = useState(() => localDayKey(mondayOf(new Date())))
   const [displayName, setDisplayName] = useState<string>('Kullanıcı')
@@ -161,29 +166,30 @@ export default function Dashboard() {
   }
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
+    getCurrentUser().then(({ data: { user } }) => {
       if (!user) return
 
       const targetUid = impersonatedUserId || user.id
 
-      // Ensure the profile exists before reading it; preserve existing profile names.
+      // Existing accounts need one shared read, not an upsert and two serial reads on each visit.
       const metadataName = actualProfileName(user.user_metadata?.display_name, user.user_metadata?.full_name, user.user_metadata?.name)
-      supabase.from('profiles')
-        .upsert({ id: user.id, email: user.email, display_name: metadataName || 'Kullanıcı' }, { onConflict: 'id', ignoreDuplicates: true })
-        .then(async () => {
-          const { data: ownProfile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
-          setIsAdmin(ownProfile?.role === 'admin')
-          const { data: profile, error } = await supabase.from('profiles').select('display_name,email').eq('id', targetUid).single()
+      void (async () => {
+        let { data: profile, error } = await supabase.from('profiles').select('id,role,display_name,email').eq('id', targetUid).maybeSingle()
+        if (error) return
+        if (!profile && !impersonatedUserId) {
+          const created = await supabase.from('profiles').upsert({ id: user.id, email: user.email, display_name: metadataName || 'Kullanıcı' }, { onConflict: 'id', ignoreDuplicates: true }).select('id,role,display_name,email').maybeSingle()
+          profile = created.data; error = created.error
           if (error) return
-          const profileName = actualProfileName(profile?.display_name)
-          const resolved = profileName || (!impersonatedUserId ? metadataName : null)
-          setDisplayName(resolved || profileNameLabel(null, profile?.email))
-          setShowNameModal(!impersonatedUserId && !resolved)
-          if (!impersonatedUserId && !profileName && metadataName) {
-            const { error: repairError } = await supabase.from('profiles').update({ display_name: metadataName }).eq('id', user.id)
-            if (!repairError) setLeaderboard(prev => prev.map(row => row.user_id === user.id ? { ...row, name: metadataName } : row))
-          }
-        })
+        }
+        const profileName = actualProfileName(profile?.display_name)
+        const resolved = profileName || (!impersonatedUserId ? metadataName : null)
+        setDisplayName(resolved || profileNameLabel(null, profile?.email))
+        setShowNameModal(!impersonatedUserId && !resolved)
+        if (!impersonatedUserId && !profileName && metadataName) {
+          const { error: repairError } = await supabase.from('profiles').update({ display_name: metadataName }).eq('id', user.id)
+          if (!repairError) setLeaderboard(prev => prev.map(row => row.user_id === user.id ? { ...row, name: metadataName } : row))
+        }
+      })()
 
       supabase.from('exams').select('*').eq('user_id', targetUid).then(r => {
         if (r.data) {
@@ -205,7 +211,7 @@ export default function Dashboard() {
       const sunday = new Date(monday)
       sunday.setDate(sunday.getDate() + 6)
       sunday.setHours(23, 59, 59, 999)
-      supabase.from('study_sessions').select('*').eq('user_id', targetUid)
+      supabase.from('study_sessions').select('subject_id,duration_minutes,started_at').eq('user_id', targetUid)
         .gte('started_at', monday.toISOString())
         .lte('started_at', sunday.toISOString())
         .then(r => r.data && setWeekSessions(r.data))
@@ -285,7 +291,7 @@ export default function Dashboard() {
 
 
     })
-  }, [impersonatedUserId, setIsAdmin])
+  }, [impersonatedUserId])
 
   useEffect(() => {
     let cancelled = false
@@ -294,7 +300,7 @@ export default function Dashboard() {
     const refresh = async () => {
       const request = ++requestId
       try {
-        const { data: { user }, error: authError } = await supabase.auth.getUser()
+        const { data: { user }, error: authError } = await getCurrentUser()
         if (authError) throw authError
         if (!user || cancelled) return
         const start = new Date()
@@ -451,7 +457,7 @@ export default function Dashboard() {
   // Haftalık rapor indirme
   const handleExportReport = async (format: 'json' | 'pdf') => {
     setGenerating(true)
-    const { data: { user } } = await supabase.auth.getUser()
+    const { data: { user } } = await getCurrentUser()
     if (!user) { setGenerating(false); return }
 
     const monday = getMonday(new Date())
@@ -538,7 +544,7 @@ export default function Dashboard() {
   const saveDisplayName = async () => {
     const name = actualProfileName(tempName)
     if (!name || impersonatedUserId) return
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    const { data: { user }, error: authError } = await getCurrentUser()
     if (!user || authError) { void Swal.fire('Kaydedilemedi', 'Yeniden giriş yapın.', 'error'); return }
     const { error: profileError } = await supabase.from('profiles').update({ display_name: name }).eq('id', user.id).select('id').single()
     if (profileError) { void Swal.fire('Ad kaydedilemedi', 'Lütfen tekrar deneyin.', 'error'); return }
@@ -548,15 +554,10 @@ export default function Dashboard() {
     setShowNameModal(false)
   }
 
-  const container: any = {
-    hidden: { opacity: 0 },
-    show:   { opacity: 1, transition: { staggerChildren: 0.06 } }
-  }
-
   const saveDailyMessage = async () => {
     if (!communityVisible || !communitySharing) return
     setIsSavingMessage(true)
-    const targetUid = impersonatedUserId || (await supabase.auth.getUser()).data.user?.id
+    const targetUid = impersonatedUserId || (await getCurrentUser()).data.user?.id
     if (targetUid) {
       const { error } = await supabase.from('profiles').update({ daily_message: dailyMessage }).eq('id', targetUid).select('id').single()
       if (error) { setIsSavingMessage(false); void Swal.fire('Mesaj kaydedilemedi', 'Lütfen tekrar dene.', 'error'); return }
@@ -567,7 +568,7 @@ export default function Dashboard() {
   }
 
   return (
-    <motion.div variants={container} initial="hidden" animate="show" className="dashboard">
+    <div className="dashboard">
 
       {/* Name Onboarding Modal */}
       {showNameModal && (
@@ -644,6 +645,6 @@ export default function Dashboard() {
       </div>
 
       {isAdmin && <details className="dash-panel dash-admin"><summary>YKS / YDT kelime araçları</summary><p className="dash-muted">Paylaşmak istediğin günün kelimelerini kopyala.</p><div className="dash-admin-controls"><select aria-label="Kelime günü" value={selectedVocabDay} onChange={e => setSelectedVocabDay(e.target.value ? Number(e.target.value) : '')}><option value="">Gün seç</option>{availableDays.map(d => <option key={d} value={d}>Day {d}</option>)}</select><button className="dash-secondary" onClick={handleCopyVocab} disabled={!selectedVocabDay}><Copy size={15} /> Kopyala</button></div></details>}
-    </motion.div>
+    </div>
   )
 }

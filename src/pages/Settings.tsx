@@ -1,7 +1,7 @@
 import { examHasPoints } from '../lib/examTemplates'
 import './SuitePages.css'
 import { useEffect, useState } from 'react'
-import { supabase } from '../lib/supabase'
+import { supabase, getCurrentUser } from '../lib/supabase'
 import { seedAllData } from '../lib/seed'
 import Swal from 'sweetalert2'
 import CustomSelect from '../components/CustomSelect'
@@ -78,7 +78,7 @@ export default function Settings() {
   const [savingVocab, setSavingVocab] = useState(false)
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
+    getCurrentUser().then(({ data: { user } }) => {
       if (user) {
         const targetUid = impersonatedUserId || user.id
         setUserId(targetUid)
