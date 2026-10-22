@@ -3,8 +3,8 @@ import SharedAgsTopics from '../components/SharedAgsTopics'
 import AgsTopicSourceChoice from '../components/AgsTopicSourceChoice'
 import { useAgsTopicSource } from '../lib/useAgsTopicSource'
 import { isAgsExam } from '../lib/agsTopicSource'
-import { useEffect, useState, useCallback } from 'react'
-import { supabase } from '../lib/supabase'
+import { useEffect, useState, useCallback, useMemo } from 'react'
+import { supabase, getCurrentUser } from '../lib/supabase'
 import Swal from 'sweetalert2'
 import {
   BookMarked, ChevronDown, ChevronUp, Plus, Trash2,
@@ -39,7 +39,7 @@ export default function Topics() {
   const [editTitle, setEditTitle] = useState('')
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
+    getCurrentUser().then(({ data: { user } }) => {
       if (!user) return
       const targetUid = impersonatedUserId || user.id
       setUserId(targetUid)
@@ -49,8 +49,13 @@ export default function Topics() {
     })
   }, [impersonatedUserId])
 
-  const subjectTopics = (subjectId: string) =>
-    topics.filter(t => t.subject_id === subjectId).sort((a, b) => a.sort_order - b.sort_order)
+  const topicsBySubject = useMemo(() => {
+    const groups = new Map<string, Topic[]>()
+    for (const topic of topics) { const group = groups.get(topic.subject_id) || []; group.push(topic); groups.set(topic.subject_id, group) }
+    for (const group of groups.values()) group.sort((a, b) => a.sort_order - b.sort_order)
+    return groups
+  }, [topics])
+  const subjectTopics = useCallback((subjectId: string) => topicsBySubject.get(subjectId) || [], [topicsBySubject])
 
   // ── Konu ekle ──────────────────────────────────────────────────────────────
   const handleAdd = async (subjectId: string) => {
@@ -119,7 +124,7 @@ export default function Topics() {
       t.id === topic.id ? { ...t, sort_order: prev.sort_order } :
       t.id === prev.id  ? { ...t, sort_order: topic.sort_order } : t
     ))
-  }, [topics])
+  }, [subjectTopics])
 
   const moveDown = useCallback(async (topic: Topic) => {
     const subs = subjectTopics(topic.subject_id)
@@ -134,7 +139,7 @@ export default function Topics() {
       t.id === topic.id ? { ...t, sort_order: next.sort_order } :
       t.id === next.id  ? { ...t, sort_order: topic.sort_order } : t
     ))
-  }, [topics])
+  }, [subjectTopics])
 
   // ── Düzenle ────────────────────────────────────────────────────────────────
   const saveEdit = async () => {

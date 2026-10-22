@@ -88,3 +88,7 @@
     @apply bg-background text-foreground antialiased;
   }
 }
+
+.route-loading{display:flex;min-height:180px;align-items:center;justify-content:center;color:#62748b;font-family:'Source Sans 3',Arial,sans-serif;font-size:14px}
+
+.route-error{padding:32px;text-align:center;color:#62748b}.route-error button{margin-top:12px;padding:8px 14px;border:1px solid #dce5f0;border-radius:7px;cursor:pointer}

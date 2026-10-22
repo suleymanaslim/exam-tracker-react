@@ -2,7 +2,7 @@ import './Plan.css'
 import { localDayKey } from '../lib/statsPeriod'
 import { findWeeklyPlans } from '../lib/weeklyPlanDates'
 import { useEffect, useState, useMemo } from 'react'
-import { supabase } from '../lib/supabase'
+import { supabase, getCurrentUser } from '../lib/supabase'
 import {
   Calendar, Plus, Trash2, Copy, ChevronLeft, ChevronRight, Clock,
   Shield, Globe, BookOpen, Calculator, Target, Database, PlayCircle
@@ -86,7 +86,7 @@ export default function Plan() {
 
   // Load user & data
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
+    getCurrentUser().then(({ data: { user } }) => {
       if (user) {
         const targetUid = impersonatedUserId || user.id
         setUserId(targetUid)
@@ -113,29 +113,28 @@ export default function Plan() {
       return formatDate(d)
     })
 
+    let active = true
     const loadPlan = async () => {
+      const videos = supabase.from('video_plan_items').select('*').eq('user_id', userId).in('date', weekDates)
+      const [planResult, videoResult] = await Promise.all([findWeeklyPlans(supabase, userId, weekStart), videos])
+      if (!active) return
+      setVideoItems(videoResult.data ?? [])
       // 1. Haftalık plan ve normal plan maddeleri
-      const { data: plans, error } = await findWeeklyPlans(supabase, userId, weekStart)
+      const { data: plans, error } = planResult
       if (error) { void Swal.fire('Plan yüklenemedi', 'Lütfen tekrar deneyin.', 'error'); return }
       if (plans?.length) {
         const ids = plans.map(plan => plan.id)
         setPlanId(ids[0]); setLoadedPlanIds(ids)
         const { data: pi } = await supabase.from('plan_items').select('*').in('weekly_plan_id', ids).order('sort_order')
-        setItems(pi ?? [])
+        if (active) setItems(pi ?? [])
       } else {
         const { data: np } = await supabase.from('weekly_plans').insert({ user_id: userId, week_start_date: ws }).select().single()
         if (np) { setPlanId(np.id); setLoadedPlanIds([np.id]); setItems([]) }
       }
 
-      // 2. Video plan maddeleri
-      const { data: vpi } = await supabase
-        .from('video_plan_items')
-        .select('*')
-        .eq('user_id', userId)
-        .in('date', weekDates)
-      setVideoItems(vpi ?? [])
     }
-    loadPlan()
+    void loadPlan()
+    return () => { active = false }
   }, [userId, weekStart])
 
   // Filtered selects

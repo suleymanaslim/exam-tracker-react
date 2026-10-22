@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useAdminStore } from './adminStore'
-import { supabase } from './supabase'
+import { getCurrentUser } from './supabase'
 import { fetchQuestionData, questionPlanError } from './questionPlanData'
 import type { QuestionPlan, QuestionLog } from './questionPlan'
 
@@ -13,7 +13,7 @@ export function useQuestionData() {
     const load = async () => {
       const current = ++version
       try {
-        const { data: { user }, error: authError } = await supabase.auth.getUser()
+        const { data: { user }, error: authError } = await getCurrentUser()
         if (authError || !user) throw authError || new Error('Oturum bulunamadı.')
         const data = await fetchQuestionData(impersonatedUserId || user.id)
         if (active && current === version) setSource({ ...data, owner: impersonatedUserId, loading: false, error: '' })

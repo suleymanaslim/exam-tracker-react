@@ -1,8 +1,8 @@
 import './SuitePages.css'
 import './VideoPlan.css'
 import { Link } from 'react-router-dom'
-import { useEffect, useState, useCallback, useRef } from 'react'
-import { supabase } from '../lib/supabase'
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
+import { supabase, getCurrentUser } from '../lib/supabase'
 import { Plus, Trash2, Download, Printer, Settings, EyeOff, SkipForward, X, Check, ChevronUp, ChevronDown } from 'lucide-react'
 import Swal from 'sweetalert2'
 import { useAdminStore } from '../lib/adminStore'
@@ -104,15 +104,15 @@ export default function VideoPlan() {
   /* calendar start */
   const [startDate, setStartDate] = useState(getMonday(new Date()))
 
-  const days = Array.from({ length: 7 }).map((_, i) => {
+  const days = useMemo(() => Array.from({ length: 7 }).map((_, i) => {
     const d = new Date(startDate)
     d.setDate(d.getDate() + i)
     return d
-  })
+  }), [startDate])
 
   /* ─── Data ─── */
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
+    getCurrentUser().then(({ data: { user } }) => {
       if (user) {
         const uid = impersonatedUserId || user.id
         setUserId(uid)
@@ -131,9 +131,10 @@ export default function VideoPlan() {
       supabase.from('subjects').select('id, name').eq('user_id', uid),
     ])
     if (resR.data && subR.data) {
+      const subjectsById = new Map(subR.data.map(subject => [subject.id, subject]))
       const merged = resR.data.map(r => ({
         ...r,
-        subject_name: subR.data.find(s => s.id === r.subject_id)?.name || 'Bilinmeyen Ders',
+        subject_name: subjectsById.get(r.subject_id)?.name || 'Bilinmeyen Ders',
       }))
       setAllResources(merged)
       setResources(merged.filter(r => r.resource_type === 'video_ders'))

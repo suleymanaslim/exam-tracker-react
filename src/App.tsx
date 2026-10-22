@@ -1,33 +1,23 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { supabase } from './lib/supabase'
 import type { Session } from '@supabase/supabase-js'
 
-// Import Pages
-import Login from './pages/Login'
-import Dashboard from './pages/Dashboard'
-import Plan from './pages/Plan'
-import Study from './pages/Study'
-import History from './pages/History'
-import Stats from './pages/Stats'
-import Settings from './pages/Settings'
-import Topics from './pages/Topics'
-import MonthlyPlan from './pages/MonthlyPlan'
-import Admin from './pages/Admin'
-import Results from './pages/Results'
-import TimedMockExam from './pages/TimedMockExam'
-import VideoPlan from './pages/VideoPlan'
-import QuestionPlan from './pages/QuestionPlan'
+import { Login, Dashboard, Plan, Study, History, Stats, Settings, Topics, MonthlyPlan, Admin, Results, VideoPlan, QuestionPlan } from './lib/routes'
 import AppLayout from './components/AppLayout'
+import RouteBoundary from './components/RouteBoundary'
 
 import { useGlobalTimer } from './lib/useGlobalTimer'
+
+function TimerRuntime({ userId }: { userId: string | null }) {
+  useGlobalTimer(userId)
+  return null
+}
 
 function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
 
-  // Global timer — sayfa değişse de çalışmaya devam eder
-  useGlobalTimer(session?.user.id || null)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -39,6 +29,7 @@ function App() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
+      setLoading(false)
     })
 
     return () => subscription.unsubscribe()
@@ -50,6 +41,8 @@ function App() {
 
   return (
     <BrowserRouter>
+      <TimerRuntime userId={session?.user.id || null} />
+      <RouteBoundary><Suspense fallback={<div className="route-loading" role="status">Sayfa hazırlanıyor…</div>}>
       <Routes>
         <Route 
           path="/login" 
@@ -58,12 +51,12 @@ function App() {
         
         <Route
           path="/"
-          element={session ? <AppLayout /> : <Navigate to="/login" />}
+          element={session ? <AppLayout userId={session.user.id} /> : <Navigate to="/login" />}
         >
           <Route index element={<Dashboard />} />
           <Route path="plan" element={<Plan />} />
           <Route path="study" element={<Study />} />
-          <Route path="timed-mock-exam" element={<TimedMockExam />} />
+          <Route path="timed-mock-exam" element={<Study mockExam />} />
           <Route path="history" element={<History />} />
           <Route path="stats"     element={<Stats />} />
           <Route path="results"   element={<Results />} />
@@ -75,6 +68,7 @@ function App() {
           <Route path="admin"     element={<Admin />} />
         </Route>
       </Routes>
+      </Suspense></RouteBoundary>
     </BrowserRouter>
   )
 }
