@@ -4,13 +4,14 @@ import { examHasPoints, examScoreLabel } from '../lib/examTemplates'
 import { lazy, Suspense, useEffect, useState, useMemo, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase, getCurrentUser } from '../lib/supabase'
-import { Plus, Trash2, Calendar, Award, List, X, Edit3, Eye } from 'lucide-react'
+import { Plus, Trash2, Calendar, Award, List, X, Edit3, Eye, Download, Loader2 } from 'lucide-react'
 import Swal from 'sweetalert2'
 import CustomSelect from '../components/CustomSelect'
 import { useAdminStore } from '../lib/adminStore'
 import { answerLimit, readAnswerInput, validateAnswers } from '../lib/resultAnswers'
 import { clearMockExamResult, useMockExamStore } from '../lib/mockExamStore'
 import { examTrend, questionComparison, groupQuestionChanges } from '../lib/examAnalytics'
+import { buildExamResultsExport, downloadExamResultsJson } from '../lib/examResultsExport'
 
 const ExamHistoryChart = lazy(() => import('../components/ExamHistoryChart'))
 
@@ -32,6 +33,10 @@ export default function Results() {
   const [results, setResults] = useState<ExamResult[]>([])
   const [details, setDetails] = useState<ResultDetail[]>([])
   const [loading, setLoading] = useState(true)
+
+  const [exporting, setExporting] = useState(false)
+  const exportRequest = useRef(0)
+  const exportBusy = useRef(false)
 
   const [tab, setTab] = useState<Tab>('list')
   const [selectedExamId, setSelectedExamId] = useState<string>('')
@@ -75,6 +80,35 @@ export default function Results() {
       }
     })
   }, [impersonatedUserId])
+
+  useEffect(() => {
+    return () => { exportRequest.current += 1 }
+  }, [impersonatedUserId])
+
+  const exportAllResults = async () => {
+    if (!userId || exportBusy.current || saving) return
+    exportBusy.current = true
+    setExporting(true)
+    const request = ++exportRequest.current
+    try {
+      const { data: { user }, error } = await getCurrentUser()
+      if (error || !user || (impersonatedUserId || user.id) !== userId) throw new Error('Hesap bilgileri değişti. Sayfayı yenileyip tekrar deneyin.')
+      // A caller-owned signal bypasses the tab cache for a fresh export.
+      const signal = new AbortController().signal
+      const data = await buildExamResultsExport((table, from, to) => {
+        const query = supabase.from(table).select('*').eq('user_id', userId).order('id').range(from, to).abortSignal(signal)
+        return table === 'study_sessions' ? query.eq('session_type', 'mock_exam') : query
+      })
+      const current = await getCurrentUser()
+      if (request !== exportRequest.current || current.data.user?.id !== user.id) return
+      downloadExamResultsJson(data)
+    } catch {
+      if (request === exportRequest.current) void Swal.fire({ title: 'JSON indirilemedi', text: 'Tüm deneme verileri alınamadı. Bağlantınızı kontrol edip tekrar deneyin.', icon: 'error', confirmButtonText: 'Tamam' })
+    } finally {
+      exportBusy.current = false
+      setExporting(false)
+    }
+  }
 
   // Timed mock exams hand off their details through the URL so this existing
   // result-entry wizard can be reused without creating a separate scoring path.
@@ -257,10 +291,16 @@ export default function Results() {
           </h1>
           <p className="text-[15px] text-[#62748b] mt-1">Sınav ve deneme sonuçlarını kaydet, gelişimini takip et.</p>
         </div>
-        {!pendingMock && <button onClick={() => { setShowForm(!showForm); setFormStep(0); setFormError(''); if (!showForm) { setEditingResultId(null); setFormTitle(''); setFormExamId(''); setFormScores({}) } }} className="bg-[#4269a8] hover:bg-blue-600 text-white font-medium text-sm px-4 py-2 rounded-lg transition-all flex items-center gap-2 self-start md:self-auto">
-          {showForm ? <List className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-          {showForm ? 'Listeye Dön' : 'Yeni Sonuç Ekle'}
-        </button>}
+        <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
+          <button type="button" onClick={() => void exportAllResults()} disabled={exporting || saving || !userId} title="Tüm denemeleri, taslakları ve süre kayıtlarını JSON olarak indir" className="border border-[#e3e9f0] bg-white hover:bg-[#f8fafc] text-[#4269a8] font-medium text-sm px-4 py-2 rounded-lg transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-wait" aria-busy={exporting}>
+            {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            {exporting ? 'Hazırlanıyor…' : 'JSON İndir'}
+          </button>
+          {!pendingMock && <button onClick={() => { setShowForm(!showForm); setFormStep(0); setFormError(''); if (!showForm) { setEditingResultId(null); setFormTitle(''); setFormExamId(''); setFormScores({}) } }} className="bg-[#4269a8] hover:bg-blue-600 text-white font-medium text-sm px-4 py-2 rounded-lg transition-all flex items-center gap-2 self-start md:self-auto">
+            {showForm ? <List className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+            {showForm ? 'Listeye Dön' : 'Yeni Sonuç Ekle'}
+          </button>}
+        </div>
       </div>
 
       {!showForm && (
