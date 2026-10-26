@@ -82,18 +82,27 @@ export function analyzeQuestions(plans: QuestionPlan[], logs: QuestionLog[], wee
   }
 }
 
-export function withWeeklyQuestionProgress(plans: QuestionPlan[], logs: QuestionLog[]): QuestionPlan[] {
+export function withWeeklyQuestionProgress(plans: QuestionPlan[], logs: QuestionLog[], carryBefore?: string): QuestionPlan[] {
   const planById = new Map(plans.map(plan => [plan.id, plan]))
   const weekly = plans.filter(plan => plan.period === 'week' && !plan.note)
   const keyFor = (subject: string | null, date: string) => `${subject}:${weekKey(date)}`
   const grouped = logs.filter(log => planById.get(log.question_plan_id)?.subject_id != null
     && Number.isFinite(Date.parse(log.created_at))).map(log => ({ ...log,
       question_plan_id: keyFor(planById.get(log.question_plan_id)!.subject_id, logDay(log)) }))
+  // Study can resume an old weekly goal. Count only solutions explicitly saved
+  // to that goal after its original week; reporting keeps its calendar boundaries.
+  if (carryBefore) for (const log of logs) {
+    const plan = planById.get(log.question_plan_id)
+    if (plan?.period === 'week' && !plan.note && plan.subject_id && plan.date < carryBefore
+      && Number.isFinite(Date.parse(log.created_at)) && weekKey(logDay(log)) !== weekKey(plan.date)) {
+      grouped.push({ ...log, question_plan_id: keyFor(plan.subject_id, plan.date) })
+    }
+  }
   const progress = withQuestionProgress(weekly.map(plan => ({ id: keyFor(plan.subject_id, plan.date) })), grouped)
   const byId = new Map(weekly.map((plan, index) => [plan.id, progress[index]]))
   return plans.map(plan => {
     if (plan.period === 'week' && plan.note) {
-      const [own] = withQuestionProgress([plan], logs.filter(log => log.question_plan_id === plan.id && Number.isFinite(Date.parse(log.created_at)) && weekKey(logDay(log)) === weekKey(plan.date)))
+      const [own] = withQuestionProgress([plan], logs.filter(log => log.question_plan_id === plan.id && Number.isFinite(Date.parse(log.created_at)) && ((carryBefore && plan.date < carryBefore) || weekKey(logDay(log)) === weekKey(plan.date))))
       return own
     }
     const aggregate = byId.get(plan.id)

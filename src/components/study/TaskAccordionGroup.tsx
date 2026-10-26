@@ -2,11 +2,11 @@ import { useId, useState } from 'react'
 import type { ReactNode } from 'react'
 import { ChevronDown } from 'lucide-react'
 
-interface Props { title: string; count: number; icon: ReactNode; children: ReactNode }
+interface Props { title: string; count: number; icon: ReactNode; children: ReactNode; defaultExpanded?: boolean; unmountWhenClosed?: boolean }
 
-export default function TaskAccordionGroup({ title, count, icon, children }: Props) {
+export default function TaskAccordionGroup({ title, count, icon, children, defaultExpanded = true, unmountWhenClosed = false }: Props) {
   const id = useId()
-  const [expanded, setExpanded] = useState(true)
+  const [expanded, setExpanded] = useState(defaultExpanded)
   const open = count > 0 && expanded
   return <section className={`study-task-group ${count === 0 ? 'is-empty' : ''}`}>
     <h3>
@@ -15,6 +15,6 @@ export default function TaskAccordionGroup({ title, count, icon, children }: Pro
         <ChevronDown size={13} className={`transition-transform duration-200 ${open ? '' : '-rotate-90'}`} />
       </button>
     </h3>
-    <div id={id} aria-hidden={!open} inert={!open} className={`study-task-collapse ${open ? 'is-open' : ''}`}><div className="min-h-0 overflow-hidden"><div className="space-y-0.5 pb-3">{children}</div></div></div>
+    <div id={id} aria-hidden={!open} inert={!open} className={`study-task-collapse ${open ? 'is-open' : ''}`}><div className="min-h-0 overflow-hidden"><div className="space-y-0.5 pb-3">{(!unmountWhenClosed || open) && children}</div></div></div>
   </section>
 }

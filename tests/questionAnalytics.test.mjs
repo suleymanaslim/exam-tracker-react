@@ -91,9 +91,9 @@ test('all-time totals retain old records and apply weekly goal override separate
   assert.equal(data.remaining, 75)
   assert.equal(data.previous, null)
 })
-test('weekly goals appear throughout their week but expired, future and archived weekly goals do not', () => {
+test('weekly goals retain incomplete previous weeks for the collapsed backlog and exclude future/archived goals', () => {
   const plans = [plan('current', 'verbal', 30, '2026-10-05', { period: 'week' }), plan('expired', 'verbal', 30, '2026-09-28', { period: 'week' }), plan('future', 'math', 40, '2026-10-12', { period: 'week' }), plan('archived', 'math', 40, '2026-10-05', { period: 'week', archived_at: 'now' })]
-  for (const date of ['2026-10-05', '2026-10-09', '2026-10-11']) assert.deepEqual(openQuestionPlans(plans, date).map(p => p.id), ['current'])
+  for (const date of ['2026-10-05', '2026-10-09', '2026-10-11']) assert.deepEqual(openQuestionPlans(plans, date).map(p => p.id), ['current', 'expired'])
 })
 test('missing answer counts stay unknown while a real zero stays visible', () => {
   const plans = [plan('a')]
@@ -124,4 +124,19 @@ test('unplanned questions and other topics never complete a topic-bound target o
   const broad = analyzeQuestions([...plans, plan('general', 'verbal', 200, '2026-10-05', { period: 'week' })], logs, '2026-10-05')
   assert.equal(broad.target, 200)
   assert.equal(broad.remaining, 8)
+})
+
+
+test('resumed old weekly goals count their explicit later solutions in Study without rewriting weekly reports', () => {
+  const plans = [plan('weekly', 'verbal', 40, '2026-10-05', { period: 'week' }), plan('topic', 'verbal', 40, '2026-10-05', { period: 'week', note: 'İsimler' }), plan('daily')]
+  const logs = [result('daily', 10), result('weekly', 7, '2026-10-12T10:00:00Z'), result('topic', 12), result('topic', 5, '2026-10-12T10:00:00Z')]
+  const before = structuredClone(logs)
+  const normal = withWeeklyQuestionProgress(plans, logs)
+  const study = withWeeklyQuestionProgress(normal, logs, '2026-10-12')
+  assert.equal(normal[0].solved_questions, 22)
+  assert.equal(study[0].solved_questions, 29)
+  assert.equal(normal[1].solved_questions, 12)
+  assert.equal(study[1].solved_questions, 17)
+  assert.deepEqual(withWeeklyQuestionProgress(study, logs, '2026-10-12'), study)
+  assert.deepEqual(logs, before)
 })

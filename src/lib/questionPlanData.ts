@@ -1,6 +1,7 @@
 import { supabase } from './supabase'
 import { withQuestionProgress } from './questionPlan'
 import { readQuestionNoteHistory } from './questionNoteHistory'
+import { localDayKey, mondayOf } from './statsPeriod'
 import { withWeeklyQuestionProgress } from './questionAnalytics'
 import type { QuestionPlan, QuestionLog, QuestionVideo } from './questionPlan'
 
@@ -28,7 +29,8 @@ export async function fetchQuestionData(userId: string) {
   return { plans, logs }
 }
 export async function fetchQuestionPlans(userId: string): Promise<QuestionPlan[]> {
-  return (await fetchQuestionData(userId)).plans.filter(plan => !plan.archived_at)
+  const { plans, logs } = await fetchQuestionData(userId)
+  return withWeeklyQuestionProgress(plans, logs, localDayKey(mondayOf(new Date()))).filter(plan => !plan.archived_at)
 }
 export function questionPlanError(error: { code?: string; message?: string }) {
   if (error.message === 'QUESTION_PLAN_NOTE_MISMATCH') return 'Çözümün konusu seçili planla uyuşmuyor. Seçili planı kontrol edin; kayıt değiştirilmedi.'

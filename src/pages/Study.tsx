@@ -14,7 +14,7 @@ import { unlockTimerAlarm, stopTimerAlarm } from '../lib/timerAudio'
 import { findWeeklyPlans } from '../lib/weeklyPlanDates'
 import { localDayKey } from '../lib/statsPeriod'
 import { fetchQuestionPlans, questionPlanError } from '../lib/questionPlanData'
-import { openQuestionPlans } from '../lib/questionPlan'
+import { openQuestionPlans, isPreviousQuestionWeek } from '../lib/questionPlan'
 import type { QuestionPlan as QuestionTask } from '../lib/questionPlan'
 import { questionCompletionOptions, readQuestionAnswers, lockQuestionInputs } from '../lib/questionDialogs'
 import { timerSaveError, timerSaveWasRejected } from '../lib/timerSaveError'
@@ -463,7 +463,7 @@ export default function Study({ mockExam = false }: { mockExam?: boolean }) {
       disabled: !item.subject_id || !subjectsById.has(item.subject_id) || ownerId !== userId,
     }
   }), [todayPlan, todayTotals, subjectsById, ownerId, userId])
-  const questionRows = useMemo<TaskRow[]>(() => questionPlans.map(task => ({ id: task.id, name: task.subjects?.name || 'Ders kaldırıldı', detail: `${task.note ? `${task.note} · ` : ''}${task.solved_questions} / ${task.target_questions} soru${task.period === 'week' ? ' · Haftalık' : task.date < todayKey ? ' · Bekleyen' : ''}`, todayMinutes: Math.round(todayTotals.subjects.get(task.subject_id) || 0), kind: 'questions', done: task.target_questions != null && task.solved_questions >= task.target_questions, disabled: !task.subject_id || !task.subjects?.exam_id || ownerId !== userId || !!questionError })), [questionPlans, todayKey, todayTotals, ownerId, userId, questionError])
+  const questionRows = useMemo<TaskRow[]>(() => questionPlans.map(task => ({ id: task.id, name: task.subjects?.name || 'Ders kaldırıldı', detail: `${task.note ? `${task.note} · ` : ''}${task.solved_questions} / ${task.target_questions} soru${task.period === 'week' ? ' · Haftalık' : task.date < todayKey ? ' · Bekleyen' : ''}${isPreviousQuestionWeek(task.date, todayKey) ? ` · ${new Date(`${task.date}T12:00:00`).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' })}` : ''}`, todayMinutes: Math.round(todayTotals.subjects.get(task.subject_id) || 0), kind: 'questions', previousWeek: isPreviousQuestionWeek(task.date, todayKey), done: task.target_questions != null && task.solved_questions >= task.target_questions, disabled: !task.subject_id || !task.subjects?.exam_id || ownerId !== userId || !!questionError })), [questionPlans, todayKey, todayTotals, ownerId, userId, questionError])
   const activeQuestion = questionPlans.find(task => task.id === (questionPlanId || selectedTaskId))
   const timerDetail = mode === 'questions'
     ? activeQuestion ? `${activeQuestion.note ? `${activeQuestion.note} · ` : ''}${activeQuestion.solved_questions} / ${activeQuestion.target_questions} soru` : 'Ek soru çözümü'

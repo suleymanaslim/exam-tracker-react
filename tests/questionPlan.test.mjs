@@ -96,3 +96,27 @@ test('a selected plan topic takes precedence over editable notes in timed payloa
   assert.equal(questionSessionPayload(session).p_note, 'Sözcükte anlam')
   assert.equal(questionSessionPayload(session).p_question_plan_id, 'selected-topic')
 })
+
+
+test('previous daily and weekly leftovers are separated at local Monday without mutating saved plans', async () => {
+  const { isPreviousQuestionWeek } = await import('../src/lib/questionPlan.ts')
+  const plans = [
+    { id: 'old-day', date: '2026-10-18', target_questions: 30, solved_questions: 10 },
+    { id: 'old-week', period: 'week', date: '2026-10-12', target_questions: 50, solved_questions: 20 },
+    { id: 'old-done', date: '2026-10-18', target_questions: 30, solved_questions: 30 },
+    { id: 'old-week-done', period: 'week', date: '2026-10-12', target_questions: 50, solved_questions: 50 },
+    { id: 'same-week', date: '2026-10-19', target_questions: 30, solved_questions: 10 },
+    { id: 'today', date: '2026-10-22', target_questions: 30, solved_questions: 30 },
+    { id: 'future', date: '2026-10-23', target_questions: 30, solved_questions: 0 },
+    { id: 'archived', date: '2026-10-12', target_questions: 50, solved_questions: 0, archived_at: '2026-10-13' },
+  ]
+  const before = structuredClone(plans)
+  const open = openQuestionPlans(plans, '2026-10-22')
+  assert.deepEqual(open.filter(plan => isPreviousQuestionWeek(plan.date, '2026-10-22')).map(plan => plan.id), ['old-day', 'old-week'])
+  assert.deepEqual(open.filter(plan => !isPreviousQuestionWeek(plan.date, '2026-10-22')).map(plan => plan.id), ['same-week', 'today'])
+  assert.equal(isPreviousQuestionWeek('2026-10-19', '2026-10-25'), false)
+  assert.equal(isPreviousQuestionWeek('2026-10-25', '2026-10-26'), true)
+  assert.equal(isPreviousQuestionWeek('2026-12-27', '2027-01-01'), true)
+  assert.equal(isPreviousQuestionWeek('2026-12-28', '2027-01-01'), false)
+  assert.deepEqual(plans, before)
+})

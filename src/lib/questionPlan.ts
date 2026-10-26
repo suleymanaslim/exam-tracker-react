@@ -72,13 +72,19 @@ export function withQuestionProgress<T extends { id: string }>(plans: T[], resul
   }
   return plans.map(plan => ({ ...plan, ...(counts.get(plan.id) || { solved_questions: 0, correct_questions: 0, wrong_questions: 0, answers_recorded: false, correct_recorded: false, wrong_recorded: false }) }))
 }
-export function openQuestionPlans(plans: QuestionPlan[], today: string) {
-  const start = new Date(`${today}T00:00:00`)
+function questionMonday(today: string) {
+  const start = new Date(`${today}T12:00:00`)
   start.setDate(start.getDate() - (start.getDay() + 6) % 7)
-  const monday = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`
+  return `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`
+}
+export function isPreviousQuestionWeek(date: string, today: string) {
+  return date < questionMonday(today)
+}
+export function openQuestionPlans(plans: QuestionPlan[], today: string) {
+  const monday = questionMonday(today)
   return plans.filter(plan => !plan.archived_at && plan.target_questions != null && plan.target_questions > 0 && (plan.period === 'week'
-    ? plan.date === monday
-    : plan.date === today || (plan.date < today && plan.target_questions != null && plan.solved_questions < plan.target_questions)))
+    ? plan.date === monday || (plan.date < monday && plan.solved_questions < plan.target_questions)
+    : plan.date === today || (plan.date < today && plan.solved_questions < plan.target_questions)))
 }
 export function questionAnswers(total: unknown, correct: unknown = '', wrong: unknown = '') {
   const solved = questionCount(total, true)

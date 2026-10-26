@@ -25,6 +25,7 @@ export interface TaskRow {
   name: string
   detail: string
   todayMinutes: number
+  previousWeek?: boolean
   kind: 'video' | 'study' | 'questions'
   done: boolean
   disabled: boolean

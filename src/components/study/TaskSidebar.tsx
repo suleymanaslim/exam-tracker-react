@@ -1,4 +1,4 @@
-import { BookOpen, BookOpenCheck, CalendarDays, Check, Clock3, ExternalLink, Video } from 'lucide-react'
+import { BookOpen, BookOpenCheck, CalendarDays, Check, Clock3, ExternalLink, History, Video } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import TaskAccordionGroup from './TaskAccordionGroup'
 import type { TaskRow } from './types'
@@ -29,6 +29,8 @@ function TaskButton({ task, selected, onClick }: { task: TaskRow; selected: bool
 
 export default function TaskSidebar({ tasks, questions, selectedId, todayDuration, busy, error, onSelectTask, onSelectQuestion }: Props) {
   const videos = tasks.filter(task => task.kind === 'video')
+  const currentQuestions = questions.filter(task => !task.previousWeek)
+  const previousQuestions = questions.filter(task => task.previousWeek)
   const weekly = tasks.filter(task => task.kind === 'study')
   return <aside className="study-task-sidebar" aria-label="Bugünün planı" aria-hidden={busy} inert={busy}>
     <div className="study-sidebar-inner flex h-full min-h-0 flex-col">
@@ -47,10 +49,13 @@ export default function TaskSidebar({ tasks, questions, selectedId, todayDuratio
         <TaskAccordionGroup title="Haftalık görevler" count={weekly.length} icon={<CalendarDays size={14} />}>
           {weekly.map(task => <TaskButton key={task.id} task={task} selected={selectedId === task.id} onClick={() => onSelectTask(task.id)} />)}
         </TaskAccordionGroup>
-        <TaskAccordionGroup title="Soru görevleri" count={questions.length} icon={<BookOpenCheck size={14} />}>
-          {questions.map(task => <TaskButton key={task.id} task={task} selected={selectedId === task.id} onClick={() => onSelectQuestion(task.id)} />)}
+        <TaskAccordionGroup title="Soru görevleri" count={currentQuestions.length} icon={<BookOpenCheck size={14} />}>
+          {currentQuestions.map(task => <TaskButton key={task.id} task={task} selected={selectedId === task.id} onClick={() => onSelectQuestion(task.id)} />)}
         </TaskAccordionGroup>
-        {tasks.length === 0 && questions.length === 0 && !error && <p className="px-2 pt-2 text-xs leading-5 text-[var(--study-muted)]">Bugün için planlanmış görev yok.</p>}
+        {previousQuestions.length > 0 && <TaskAccordionGroup title="Önceki haftalardan kalanlar" count={previousQuestions.length} icon={<History size={14} />} defaultExpanded={false} unmountWhenClosed>
+          {previousQuestions.map(task => <TaskButton key={task.id} task={task} selected={selectedId === task.id} onClick={() => onSelectQuestion(task.id)} />)}
+        </TaskAccordionGroup>}
+        {tasks.length === 0 && currentQuestions.length === 0 && !error && <p className="px-2 pt-2 text-xs leading-5 text-[var(--study-muted)]">Bugün için planlanmış görev yok.</p>}
         {error && <p className="px-2 pt-2 text-xs leading-5 text-[var(--study-muted)]" role="status">{error}</p>}
       </div>
     </div>
