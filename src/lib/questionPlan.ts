@@ -1,4 +1,4 @@
-export const QUESTION_PRESETS = [15, 20, 30, 45] as const
+export const QUESTION_PRESETS = [10, 20, 30, 45] as const
 export interface QuestionPlan {
   id: string
   user_id: string

@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
-import { withQuestionProgress, questionNoteSuggestions } from './questionPlan'
+import { withQuestionProgress } from './questionPlan'
+import { readQuestionNoteHistory } from './questionNoteHistory'
 import { withWeeklyQuestionProgress } from './questionAnalytics'
 import type { QuestionPlan, QuestionLog, QuestionVideo } from './questionPlan'
 
@@ -50,16 +51,14 @@ export async function fetchQuestionVideos(userId: string): Promise<QuestionVideo
 }
 
 export async function fetchQuestionNotes(userId: string, subjectId: string): Promise<string[]> {
-  const notes: string[] = []
-  for (let start = 0; ; start += 500) {
-    const { data, error } = await supabase.from('question_session_results')
-      .select('note,question_plans!inner(subject_id)')
+  return readQuestionNoteHistory((source, from, to) => {
+    if (source === 'plans') return supabase.from('question_plans')
+      .select('note,created_at').eq('user_id', userId).eq('subject_id', subjectId)
+      .not('note', 'is', null).order('created_at', { ascending: false }).order('id').range(from, to)
+    return supabase.from('question_session_results')
+      .select('note,created_at,question_plans!inner(subject_id)')
       .eq('user_id', userId).eq('question_plans.subject_id', subjectId)
       .is('deleted_at', null).not('note', 'is', null)
-      .order('created_at', { ascending: false }).order('id').range(start, start + 499)
-    if (error) throw error
-    const page = data || []
-    notes.push(...page.map(row => row.note as string))
-    if (page.length < 500) return questionNoteSuggestions(notes, Number.POSITIVE_INFINITY)
-  }
+      .order('created_at', { ascending: false }).order('id').range(from, to)
+  })
 }

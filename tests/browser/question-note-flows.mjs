@@ -50,6 +50,14 @@ try {
       writes.push({ table, payload })
       if (failTarget) { failTarget = false; await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ code: '503', message: 'fixture failure' }) }); return }
       data = target(payload)
+    } else if (table === 'copy_previous_question_week') {
+      const sources = [{ date: '2026-10-22', note: 'Cümlede anlam', count: 30 }, { date: '2026-10-22', note: 'Önceki haftadan gelen konu', count: 20 }]
+      let copied = 0, skipped = 0
+      for (const source of sources) {
+        if (plans.some(plan => plan.date === source.date && plan.note === source.note)) { skipped++; continue }
+        target({ p_date: source.date, p_note: source.note, p_target: source.count }); copied++
+      }
+      data = { copied, skipped }
     } else if (table === 'save_question_week_targets_with_notes') {
       writes.push({ table, payload })
       for (const row of payload.p_targets) target({ p_date: row.date, p_note: row.note, p_plan_id: row.plan_id, p_target: row.target })
@@ -79,10 +87,24 @@ try {
     await page.locator('.question-day-task').filter({ hasText: note }).waitFor()
   }
   await addGoal('Sözcükte anlam'); await addGoal('Cümlede anlam')
+  // Both unsolved plan topics and previously typed solution notes are selectable.
+  await page.getByRole('button', { name: 'Hedef ekle', exact: true }).click()
+  await page.locator('#question-subject').selectOption(sid)
+  await page.locator('.question-note-history button').filter({ hasText: 'Sözcükte anlam' }).waitFor()
+  await page.getByRole('button', { name: '10', exact: true }).click()
+  assert.equal(await page.locator('.swal2-input').inputValue(), '10')
+  await page.locator('#question-plan-note').fill('CÜMLE')
+  await page.locator('.question-note-history button').filter({ hasText: 'Cümlede anlam' }).waitFor()
+  assert.equal(await page.locator('.question-note-history button:visible').count(), 1)
+  await page.locator('.question-note-history button').filter({ hasText: 'Cümlede anlam' }).click()
+  assert.equal(await page.locator('#question-plan-note').inputValue(), 'Cümlede anlam')
+  await page.getByRole('button', { name: 'İptal', exact: true }).click()
+  console.log('PASS goal history suggestions, Turkish live filtering, click selection and quick 10')
   assert.equal(plans.length, 2)
   assert.notEqual(plans[0].id, plans[1].id)
   const goal = note => page.locator('.question-day-task').filter({ hasText: note })
   await goal('Sözcükte anlam').getByRole('button', { name: 'Çözülen ekle', exact: true }).click()
+  await page.waitForFunction(() => document.querySelector('#question-note')?.value === 'Sözcükte anlam')
   assert.equal(await page.locator('#question-note').inputValue(), 'Sözcükte anlam')
   assert.equal(await page.locator('#question-note').getAttribute('readonly'), '')
   assert.equal(await page.locator('.question-note-history button').count(), 0)
@@ -120,13 +142,36 @@ try {
   await page.getByText('7 soru', { exact: true }).waitFor()
   assert.equal(await page.getByText('7 soru', { exact: true }).count(), 1)
   console.log('PASS selected topic survives timer reload and appears once in history')
+  // A note originally typed during a free solution also becomes a target suggestion.
+  const freePlan = { ...plans[0], id: crypto.randomUUID(), note: null, target_questions: null }
+  plans.push(freePlan)
+  logs.push({ id: crypto.randomUUID(), question_plan_id: freePlan.id, user_id: uid, session_id: null, created_at: '2026-10-22T11:00:00Z', solved_questions: 2, note: 'Çözüm notundan gelen konu' })
   await page.locator('.app-sidebar a[href="/questions"]').click()
+  await page.getByRole('button', { name: 'Hedef ekle', exact: true }).click()
+  await page.locator('#question-subject').selectOption(sid)
+  await page.locator('#question-plan-note').fill('çözüm notundan')
+  await page.locator('.question-note-history button').filter({ hasText: 'Çözüm notundan gelen konu' }).waitFor()
+  await page.getByRole('button', { name: 'İptal', exact: true }).click()
   await page.getByRole('button', { name: 'Haftayı planla', exact: true }).click()
   await page.getByRole('textbox', { name: 'Pazartesi soru hedefi', exact: true }).fill('45')
-  await page.getByRole('textbox', { name: 'Pazartesi konu / not', exact: true }).fill('Paragraf')
+  await page.getByLabel('Pazartesi konu / not', { exact: true }).fill('Paragraf')
   await page.getByRole('button', { name: 'Günlere kaydet', exact: true }).click()
   await page.getByText('Hedefler günlere eklendi. Planım sekmesinde görebilirsin.', { exact: true }).waitFor()
   assert.equal(writes.find(write => write.table === 'save_question_week_targets_with_notes').payload.p_targets.find(row => row.date === '2026-10-19').note, 'Paragraf')
+  const countsBeforeCopy = [logs.length, sessions.length]
+  await page.getByRole('button', { name: 'Önceki haftayı kopyala', exact: true }).click()
+  await page.getByRole('button', { name: 'Hedefleri kopyala', exact: true }).click()
+  await page.getByRole('heading', { name: '1 hedef kopyalandı', exact: true }).waitFor()
+  await page.getByRole('button', { name: 'Tamam', exact: true }).click()
+  await page.locator('.question-day-task').filter({ hasText: 'Önceki haftadan gelen konu' }).waitFor()
+  assert.deepEqual([logs.length, sessions.length], countsBeforeCopy)
+  const plansAfterCopy = plans.length
+  await page.getByRole('button', { name: 'Önceki haftayı kopyala', exact: true }).click()
+  await page.getByRole('button', { name: 'Hedefleri kopyala', exact: true }).click()
+  await page.getByRole('heading', { name: 'Yeni hedef eklenmedi', exact: true }).waitFor()
+  await page.getByRole('button', { name: 'Tamam', exact: true }).click()
+  assert.equal(plans.length, plansAfterCopy)
+  console.log('PASS previous-week copy, existing targets preserved and no duplicated goals or history')
   await page.setViewportSize({ width: 390, height: 844 })
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true)
   await page.screenshot({ path: '/tmp/question-plan-notes-mobile.png', fullPage: true })

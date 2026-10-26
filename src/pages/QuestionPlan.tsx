@@ -8,7 +8,7 @@ import { useAdminStore } from '../lib/adminStore'
 import { questionCount, completedVideo, questionNote } from '../lib/questionPlan'
 import type { QuestionPlan as QuestionTask, QuestionVideo, QuestionLog } from '../lib/questionPlan'
 import { fetchQuestionData, fetchQuestionVideos, questionPlanError } from '../lib/questionPlanData'
-import { questionInputOptions, questionCompletionOptions, readQuestionAnswers, lockQuestionInputs } from '../lib/questionDialogs'
+import { questionInputOptions, questionNotePicker, questionCompletionOptions, readQuestionAnswers, lockQuestionInputs } from '../lib/questionDialogs'
 import { analyzeQuestions } from '../lib/questionAnalytics'
 import { localDayKey, mondayOf, weekBounds } from '../lib/statsPeriod'
 import QuestionWeekBoard from '../components/QuestionWeekBoard'
@@ -82,6 +82,33 @@ export default function QuestionPlan() {
     window.dispatchEvent(new Event('question-data-changed'))
     if (userId && ownerRef.current === userId) await load(userId, true)
   }
+  const copyPreviousWeek = async () => {
+    if (!userId) return
+    const source = new Date(`${week}T12:00:00`); source.setDate(source.getDate() - 7)
+    const sourceEnd = new Date(source); sourceEnd.setDate(sourceEnd.getDate() + 6)
+    const owner = userId, targetWeek = week
+    const result = await Swal.fire({
+      title: 'Önceki haftayı kopyala',
+      text: `${dateLabel(localDayKey(source))} – ${dateLabel(localDayKey(sourceEnd))} hedefleri seçili haftanın aynı günlerine eklenir. Konu/notlar korunur; çözülen sorular ve süreler taşınmaz. Mevcut hedeflerin değiştirilmez.`,
+      showCancelButton: true, confirmButtonText: 'Hedefleri kopyala', cancelButtonText: 'İptal', confirmButtonColor: '#4269a8',
+      showLoaderOnConfirm: true, allowOutsideClick: () => !Swal.isLoading(),
+      preConfirm: async () => {
+        if (ownerRef.current !== owner) return false
+        try {
+          const { data, error } = await supabase.rpc('copy_previous_question_week', { p_user_id: owner, p_week_start: targetWeek })
+          if (error) { Swal.showValidationMessage(error.message === 'QUESTION_COPY_COUNT_LIMIT' ? 'Bir ders/konu hedefi 100.000 soruyu aşıyor. Önceki haftayı kontrol et; hiçbir hedef kopyalanmadı.' : questionPlanError(error)); return false }
+          if (!data || !Number.isInteger(data.copied) || !Number.isInteger(data.skipped)) { Swal.showValidationMessage('Sonuç doğrulanamadı. Tekrar kopyalamak mükerrer hedef oluşturmaz.'); return false }
+          return data as { copied: number; skipped: number }
+        } catch { Swal.showValidationMessage('Bağlantı kurulamadı. Tekrar deneyebilirsin.'); return false }
+      },
+    })
+    if (!result.isConfirmed || ownerRef.current !== owner) return
+    await afterSave()
+    setTab('plans')
+    void Swal.fire({ title: result.value.copied ? `${result.value.copied} hedef kopyalandı` : 'Yeni hedef eklenmedi',
+      text: result.value.skipped ? `${result.value.skipped} mevcut veya kullanılamayan hedef atlandı.` : result.value.copied ? 'Konu/notlar aynı günlere eklendi.' : 'Önceki haftada kopyalanacak hedef bulunmuyor.',
+      icon: result.value.copied ? 'success' : 'info', confirmButtonText: 'Tamam' })
+  }
   const saveTarget = async (lesson?: QuestionVideo, existing?: QuestionTask, date?: string) => {
     if (!userId || (lesson && !lesson.resources?.subject_id)) return
     let selectedDate = lesson?.date || existing?.date || date || days[selectedDay].date
@@ -92,7 +119,7 @@ export default function QuestionPlan() {
       ...options, title: existing ? 'Soru hedefini düzenle' : lesson ? 'Videonun gününe soru ekle' : 'Soru hedefi ekle',
       html: (!fixed ? `<label class="question-dialog-date">Ders<select id="question-subject"><option value="">Ders seç</option>${subjects.map(s => `<option value="${htmlText(s.id)}">${htmlText(`${s.exams?.name || ''} · ${s.name}`)}</option>`).join('')}</select></label>` : '')
         + (!fixed ? '<label class="question-dialog-date">Hedef dönemi<select id="question-period"><option value="day">Günlük</option><option value="week">Haftalık</option></select></label>' : `<p>${htmlText(subjects.find(subject => subject.id === subjectId)?.name || 'Ders')} · ${existing?.period === 'week' ? 'Haftalık hedef' : 'Günlük hedef'}</p>`)
-        + options.html + '<label class="question-dialog-note">Konu / not (isteğe bağlı)<input id="question-plan-note" type="text" maxlength="1000" placeholder="Örn. Sözcükte anlam · anlam ilişkileri" autocomplete="off"></label>' + `<label class="question-dialog-date">Gün / hafta<input id="question-date" type="date" required ${lesson ? 'readonly' : ''}></label>`,
+        + options.html + '<label class="question-dialog-note">Konu / not (isteğe bağlı)<input id="question-plan-note" list="question-plan-note-list" type="text" maxlength="1000" placeholder="Örn. Sözcükte anlam · anlam ilişkileri" autocomplete="off"></label><datalist id="question-plan-note-list"></datalist><div class="question-note-history" aria-label="Önceki konu ve notlar"></div>' + `<label class="question-dialog-date">Gün / hafta<input id="question-date" type="date" required ${lesson ? 'readonly' : ''}></label>`,
       didOpen: () => {
         options.didOpen()
         const input = Swal.getPopup()?.querySelector<HTMLInputElement>('#question-date')
@@ -101,10 +128,16 @@ export default function QuestionPlan() {
         const note = Swal.getPopup()?.querySelector<HTMLInputElement>('#question-plan-note')
         if (note) {
           note.value = existing?.note || ''
+          const popup = Swal.getPopup()!
+          const refreshNotes = questionNotePicker(popup, note, userId, 'question-plan-note-list')
           if (existing?.note_locked) {
             note.readOnly = true
             const help = document.createElement('small'); help.textContent = 'Çözüm geçmişini korumak için bu planın konusu sabittir. Yeni konu için yeni hedef ekle.'
             note.parentElement?.append(help)
+          } else {
+            const select = popup.querySelector<HTMLSelectElement>('#question-subject')
+            refreshNotes(subjectId || select?.value)
+            select?.addEventListener('change', () => refreshNotes(select.value))
           }
         }
         if (period) {
@@ -194,7 +227,7 @@ export default function QuestionPlan() {
   const summary = useMemo(() => analyzeQuestions(plans, logs, week), [plans, logs, week])
   const shift = (direction: number) => { const next = new Date(start); next.setDate(next.getDate() + direction * 7); setWeek(localDayKey(next)) }
   return <div className="question-page">
-    <header className="question-header"><div><p>SORU ÇALIŞMASI</p><h1>Soru planı</h1></div><div className="question-header-actions"><button className="question-button" disabled={loading || !!error || !subjects.length} onClick={() => void saveTarget()}><Plus size={16} /> Hedef ekle</button>{isAdmin && userId && <button className="question-button is-secondary" disabled={loading || !!error || !weekPlans.length} onClick={() => setCopyScope({ userId, week })}><Copy size={16} /> Kullanıcıya yapıştır</button>}<Link className="question-button is-secondary" to="/study"><Play size={16} /> Çalışmaya geç</Link></div></header>
+    <header className="question-header"><div><p>SORU ÇALIŞMASI</p><h1>Soru planı</h1></div><div className="question-header-actions"><button className="question-button" disabled={loading || !!error || !subjects.length} onClick={() => void saveTarget()}><Plus size={16} /> Hedef ekle</button><button className="question-button is-secondary" disabled={loading || !!error || !subjects.length} onClick={() => void copyPreviousWeek()}><Copy size={16} /> Önceki haftayı kopyala</button>{isAdmin && userId && <button className="question-button is-secondary" disabled={loading || !!error || !weekPlans.length} onClick={() => setCopyScope({ userId, week })}><Copy size={16} /> Kullanıcıya yapıştır</button>}<Link className="question-button is-secondary" to="/study"><Play size={16} /> Çalışmaya geç</Link></div></header>
     <div className="question-week"><strong>{dateLabel(week)} – {dateLabel(localDayKey(weekEnd))}</strong><div><button aria-label="Önceki hafta" onClick={() => shift(-1)}><ChevronLeft size={17} /></button><input type="date" aria-label="Hafta seç" value={week} onChange={e => { if (e.target.value) setWeek(localDayKey(mondayOf(new Date(`${e.target.value}T00:00:00`)))) }} /><button aria-label="Sonraki hafta" onClick={() => shift(1)}><ChevronRight size={17} /></button><button onClick={() => setWeek(localDayKey(mondayOf(new Date())))}>Bu hafta</button></div></div>
     <div className="question-summary"><span><strong>{summary.solved.toLocaleString('tr-TR')}</strong> soru çözüldü</span><span>{summary.target.toLocaleString('tr-TR')} haftalık hedef · {summary.remaining.toLocaleString('tr-TR')} kalan</span></div>
     <div className="question-toolbar"><div className="question-tabs" role="group" aria-label="Soru planı görünümü"><button aria-pressed={tab === 'plans'} onClick={() => setTab('plans')}>Planım <span>{weekPlans.length}</span></button><button aria-pressed={tab === 'videos'} onClick={() => setTab('videos')}>Videodan ekle <span>{weekLessons.length}</span></button><button aria-pressed={tab === 'planner'} onClick={() => setTab('planner')}>Haftayı planla</button><button aria-pressed={tab === 'logs'} onClick={() => setTab('logs')}>Kayıtlar <span>{weekLogs.length}</span></button></div><input type="search" aria-label="Ders veya konu ara" placeholder="Ders veya konu ara…" value={search} onChange={event => setSearch(event.target.value)} /></div>

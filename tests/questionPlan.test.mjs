@@ -4,7 +4,7 @@ import { QUESTION_PRESETS, questionCount, questionAnswers, completedVideo, withQ
 import { questionSessionPayload } from '../src/lib/questionSession.ts'
 
 test('question presets and custom counts accept only whole numbers in range', () => {
-  assert.deepEqual(QUESTION_PRESETS, [15, 20, 30, 45])
+  assert.deepEqual(QUESTION_PRESETS, [10, 20, 30, 45])
   for (const value of [15, '20', ' 73 ']) assert.ok(questionCount(value) > 0)
   for (const value of [0, -1, 1.5, '15.5', '15abc', '', ' ', null, 100001, Infinity, true]) assert.equal(questionCount(value), null)
   assert.equal(questionCount('0', true), 0)

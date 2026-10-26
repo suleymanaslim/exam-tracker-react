@@ -1,5 +1,6 @@
 import Swal from 'sweetalert2'
 import { QUESTION_PRESETS, questionCount, questionAnswers, questionEntryAnswers, questionNote, solvedQuestionPresets } from './questionPlan'
+import { matchingQuestionNotes } from './questionNoteHistory'
 import { fetchQuestionNotes } from './questionPlanData'
 
 export function questionInputOptions(initial = '', allowZero = false, presets: readonly number[] = QUESTION_PRESETS) {
@@ -19,6 +20,55 @@ export function questionInputOptions(initial = '', allowZero = false, presets: r
     inputValidator: (value: string) => questionCount(value, allowZero) === null ? 'Geçerli bir tam sayı girin.' : undefined,
   }
 }
+/** Refresh on subject changes; ignore closed dialogs and out-of-order responses. */
+export function questionNotePicker(popup: HTMLElement, noteInput: HTMLInputElement, ownerId: string, listId: string) {
+  let version = 0, expanded = false
+  let notes: string[] = []
+  const list = popup.querySelector<HTMLDataListElement>(`#${listId}`)
+  const history = popup.querySelector<HTMLDivElement>('.question-note-history')
+  const render = () => {
+    history?.replaceChildren()
+    if (noteInput.readOnly || !history) return
+    const matches = matchingQuestionNotes(notes, noteInput.value)
+    matches.forEach((note, index) => {
+      const button = document.createElement('button')
+      button.type = 'button'; button.textContent = note; button.title = note
+      button.hidden = !expanded && index >= 3
+      if (index >= 3) button.dataset.olderNote = 'true'
+      button.addEventListener('click', () => {
+        if (noteInput.readOnly) return
+        noteInput.value = note
+        noteInput.dispatchEvent(new Event('input', { bubbles: true }))
+        noteInput.focus()
+      })
+      history.append(button)
+    })
+    if (matches.length > 3) {
+      const toggle = document.createElement('button')
+      toggle.type = 'button'; toggle.className = 'question-notes-toggle'
+      toggle.textContent = expanded ? 'Daha az göster' : `Önceki notlar (${matches.length - 3})`
+      toggle.setAttribute('aria-expanded', String(expanded))
+      toggle.addEventListener('click', () => { expanded = !expanded; render(); history.querySelector<HTMLButtonElement>('.question-notes-toggle')?.focus() })
+      history.append(toggle)
+    }
+  }
+  noteInput.addEventListener('input', () => { expanded = false; render() })
+  return (subjectId?: string | null) => {
+    const request = ++version
+    notes = []; expanded = false
+    list?.replaceChildren(); history?.replaceChildren()
+    if (!subjectId || noteInput.readOnly) return
+    void fetchQuestionNotes(ownerId, subjectId).then(values => {
+      if (request !== version || Swal.getPopup() !== popup || noteInput.readOnly) return
+      notes = values
+      for (const note of notes) {
+        const option = document.createElement('option'); option.value = note; list?.append(option)
+      }
+      render()
+    }).catch(() => { /* A failed lookup never prevents entering a note. */ })
+  }
+}
+
 interface QuestionDialogContext { boundNote?: string | null; note?: string | null; ownerId?: string | null; subjectId?: string | null }
 export function questionCompletionOptions(initial = '', correct?: number | null, wrong?: number | null, locked = false, target?: number | null, context: QuestionDialogContext = {}) {
   const options = questionInputOptions(initial, true, solvedQuestionPresets(target))
@@ -58,35 +108,7 @@ export function questionCompletionOptions(initial = '', correct?: number | null,
     input.addEventListener('input', () => { if (popup.dataset.autoQuestions !== 'true') manualTotal = input.value })
     if (locked) lockQuestionInputs()
     else if (!context.boundNote && context.ownerId && context.subjectId) {
-      void fetchQuestionNotes(context.ownerId, context.subjectId).then(notes => {
-        if (Swal.getPopup() !== popup || noteInput.readOnly) return
-        const list = popup.querySelector('#question-note-list')
-        const history = popup.querySelector<HTMLDivElement>('.question-note-history')
-        for (const note of notes) {
-          const option = document.createElement('option'); option.value = note; list?.append(option)
-        }
-        notes.forEach((note, index) => {
-          const button = document.createElement('button')
-          button.type = 'button'; button.textContent = note; button.title = note
-          button.hidden = index >= 3
-          if (index >= 3) button.dataset.olderNote = 'true'
-          button.addEventListener('click', () => { if (!noteInput.readOnly) { noteInput.value = note; noteInput.focus() } })
-          history?.append(button)
-        })
-        if (notes.length > 3 && history) {
-          const toggle = document.createElement('button')
-          toggle.type = 'button'; toggle.className = 'question-notes-toggle'
-          toggle.textContent = `Önceki notlar (${notes.length - 3})`
-          toggle.setAttribute('aria-expanded', 'false')
-          toggle.addEventListener('click', () => {
-            const expanded = toggle.getAttribute('aria-expanded') !== 'true'
-            history.querySelectorAll<HTMLButtonElement>('[data-older-note]').forEach(button => { button.hidden = !expanded })
-            toggle.setAttribute('aria-expanded', String(expanded))
-            toggle.textContent = expanded ? 'Daha az göster' : `Önceki notlar (${notes.length - 3})`
-          })
-          history.append(toggle)
-        }
-      }).catch(() => { /* A failed suggestion lookup never prevents entering a note. */ })
+      questionNotePicker(popup, noteInput, context.ownerId, 'question-note-list')(context.subjectId)
     }
   }, html: options.html
     + '<details class="question-dialog-answers"><summary>Doğru / yanlış (isteğe bağlı)</summary><div><label>Doğru<input id="question-correct" type="number" min="0" max="100000" step="1" inputmode="numeric" placeholder="—"></label><label>Yanlış<input id="question-wrong" type="number" min="0" max="100000" step="1" inputmode="numeric" placeholder="—"></label></div></details>'

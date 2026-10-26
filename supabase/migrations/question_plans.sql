@@ -452,5 +452,54 @@ $$;
 REVOKE ALL ON FUNCTION public.copy_question_week(uuid, uuid, date) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.copy_question_week(uuid, uuid, date) TO authenticated;
 
+-- Copy only goals from the immediately preceding week; no logs or study sessions.
+-- Existing destination goals, including archived ones, are never overwritten.
+CREATE OR REPLACE FUNCTION public.copy_previous_question_week(p_user_id uuid, p_week_start date)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE
+  week_start date := date_trunc('week', p_week_start::timestamp)::date;
+  entry record;
+  inserted uuid;
+  copied integer := 0;
+  skipped integer := 0;
+BEGIN
+  IF auth.uid() IS NULL OR p_user_id IS NULL OR (p_user_id <> auth.uid() AND NOT EXISTS (
+    SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'
+  )) THEN RAISE EXCEPTION 'Access denied' USING ERRCODE = '42501'; END IF;
+  IF p_week_start IS NULL THEN RAISE EXCEPTION 'Invalid week' USING ERRCODE = '22023'; END IF;
+  PERFORM pg_advisory_xact_lock(hashtextextended('question-week:' || p_user_id::text || ':' || week_start::text, 0));
+  FOR entry IN
+    SELECT subject_id, date + 7 AS target_date, period, note, sum(target_questions)::bigint AS target
+    FROM public.question_plans
+    WHERE user_id = p_user_id AND date >= week_start - 7 AND date < week_start
+      AND archived_at IS NULL AND target_questions > 0
+    GROUP BY subject_id, date, period, note ORDER BY date, subject_id, period, note
+  LOOP
+    IF entry.subject_id IS NULL OR NOT EXISTS (
+      SELECT 1 FROM public.subjects WHERE id = entry.subject_id AND user_id = p_user_id
+    ) THEN skipped := skipped + 1; CONTINUE; END IF;
+    IF entry.target NOT BETWEEN 1 AND 100000 THEN
+      RAISE EXCEPTION 'QUESTION_COPY_COUNT_LIMIT' USING ERRCODE = '22023';
+    END IF;
+    -- Video goals become independent question goals on the corresponding weekday.
+    -- They must not keep a foreign key to a video from last week.
+    inserted := NULL;
+    IF EXISTS (SELECT 1 FROM public.question_plans WHERE user_id = p_user_id
+      AND subject_id = entry.subject_id AND date = entry.target_date AND period = entry.period
+      AND note IS NOT DISTINCT FROM entry.note) THEN
+      skipped := skipped + 1; CONTINUE;
+    END IF;
+    INSERT INTO public.question_plans(user_id, subject_id, date, kind, period, target_questions, note)
+    VALUES (p_user_id, entry.subject_id, entry.target_date, 'extra', entry.period, entry.target::integer, entry.note)
+    ON CONFLICT (user_id, subject_id, date, period, (md5(COALESCE(note, '')))) WHERE kind = 'extra'
+    DO NOTHING RETURNING id INTO inserted;
+    IF inserted IS NULL THEN skipped := skipped + 1; ELSE copied := copied + 1; END IF;
+  END LOOP;
+  RETURN jsonb_build_object('copied', copied, 'skipped', skipped);
+END;
+$$;
+REVOKE ALL ON FUNCTION public.copy_previous_question_week(uuid, date) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.copy_previous_question_week(uuid, date) TO authenticated;
+
 NOTIFY pgrst, 'reload schema';
 COMMIT;

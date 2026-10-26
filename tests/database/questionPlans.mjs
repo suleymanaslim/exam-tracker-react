@@ -164,6 +164,29 @@ async function scenario(oldMigration = null) {
     assert.deepEqual((await db.query('SELECT * FROM public.question_plans ORDER BY id')).rows,allRows)
     assert.deepEqual((await db.query('SELECT * FROM public.question_session_results ORDER BY id')).rows,allLogs)
     console.log('PASS separate topics, strict manual/timed attribution, immutable history, atomic week notes and idempotent upgrade')
+    await user(alice)
+    const copyPrevious = async () => (await value("SELECT public.copy_previous_question_week($1,'2026-10-19') AS result",[alice])).result
+    const beforeCopy = await value('SELECT (SELECT count(*) FROM public.question_session_results)::int AS logs, (SELECT count(*) FROM public.study_sessions)::int AS sessions')
+    await target(alice,subject,'2026-10-19',70)
+    const firstCopy = await copyPrevious()
+    assert.equal(firstCopy.copied,2)
+    assert.equal((await value("SELECT target_questions FROM public.question_plans WHERE date='2026-10-19' AND subject_id=$1 AND note IS NULL",[subject])).target_questions,70)
+    const copiedTopic = await value("SELECT * FROM public.question_plans WHERE date='2026-10-19' AND subject_id=$1 AND note='Paragraf'",[subject])
+    assert.equal(copiedTopic.target_questions,40)
+    assert.equal(copiedTopic.video_plan_item_id,null)
+    assert.equal(copiedTopic.kind,'extra')
+    await target(alice,subject,'2026-10-19',99,'day',null,copiedTopic.id)
+    assert.deepEqual(await copyPrevious(),{copied:0,skipped:2})
+    assert.equal((await value('SELECT target_questions FROM public.question_plans WHERE id=$1',[copiedTopic.id])).target_questions,99)
+    assert.deepEqual(await value('SELECT (SELECT count(*) FROM public.question_session_results)::int AS logs, (SELECT count(*) FROM public.study_sessions)::int AS sessions'),beforeCopy)
+    await user(bob)
+    await assert.rejects(copyPrevious(),/Access denied/)
+    await user(null)
+    await assert.rejects(copyPrevious(),/Access denied/)
+    await user(admin)
+    assert.deepEqual(await copyPrevious(),{copied:0,skipped:2})
+    console.log('PASS previous-week topic copy, existing goals preserved, retry idempotence, no copied logs/time and owner/admin authorization')
+
 
   } finally { await db.close() }
 }
