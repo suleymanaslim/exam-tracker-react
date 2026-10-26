@@ -11,3 +11,5 @@
 
 
 .question-note-history button[hidden]{display:none}.question-note-history .question-notes-toggle{background:white;color:#4269a8;border-style:dashed}.question-note-history .question-notes-toggle:focus-visible{outline:2px solid #4269a8;outline-offset:2px}
+
+.question-plan-note{display:block;font-size:13px;line-height:1.45;color:#4269a8;overflow-wrap:anywhere;white-space:pre-wrap}.question-week-field .question-week-note{display:flex;flex-direction:column;font-size:11px;color:#62748b;margin-top:5px}.question-week-field .question-week-note input{min-height:38px;margin:5px 0 9px;padding:7px;text-align:left;font-size:13px;font-weight:400;color:#24354a}.question-dialog-note input[readonly],.question-week-note input[readonly]{background:#f2f5f9;color:#52667e}.question-dialog-note small{font-size:12px;line-height:1.45;color:#62748b}

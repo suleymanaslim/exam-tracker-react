@@ -5,7 +5,7 @@ import { localDayKey } from './statsPeriod.ts'
 
 export function questionSessionPayload(session: RecoverySession) {
   const answers = questionAnswers(session.solvedQuestions, session.correctQuestions, session.wrongQuestions)
-  const note = questionNote(session.questionNote)
+  const note = questionNote(session.questionPlanNote || session.questionNote)
   if (note === undefined) throw new Error('Konu/not en fazla 1000 karakter olabilir.')
   if (session.mode !== 'questions' || !answers || session.durationMinutes <= 0) throw new Error('Soru sayısını girin ve en az bir saniye çalışın.')
   return {

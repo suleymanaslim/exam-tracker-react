@@ -51,6 +51,7 @@ npx playwright install chromium
 VITE_SUPABASE_URL=https://exam-test.supabase.co VITE_SUPABASE_ANON_KEY=fixture npm run build
 npm run test:browser
 npm run test:plans
+npm run test:question-notes
 ```
 
 Önceki sürümün aynı değişkenlerle üretilmiş `dist` klasörünü `PERF_BASELINE_DIST` ortam değişkeniyle verirseniz aynı gecikmeler altında önce/sonra karşılaştırması da yapılır. Bu testteki süreler canlı ağın veya Supabase sunucusunun performans garantisi değildir.
@@ -87,3 +88,9 @@ Yeni yayın sonrası eski sayfa dosyalarının yüklenememesi için bir kez otom
 | `supabase` | Veritabanı geçişleri ve Edge Function |
 | `tests` | Hesap izolasyonu, veri doğruluğu, sayaç ve önbellek testleri |
 | `public` | Kullanılan logo, favicon ve sayaç sesi |
+
+### Soru planında konu / not
+
+Bu özellik için `supabase/migrations/question_plans.sql` dosyasının **tamamını** Supabase SQL Editor’de çalıştırın. Güncelleme mevcut tablo ve kayıtları silmez; konu/not alanını ekler, farklı konuların ayrı hedeflerde tutulmasını sağlar ve kayıt fonksiyonlarını günceller. Aynı dosya tekrar çalıştırılabilir. Frontend dağıtımı SQL’i otomatik uygulamaz.
+
+Hedef eklerken ve haftayı planlarken konu/not yazılabilir. Konu belirtilen hedefin manuel veya süreli çözümü yalnızca seçili hedefe kaydolur; konu bilgisi çözüm geçmişinde görünür ve sayaç kurtarmada korunur. Çözüm kaydı oluşan hedefin konu başlığı geçmişi korumak için değiştirilemez; başka konuya yeni hedef eklenir. Konu belirtilmeyen eski hedefler ve çözüm notları korunur.

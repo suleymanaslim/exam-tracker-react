@@ -1,6 +1,7 @@
 export function timerSaveError(error: unknown, questions = false) {
   const rawCode = typeof error === 'object' && error !== null && 'code' in error ? error.code : null
   const code = typeof rawCode === 'string' && /^[A-Z0-9]{3,12}$/.test(rawCode) ? rawCode : ''
+  if (questions && typeof error === 'object' && error !== null && 'message' in error && error.message === 'QUESTION_PLAN_NOTE_MISMATCH') return 'Seçili planın konusu değişmiş. Çözüm başka konuya kaydedilmedi; süren ve girdiğin bilgiler bu cihazda korunuyor.'
   const suffix = code ? ` (${code})` : ''
   if (questions && ['PGRST202', 'PGRST204', 'PGRST205', '42P01', '42703'].includes(code)) {
     return `Soru kayıt sistemi güncel değil${suffix}. Supabase’de güncel question_plans.sql dosyasını çalıştırın. Oturumun korunuyor; tekrar kaydedebilir veya oturumu unutabilirsin.`

@@ -21,7 +21,8 @@ export async function fetchQuestionData(userId: string) {
     readPages('question_session_results', '*', userId),
   ])
   const logs = (results as QuestionLog[]).filter(log => !log.deleted_at)
-  const plans = withWeeklyQuestionProgress(withQuestionProgress(raw as QuestionPlan[], logs), logs)
+  const lockedPlans = new Set((results as QuestionLog[]).map(log => log.question_plan_id))
+  const plans = withWeeklyQuestionProgress(withQuestionProgress((raw as QuestionPlan[]).map(plan => ({ ...plan, note_locked: lockedPlans.has(plan.id) })), logs), logs)
     .sort((a, b) => b.date.localeCompare(a.date))
   return { plans, logs }
 }
@@ -29,6 +30,8 @@ export async function fetchQuestionPlans(userId: string): Promise<QuestionPlan[]
   return (await fetchQuestionData(userId)).plans.filter(plan => !plan.archived_at)
 }
 export function questionPlanError(error: { code?: string; message?: string }) {
+  if (error.message === 'QUESTION_PLAN_NOTE_MISMATCH') return 'Çözümün konusu seçili planla uyuşmuyor. Seçili planı kontrol edin; kayıt değiştirilmedi.'
+  if (error.message === 'QUESTION_PLAN_NOTE_LOCKED') return 'Çözüm kaydı olan planın konusu değiştirilemez. Farklı konu için yeni hedef ekleyin.'
   return ['42P01', '42703', 'PGRST204', 'PGRST205', 'PGRST202'].includes(error.code || '')
     ? 'Soru planı için Supabase’de güncel question_plans.sql dosyasını çalıştırın.'
     : error.code === '42501' ? 'Bu hesabın soru planını düzenleme izni bulunmuyor.' : 'İşlem tamamlanamadı. Lütfen tekrar deneyin.'

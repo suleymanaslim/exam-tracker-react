@@ -90,3 +90,9 @@ test('question save retries carry the same note while legacy sessions have no no
   assert.deepEqual(questionSessionPayload({ ...session, questionNote: 'Tarih' }), questionSessionPayload({ ...structuredClone(session), questionNote: 'Tarih' }))
   assert.throws(() => questionSessionPayload({ ...session, questionNote: 'x'.repeat(1001) }))
 })
+
+test('a selected plan topic takes precedence over editable notes in timed payloads', () => {
+  const session = { id: 'session-id', ownerId: 'alice', subjectId: 'subject', resourceId: '', mode: 'questions', questionPlanId: 'selected-topic', startedAt: '2026-10-09T11:00:00Z', endedAt: '2026-10-09T11:01:00Z', durationMinutes: 1, remainingSeconds: 60, solvedQuestions: 20, questionPlanNote: '  Sözcükte anlam ', questionNote: 'Different topic' }
+  assert.equal(questionSessionPayload(session).p_note, 'Sözcükte anlam')
+  assert.equal(questionSessionPayload(session).p_question_plan_id, 'selected-topic')
+})

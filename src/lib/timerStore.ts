@@ -22,6 +22,7 @@ interface TimerState {
   questionPlanId: string | null
   questionDate: string | null
   questionTarget: number | null
+  questionPlanNote: string | null
   previousStudyMode: Exclude<TimerMode, 'questions'>
   setIsRunning: (v: boolean) => void
   setSecondsLeft: (v: number) => void
@@ -36,7 +37,7 @@ interface TimerState {
   setBreakSeconds: (v: number) => void
   resetTimer: (focusSeconds: number) => void
   startTimer: () => void
-  startQuestions: (selection: { examId: string; subjectId: string; resourceId?: string | null; planId?: string | null; target?: number | null; date: string }) => void
+  startQuestions: (selection: { examId: string; subjectId: string; resourceId?: string | null; planId?: string | null; target?: number | null; note?: string | null; date: string }) => void
   returnToStudy: () => boolean
   pauseTimer: () => void
   queueRecovery: () => void
@@ -52,7 +53,7 @@ const initial = {
   previousStudyMode: 'pomodoro_long' as Exclude<TimerMode, 'questions'>,
   mode: 'pomodoro_long' as TimerMode, phase: 'focus' as 'focus' | 'break',
   selExam: '', selSubject: '', selResource: '', deadlineEpoch: null as number | null,
-  isFinishing: false, questionPlanId: null as string | null, questionDate: null as string | null, questionTarget: null as number | null,
+  isFinishing: false, questionPlanId: null as string | null, questionDate: null as string | null, questionTarget: null as number | null, questionPlanNote: null as string | null,
   breakSeconds: 600, recovery: null as RecoverySession | null,
 }
 
@@ -62,12 +63,12 @@ export const useTimerStore = create<TimerState>((set, get) => ({
   setSecondsLeft: value => set(state => state.secondsLeft === value ? state : { secondsLeft: value }),
   setTotalSeconds: value => set({ totalSeconds: value, ...(get().phase === 'focus' && !get().startedAt ? { focusSeconds: value } : {}) }),
   setStartedAt: value => set({ startedAt: value, sessionId: value ? get().sessionId || crypto.randomUUID() : null }),
-  setMode: value => set({ mode: value, ...(value !== 'questions' ? { previousStudyMode: value } : {}), questionPlanId: null, questionDate: null, questionTarget: null }), setPhase: value => set({ phase: value }),
+  setMode: value => set({ mode: value, ...(value !== 'questions' ? { previousStudyMode: value } : {}), questionPlanId: null, questionDate: null, questionTarget: null, questionPlanNote: null }), setPhase: value => set({ phase: value }),
   setSelExam: value => set({ selExam: value }), setSelSubject: value => set({ selSubject: value }),
   setSelResource: value => set({ selResource: value }), setDeadlineEpoch: value => set({ deadlineEpoch: value }),
   setBreakSeconds: value => set({ breakSeconds: value }),
   resetTimer: focusSeconds => set({ isRunning: false, secondsLeft: focusSeconds, totalSeconds: focusSeconds,
-    focusSeconds, startedAt: null, sessionId: null, deadlineEpoch: null, phase: 'focus', recovery: null, isFinishing: false, questionPlanId: null, questionDate: null, questionTarget: null }),
+    focusSeconds, startedAt: null, sessionId: null, deadlineEpoch: null, phase: 'focus', recovery: null, isFinishing: false, questionPlanId: null, questionDate: null, questionTarget: null, questionPlanNote: null }),
   startTimer: () => {
     const state = get()
     if (!state.ownerId || !state.selSubject || state.recovery || (!isCountUp(state.mode) && state.secondsLeft <= 0)) return
@@ -79,7 +80,7 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     if (!state.ownerId || state.isRunning || state.startedAt || state.recovery || state.phase === 'break') return
     get().resetTimer(0)
     set({ mode: 'questions', previousStudyMode: state.mode === 'questions' ? state.previousStudyMode : state.mode, selExam: selection.examId, selSubject: selection.subjectId,
-      selResource: selection.resourceId || '', questionPlanId: selection.planId || null, questionDate: selection.date, questionTarget: selection.target ?? null })
+      selResource: selection.resourceId || '', questionPlanId: selection.planId || null, questionDate: selection.date, questionTarget: selection.target ?? null, questionPlanNote: selection.note?.trim() || null })
     get().startTimer()
   },
   returnToStudy: () => {
@@ -133,7 +134,7 @@ function snapshot(state: TimerState): TimerSnapshot {
     totalSeconds: state.totalSeconds, focusSeconds: state.focusSeconds, startedAt: state.startedAt?.toISOString() || null,
     sessionId: state.sessionId, mode: state.mode, previousStudyMode: state.previousStudyMode, phase: state.phase, selExam: state.selExam,
     selSubject: state.selSubject, selResource: state.selResource, deadlineEpoch: state.deadlineEpoch,
-    breakSeconds: state.breakSeconds, recovery: state.recovery, questionPlanId: state.questionPlanId, questionDate: state.questionDate, questionTarget: state.questionTarget,
+    breakSeconds: state.breakSeconds, recovery: state.recovery, questionPlanId: state.questionPlanId, questionDate: state.questionDate, questionTarget: state.questionTarget, questionPlanNote: state.questionPlanNote,
   }
 }
 
@@ -148,7 +149,7 @@ export function bindTimerOwner(ownerId: string | null) {
   const remaining = remainingSeconds(restored, Date.now())
   const recovery = restored.recovery || (restored.phase === 'focus' && (restored.isRunning || (restored.startedAt && remaining <= 0)) ? recoveryFor(restored, Date.now()) : null)
   const expiredBreak = restored.phase === 'break' && remaining <= 0
-  useTimerStore.setState({ ...restored, isFinishing: false, questionPlanId: restored.questionPlanId || null, questionDate: restored.questionDate || null, questionTarget: restored.questionTarget ?? null, previousStudyMode: restored.previousStudyMode || (restored.mode === 'questions' ? 'pomodoro_short' : restored.mode), ownerId, startedAt: restored.startedAt ? new Date(restored.startedAt) : null,
+  useTimerStore.setState({ ...restored, isFinishing: false, questionPlanId: restored.questionPlanId || null, questionDate: restored.questionDate || null, questionTarget: restored.questionTarget ?? null, questionPlanNote: restored.questionPlanNote || null, previousStudyMode: restored.previousStudyMode || (restored.mode === 'questions' ? 'pomodoro_short' : restored.mode), ownerId, startedAt: restored.startedAt ? new Date(restored.startedAt) : null,
     recovery, isRunning: recovery || expiredBreak ? false : restored.isRunning,
     deadlineEpoch: recovery || expiredBreak ? null : restored.deadlineEpoch,
     secondsLeft: expiredBreak ? restored.focusSeconds : remaining,

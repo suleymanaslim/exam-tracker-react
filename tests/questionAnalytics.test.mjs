@@ -104,3 +104,24 @@ test('missing answer counts stay unknown while a real zero stays visible', () =>
   assert.equal(known.correctRecorded, true)
   assert.equal(known.wrongRecorded, true)
 })
+
+test('topic-bound weekly progress counts only the selected plan while general weekly goals still aggregate', () => {
+  const plans = [plan('topic', 'verbal', 30, '2026-10-05', { period: 'week', note: 'Sözcükte anlam' }), plan('other', 'verbal', 30, '2026-10-05', { period: 'week', note: 'Cümlede anlam' }), plan('general', 'verbal', 100, '2026-10-05', { period: 'week' })]
+  const logs = [result('topic', 12), result('other', 40), result('topic', 25, '2026-10-12T10:00:00Z'), result('topic', 8, '2026-10-09T10:00:00Z', { deleted_at: '2026-10-10' })]
+  const progress = withWeeklyQuestionProgress(withQuestionProgress(plans, logs), logs)
+  assert.equal(progress[0].solved_questions, 12)
+  assert.equal(progress[1].solved_questions, 40)
+  assert.equal(progress[2].solved_questions, 52)
+})
+test('unplanned questions and other topics never complete a topic-bound target or reduce its remaining count', () => {
+  const plans = [plan('topic', 'verbal', 30, '2026-10-09', { note: 'Sözcükte anlam' }), plan('other', 'verbal', 30, '2026-10-09', { note: 'Cümlede anlam' }), plan('extra', 'verbal', null)]
+  const logs = [result('topic', 12), result('other', 80), result('extra', 100, '2026-10-09T10:00:00Z', { note: 'Sözcükte anlam' })]
+  const data = analyzeQuestions(plans, logs, '2026-10-05')
+  assert.equal(data.target, 60)
+  assert.equal(data.solved, 192)
+  assert.equal(data.remaining, 18)
+  assert.equal(data.bySubject[0].remaining, 18)
+  const broad = analyzeQuestions([...plans, plan('general', 'verbal', 200, '2026-10-05', { period: 'week' })], logs, '2026-10-05')
+  assert.equal(broad.target, 200)
+  assert.equal(broad.remaining, 8)
+})

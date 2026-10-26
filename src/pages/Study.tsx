@@ -208,7 +208,7 @@ export default function Study({ mockExam = false }: { mockExam?: boolean }) {
       unlockTimerAlarm()
       const task = mode === 'questions' && selectionSource === 'plan' ? questionPlans.find(item => item.id === selectedTaskId) : null
       if (!current.startedAt && task?.subject_id && task.subjects?.exam_id) {
-        current.startQuestions({ examId: task.subjects.exam_id, subjectId: task.subject_id, resourceId: task.resource_id, planId: task.id, target: task.target_questions, date: task.date })
+        current.startQuestions({ examId: task.subjects.exam_id, subjectId: task.subject_id, resourceId: task.resource_id, planId: task.id, target: task.target_questions, note: task.note, date: task.date })
       } else current.startTimer()
     }
   }
@@ -244,7 +244,7 @@ export default function Study({ mockExam = false }: { mockExam?: boolean }) {
       useTimerStore.setState({ isFinishing: true })
       let saveUncertain = false
       const result = await Swal.fire(sessionCompletionDialog({
-        ...questionCompletionOptions('', undefined, undefined, false, session.questionTarget, { ownerId: session.ownerId, subjectId: session.subjectId }), title: 'Kaç soru çözdün?',
+        ...questionCompletionOptions('', undefined, undefined, false, session.questionTarget, { boundNote: session.questionPlanNote, ownerId: session.ownerId, subjectId: session.subjectId }), title: 'Kaç soru çözdün?',
         width: 420,
         showLoaderOnConfirm: true,
         preConfirm: async value => {
@@ -432,7 +432,7 @@ export default function Study({ mockExam = false }: { mockExam?: boolean }) {
     if (mockActive || !task?.subject_id || !task.subjects?.exam_id || isTimerActive || isFinishing || ownerId !== userId) return
     setSelectionSource('plan'); setSelectedTaskId(id)
     stopTimerAlarm(); unlockTimerAlarm()
-    startQuestions({ examId: task.subjects.exam_id, subjectId: task.subject_id, resourceId: task.resource_id, planId: task.id, target: task.target_questions, date: task.date })
+    startQuestions({ examId: task.subjects.exam_id, subjectId: task.subject_id, resourceId: task.resource_id, planId: task.id, target: task.target_questions, note: task.note, date: task.date })
   }
   const todayTotals = useMemo(() => {
     const subjects = new Map<string | null, number>(), resources = new Map<string, number>()
@@ -463,10 +463,10 @@ export default function Study({ mockExam = false }: { mockExam?: boolean }) {
       disabled: !item.subject_id || !subjectsById.has(item.subject_id) || ownerId !== userId,
     }
   }), [todayPlan, todayTotals, subjectsById, ownerId, userId])
-  const questionRows = useMemo<TaskRow[]>(() => questionPlans.map(task => ({ id: task.id, name: task.subjects?.name || 'Ders kaldırıldı', detail: `${task.solved_questions} / ${task.target_questions} soru${task.period === 'week' ? ' · Haftalık' : task.date < todayKey ? ' · Bekleyen' : ''}`, todayMinutes: Math.round(todayTotals.subjects.get(task.subject_id) || 0), kind: 'questions', done: task.target_questions != null && task.solved_questions >= task.target_questions, disabled: !task.subject_id || !task.subjects?.exam_id || ownerId !== userId || !!questionError })), [questionPlans, todayKey, todayTotals, ownerId, userId, questionError])
+  const questionRows = useMemo<TaskRow[]>(() => questionPlans.map(task => ({ id: task.id, name: task.subjects?.name || 'Ders kaldırıldı', detail: `${task.note ? `${task.note} · ` : ''}${task.solved_questions} / ${task.target_questions} soru${task.period === 'week' ? ' · Haftalık' : task.date < todayKey ? ' · Bekleyen' : ''}`, todayMinutes: Math.round(todayTotals.subjects.get(task.subject_id) || 0), kind: 'questions', done: task.target_questions != null && task.solved_questions >= task.target_questions, disabled: !task.subject_id || !task.subjects?.exam_id || ownerId !== userId || !!questionError })), [questionPlans, todayKey, todayTotals, ownerId, userId, questionError])
   const activeQuestion = questionPlans.find(task => task.id === (questionPlanId || selectedTaskId))
   const timerDetail = mode === 'questions'
-    ? activeQuestion ? `${activeQuestion.solved_questions} / ${activeQuestion.target_questions} soru` : 'Ek soru çözümü'
+    ? activeQuestion ? `${activeQuestion.note ? `${activeQuestion.note} · ` : ''}${activeQuestion.solved_questions} / ${activeQuestion.target_questions} soru` : 'Ek soru çözümü'
     : selectedVideoCount != null ? '' : mode === 'manual' ? `${focusMinutes} dk kesintisiz odak` : ''
   const savedTodayMinutes = todayTotals.total
 

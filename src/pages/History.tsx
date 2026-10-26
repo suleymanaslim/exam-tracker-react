@@ -145,7 +145,7 @@ export default function History() {
     if (!log || !ownerRef.current) return
     const owner = ownerRef.current
     const result = await Swal.fire({
-      ...questionCompletionOptions(String(log.solved_questions), log.correct_questions, log.wrong_questions, false, undefined, { note: log.note, ownerId: owner, subjectId: entry.subject_id }),
+      ...questionCompletionOptions(String(log.solved_questions), log.correct_questions, log.wrong_questions, false, undefined, { note: log.note, boundNote: questionPlans.find(plan => plan.id === log.question_plan_id)?.note, ownerId: owner, subjectId: entry.subject_id }),
       title: 'Çözüm kaydını düzenle', showCancelButton: true, confirmButtonText: 'Kaydet', cancelButtonText: 'Vazgeç',
       showLoaderOnConfirm: true, allowOutsideClick: () => !Swal.isLoading(),
       preConfirm: async value => {

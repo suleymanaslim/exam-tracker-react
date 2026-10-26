@@ -122,6 +122,49 @@ async function scenario(oldMigration = null) {
     assert.ok((await value('SELECT archived_at FROM public.question_plans WHERE id=$1', [videoPlan])).archived_at)
     assert.equal((await value('SELECT note FROM public.question_session_results WHERE id=$1', [id(30)])).note, 'Paragraf')
     console.log('PASS rerunning migration keeps data, notes, archives and removed results intact')
+    await user(alice)
+    const notedTarget = async (note, period='day', planId=null) => (await value('SELECT public.set_question_target_with_note($1,$2,$3,$4,$5,$6,NULL,$7) AS id', [alice,subject,'2026-10-10',30,note,period,planId])).id
+    const topicA = await notedTarget('  Sözcükte anlam  ')
+    const topicB = await notedTarget('Cümlede anlam')
+    assert.notEqual(topicA,topicB)
+    assert.equal(await notedTarget('Sözcükte anlam'),topicA)
+    await db.query('SELECT public.add_solved_questions($1,$2,12,NULL,NULL,NULL)',[id(1001),topicA])
+    assert.equal((await value('SELECT note FROM public.question_session_results WHERE id=$1',[id(1001)])).note,'Sözcükte anlam')
+    await assert.rejects(db.query('SELECT public.add_solved_questions($1,$2,12,NULL,NULL,$3)',[id(1002),topicA,'Başka konu']),/QUESTION_PLAN_NOTE_MISMATCH/)
+    await assert.rejects(notedTarget('Başka konu','day',topicA),/QUESTION_PLAN_NOTE_LOCKED/)
+    await assert.rejects(notedTarget(null,'day',topicA),/QUESTION_PLAN_NOTE_LOCKED/)
+    await assert.rejects(db.query('SELECT public.update_question_result($1,11,NULL,NULL,$2)',[id(1001),'Başka konu']),/QUESTION_PLAN_NOTE_MISMATCH/)
+    await db.query('SELECT public.update_question_result($1,11)',[id(1001)])
+    assert.equal((await value('SELECT note FROM public.question_session_results WHERE id=$1',[id(1001)])).note,'Sözcükte anlam')
+    const timedTopic = [id(1003),topicB,alice,subject,'2026-10-10',7,'2026-10-10T10:00Z','2026-10-10T10:02Z',2]
+    await db.query('SELECT public.save_question_study_session($1,$2,$3,$4,$5,$6,$7,$8,$9)',timedTopic)
+    await db.query('SELECT public.save_question_study_session($1,$2,$3,$4,$5,$6,$7,$8,$9)',timedTopic)
+    assert.equal((await value('SELECT note FROM public.question_session_results WHERE session_id=$1',[id(1003)])).note,'Cümlede anlam')
+    await db.query("SELECT public.save_question_study_session($1,NULL,$2,$3,'2026-10-10',5,'2026-10-10T10:00Z','2026-10-10T10:02Z',2)",[id(1004),alice,subject])
+    assert.notEqual((await value('SELECT question_plan_id FROM public.question_session_results WHERE session_id=$1',[id(1004)])).question_plan_id,topicA)
+    assert.equal((await value('SELECT count(*)::int AS n FROM public.question_session_results WHERE question_plan_id=$1',[topicB])).n,1)
+    await user(bob)
+    await assert.rejects(db.query('SELECT public.set_question_target_with_note($1,$2,$3,30,$4)',[alice,subject,'2026-10-10','Konu']),/Access denied/)
+    await user(alice)
+    await assert.rejects(notedTarget('x'.repeat(1001)),/Invalid target/)
+    assert.ok(await notedTarget('📚'.repeat(500)))
+    const weekTargets = [{date:'2026-10-12',target:40,note:'Paragraf'}, {date:'2026-10-13',target:35,note:'Anlam ilişkileri'}]
+    const saveWeek = entries => db.query("SELECT public.save_question_week_targets_with_notes($1,$2,'2026-10-12',$3::jsonb)",[alice,subject,JSON.stringify(entries)])
+    await saveWeek(weekTargets); await saveWeek(weekTargets)
+    assert.equal((await value("SELECT count(*)::int AS n FROM public.question_plans WHERE date BETWEEN '2026-10-12' AND '2026-10-13' AND subject_id=$1",[subject])).n,2)
+    const beforeAtomic = await value("SELECT sum(target_questions)::int AS n FROM public.question_plans WHERE date BETWEEN '2026-10-12' AND '2026-10-13' AND subject_id=$1",[subject])
+    await assert.rejects(saveWeek([{...weekTargets[0],target:70},{...weekTargets[1],note: {topic:'not text'}}]),/Invalid question note/)
+    assert.deepEqual(await value("SELECT sum(target_questions)::int AS n FROM public.question_plans WHERE date BETWEEN '2026-10-12' AND '2026-10-13' AND subject_id=$1",[subject]),beforeAtomic)
+    await db.query('SELECT public.set_question_target($1,$2,$3,45,$4,NULL,$5)',[alice,subject,'2026-10-10','day',topicA])
+    assert.equal((await value('SELECT note FROM public.question_plans WHERE id=$1',[topicA])).note,'Sözcükte anlam')
+    await db.exec('RESET ROLE')
+    const allRows = (await db.query('SELECT * FROM public.question_plans ORDER BY id')).rows
+    const allLogs = (await db.query('SELECT * FROM public.question_session_results ORDER BY id')).rows
+    await db.exec(migration)
+    assert.deepEqual((await db.query('SELECT * FROM public.question_plans ORDER BY id')).rows,allRows)
+    assert.deepEqual((await db.query('SELECT * FROM public.question_session_results ORDER BY id')).rows,allLogs)
+    console.log('PASS separate topics, strict manual/timed attribution, immutable history, atomic week notes and idempotent upgrade')
+
   } finally { await db.close() }
 }
 try {

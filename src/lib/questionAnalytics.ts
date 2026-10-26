@@ -9,13 +9,14 @@ export function analyzeQuestions(plans: QuestionPlan[], logs: QuestionLog[], wee
   const active = logs.filter(log => !log.deleted_at && Number.isFinite(Date.parse(log.created_at)))
   const selected = active.filter(log => week === null || weekKey(logDay(log)) === weekKey(week))
   // An explicit weekly subject goal includes daily/video goals for that subject.
-  const goals = new Map<string, { subjectId: string; week: string; daily: number; weekly: number | null }>()
+  const goals = new Map<string, { subjectId: string; week: string; daily: number; weekly: number | null; scoped: Map<string, number> }>()
   for (const plan of plans) {
     if (plan.archived_at || !plan.target_questions || (week !== null && weekKey(plan.date) !== weekKey(week))) continue
     const subjectId = plan.subject_id || `removed:${plan.id}`
     const key = `${subjectId}:${weekKey(plan.date)}`
-    const goal = goals.get(key) || { subjectId, week: weekKey(plan.date), daily: 0, weekly: null }
-    if (plan.period === 'week') goal.weekly = (goal.weekly || 0) + plan.target_questions
+    const goal = goals.get(key) || { subjectId, week: weekKey(plan.date), daily: 0, weekly: null, scoped: new Map<string, number>() }
+    if (plan.note) goal.scoped.set(plan.id, plan.target_questions)
+    else if (plan.period === 'week') goal.weekly = (goal.weekly || 0) + plan.target_questions
     else goal.daily += plan.target_questions
     goals.set(key, goal)
   }
@@ -25,6 +26,8 @@ export function analyzeQuestions(plans: QuestionPlan[], logs: QuestionLog[], wee
     return bySubject.get(id)!
   }
   const solvedByGoal = new Map<string, number>()
+  const unscopedSolved = new Map<string, number>()
+  const scopedSolved = new Map<string, number>()
   for (const log of selected) {
     const plan = planById.get(log.question_plan_id)
     const subjectId = plan?.subject_id || `removed:${log.question_plan_id}`
@@ -36,11 +39,17 @@ export function analyzeQuestions(plans: QuestionPlan[], logs: QuestionLog[], wee
     row.wrongRecorded ||= log.wrong_questions != null
     const key = `${subjectId}:${weekKey(logDay(log))}`
     solvedByGoal.set(key, (solvedByGoal.get(key) || 0) + log.solved_questions)
+    if (plan?.note) {
+      const scopedKey = `${plan.id}:${weekKey(logDay(log))}`
+      scopedSolved.set(scopedKey, (scopedSolved.get(scopedKey) || 0) + log.solved_questions)
+    } else unscopedSolved.set(key, (unscopedSolved.get(key) || 0) + log.solved_questions)
   }
   for (const [key, goal] of goals) {
-    const row = rowFor(goal.subjectId), target = goal.weekly ?? goal.daily
+    const row = rowFor(goal.subjectId), target = goal.weekly ?? (goal.daily + [...goal.scoped.values()].reduce((sum, value) => sum + value, 0))
     row.target += target
-    row.remaining += Math.max(0, target - (solvedByGoal.get(key) || 0))
+    row.remaining += goal.weekly !== null
+      ? Math.max(0, target - (solvedByGoal.get(key) || 0))
+      : Math.max(0, goal.daily - (unscopedSolved.get(key) || 0)) + [...goal.scoped].reduce((sum, [id, count]) => sum + Math.max(0, count - (scopedSolved.get(`${id}:${goal.week}`) || 0)), 0)
   }
   const rows = [...bySubject.values()].sort((a, b) => b.solved - a.solved || b.target - a.target)
   const target = rows.reduce((sum, row) => sum + row.target, 0)
@@ -75,7 +84,7 @@ export function analyzeQuestions(plans: QuestionPlan[], logs: QuestionLog[], wee
 
 export function withWeeklyQuestionProgress(plans: QuestionPlan[], logs: QuestionLog[]): QuestionPlan[] {
   const planById = new Map(plans.map(plan => [plan.id, plan]))
-  const weekly = plans.filter(plan => plan.period === 'week')
+  const weekly = plans.filter(plan => plan.period === 'week' && !plan.note)
   const keyFor = (subject: string | null, date: string) => `${subject}:${weekKey(date)}`
   const grouped = logs.filter(log => planById.get(log.question_plan_id)?.subject_id != null
     && Number.isFinite(Date.parse(log.created_at))).map(log => ({ ...log,
@@ -83,6 +92,10 @@ export function withWeeklyQuestionProgress(plans: QuestionPlan[], logs: Question
   const progress = withQuestionProgress(weekly.map(plan => ({ id: keyFor(plan.subject_id, plan.date) })), grouped)
   const byId = new Map(weekly.map((plan, index) => [plan.id, progress[index]]))
   return plans.map(plan => {
+    if (plan.period === 'week' && plan.note) {
+      const [own] = withQuestionProgress([plan], logs.filter(log => log.question_plan_id === plan.id && Number.isFinite(Date.parse(log.created_at)) && weekKey(logDay(log)) === weekKey(plan.date)))
+      return own
+    }
     const aggregate = byId.get(plan.id)
     return aggregate ? { ...plan, ...aggregate, id: plan.id } : plan
   })

@@ -1,5 +1,5 @@
 import { localDayKey, mondayOf } from './statsPeriod.ts'
-import { questionCount, type QuestionPlan } from './questionPlan.ts'
+import { questionCount, questionNote, type QuestionPlan } from './questionPlan.ts'
 
 export function questionWeekDays(week: string) {
   const start = mondayOf(new Date(`${week}T12:00:00`))
@@ -14,14 +14,16 @@ export function dailyQuestionTargets(plans: QuestionPlan[], week: string) {
   return questionWeekDays(week).map(day => ({ ...day, plans: plans.filter(plan => isQuestionTarget(plan) && plan.period !== 'week' && plan.date === day.date) }))
 }
 
-export function weekTargetPayload(week: string, values: Record<string, string>) {
-  const days = questionWeekDays(week), targets: { date: string; target: number }[] = []
+export function weekTargetPayload(week: string, values: Record<string, string>, notes?: Record<string, string>, planIds?: Record<string, string | undefined>) {
+  const days = questionWeekDays(week), targets: { date: string; target: number; note?: string | null; plan_id?: string }[] = []
   for (const day of days) {
     const raw = values[day.date] || ''
     if (!raw) continue
     const count = questionCount(raw)
     if (count === null) throw new Error(`${day.label} için 1–100.000 arasında tam sayı gir.`)
-    targets.push({ date: day.date, target: count })
+    const note = questionNote(notes?.[day.date])
+    if (note === undefined) throw new Error(`${day.label} konu/not en fazla 1000 karakter olabilir.`)
+    targets.push({ date: day.date, target: count, ...(notes ? { note } : {}), ...(planIds?.[day.date] ? { plan_id: planIds[day.date] } : {}) })
   }
   if (!targets.length) throw new Error('En az bir güne soru hedefi ekle.')
   return targets
@@ -29,6 +31,7 @@ export function weekTargetPayload(week: string, values: Record<string, string>) 
 
 export function questionWeekError(error: { code?: string; message?: string; details?: string | null }) {
   if (['42P01', '42703', 'PGRST202', 'PGRST204', 'PGRST205'].includes(error.code || '')) return 'Bu özellik için Supabase’de güncel question_plans.sql dosyasını çalıştırın.'
+  if (error.message === 'QUESTION_PLAN_NOTE_LOCKED') return 'Çözüm kaydı olan planın konusu değiştirilemez. Farklı konu için yeni hedef ekle.'
   if (error.code === '42501') return 'Bu işlem için yetkin bulunmuyor. Başka kullanıcıya kopyalamayı yalnızca admin yapabilir.'
   if (error.message === 'QUESTION_COPY_SUBJECT_MAPPING') {
     try {

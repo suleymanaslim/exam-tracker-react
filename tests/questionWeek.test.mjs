@@ -31,3 +31,13 @@ test('copy errors explain setup, authorization and the exact missing subject wit
   assert.match(questionWeekError({ code: '22023', message: 'QUESTION_COPY_SUBJECT_MAPPING', details: JSON.stringify({ exam: 'AGS', subject: 'Sayısal Yetenek' }) }), /AGS \/ Sayısal Yetenek/)
   assert.doesNotMatch(questionWeekError({ message: 'private database diagnostic' }), /private/)
 })
+
+test('week payload keeps each plan identity with trimmed topic notes; blank days remain untouched', () => {
+  const values = { '2026-10-19': '45', '2026-10-20': '30' }
+  const notes = { '2026-10-19': '  Sözcükte anlam ', '2026-10-20': '', '2026-10-21': 'Unselected' }
+  assert.deepEqual(weekTargetPayload('2026-10-19', values, notes, { '2026-10-19': 'topic-plan' }), [
+    { date: '2026-10-19', target: 45, note: 'Sözcükte anlam', plan_id: 'topic-plan' },
+    { date: '2026-10-20', target: 30, note: null },
+  ])
+  assert.throws(() => weekTargetPayload('2026-10-19', values, { '2026-10-19': 'x'.repeat(1001) }), /1000/)
+})

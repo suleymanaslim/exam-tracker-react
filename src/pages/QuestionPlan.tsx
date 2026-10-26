@@ -5,7 +5,7 @@ import { BookOpenCheck, Check, ChevronLeft, ChevronRight, Plus, RefreshCw, Play,
 import Swal from 'sweetalert2'
 import { supabase, getCurrentUser } from '../lib/supabase'
 import { useAdminStore } from '../lib/adminStore'
-import { questionCount, completedVideo } from '../lib/questionPlan'
+import { questionCount, completedVideo, questionNote } from '../lib/questionPlan'
 import type { QuestionPlan as QuestionTask, QuestionVideo, QuestionLog } from '../lib/questionPlan'
 import { fetchQuestionData, fetchQuestionVideos, questionPlanError } from '../lib/questionPlanData'
 import { questionInputOptions, questionCompletionOptions, readQuestionAnswers, lockQuestionInputs } from '../lib/questionDialogs'
@@ -91,13 +91,22 @@ export default function QuestionPlan() {
     const result = await Swal.fire({
       ...options, title: existing ? 'Soru hedefini düzenle' : lesson ? 'Videonun gününe soru ekle' : 'Soru hedefi ekle',
       html: (!fixed ? `<label class="question-dialog-date">Ders<select id="question-subject"><option value="">Ders seç</option>${subjects.map(s => `<option value="${htmlText(s.id)}">${htmlText(`${s.exams?.name || ''} · ${s.name}`)}</option>`).join('')}</select></label>` : '')
-        + (!fixed ? '<label class="question-dialog-date">Hedef dönemi<select id="question-period"><option value="day">Günlük</option><option value="week">Genel haftalık hedef</option></select></label>' : `<p>${htmlText(subjects.find(subject => subject.id === subjectId)?.name || 'Ders')} · ${existing?.period === 'week' ? 'Haftalık hedef' : 'Günlük hedef'}</p>`)
-        + options.html + `<label class="question-dialog-date">Gün / hafta<input id="question-date" type="date" required ${lesson ? 'readonly' : ''}></label>`,
+        + (!fixed ? '<label class="question-dialog-date">Hedef dönemi<select id="question-period"><option value="day">Günlük</option><option value="week">Haftalık</option></select></label>' : `<p>${htmlText(subjects.find(subject => subject.id === subjectId)?.name || 'Ders')} · ${existing?.period === 'week' ? 'Haftalık hedef' : 'Günlük hedef'}</p>`)
+        + options.html + '<label class="question-dialog-note">Konu / not (isteğe bağlı)<input id="question-plan-note" type="text" maxlength="1000" placeholder="Örn. Sözcükte anlam · anlam ilişkileri" autocomplete="off"></label>' + `<label class="question-dialog-date">Gün / hafta<input id="question-date" type="date" required ${lesson ? 'readonly' : ''}></label>`,
       didOpen: () => {
         options.didOpen()
         const input = Swal.getPopup()?.querySelector<HTMLInputElement>('#question-date')
         const period = Swal.getPopup()?.querySelector<HTMLSelectElement>('#question-period')
         if (input) input.value = selectedDate
+        const note = Swal.getPopup()?.querySelector<HTMLInputElement>('#question-plan-note')
+        if (note) {
+          note.value = existing?.note || ''
+          if (existing?.note_locked) {
+            note.readOnly = true
+            const help = document.createElement('small'); help.textContent = 'Çözüm geçmişini korumak için bu planın konusu sabittir. Yeni konu için yeni hedef ekle.'
+            note.parentElement?.append(help)
+          }
+        }
         if (period) {
           period.value = existing?.period || 'day'
           period.addEventListener('change', () => {
@@ -110,11 +119,14 @@ export default function QuestionPlan() {
       preConfirm: async value => {
         const target = questionCount(value), popup = Swal.getPopup()
         const dateInput = popup?.querySelector<HTMLInputElement>('#question-date')
+        if (ownerRef.current !== userId) return false
+        const note = questionNote(popup?.querySelector<HTMLInputElement>('#question-plan-note')?.value)
+        if (note === undefined) { Swal.showValidationMessage('Konu/not en fazla 1000 karakter olabilir.'); return false }
         const subject = subjectId || popup?.querySelector<HTMLSelectElement>('#question-subject')?.value
         const period = existing?.period || popup?.querySelector<HTMLSelectElement>('#question-period')?.value || 'day'
         selectedDate = lesson?.date || dateInput?.value || ''
         if (target === null || !dateInput?.checkValidity() || !selectedDate || !subject) { Swal.showValidationMessage('Ders, soru sayısı ve gün seçin.'); return false }
-        const { error: saveError } = await supabase.rpc('set_question_target', { p_user_id: userId, p_subject_id: subject, p_date: selectedDate, p_target: target,
+        const { error: saveError } = await supabase.rpc('set_question_target_with_note', { p_note: note, p_user_id: userId, p_subject_id: subject, p_date: selectedDate, p_target: target,
           p_period: period, p_video_id: existing?.video_plan_item_id || lesson?.id || null, p_plan_id: existing?.id || null })
         if (saveError) { Swal.showValidationMessage(saveError.code === '23505' ? 'Bu dersin aynı dönemde bir hedefi var; mevcut hedefi düzenleyin.' : questionPlanError(saveError)); return false }
         return true
@@ -127,7 +139,7 @@ export default function QuestionPlan() {
     const entryId = crypto.randomUUID()
     let pendingAnswers: ReturnType<typeof readQuestionAnswers> = null
     const result = await Swal.fire({
-      ...questionCompletionOptions('', undefined, undefined, false, plan.target_questions, { ownerId: userId, subjectId: plan.subject_id }), title: 'Çözülen soru ekle',
+      ...questionCompletionOptions('', undefined, undefined, false, plan.target_questions, { boundNote: plan.note, ownerId: userId, subjectId: plan.subject_id }), title: 'Çözülen soru ekle',
       showCancelButton: true, confirmButtonText: 'Ekle', cancelButtonText: 'İptal', confirmButtonColor: '#4269a8',
       showLoaderOnConfirm: true, allowOutsideClick: () => !Swal.isLoading(),
       preConfirm: async value => {
@@ -144,7 +156,7 @@ export default function QuestionPlan() {
   const editLog = async (entry: QuestionLog) => {
     const plan = plans.find(p => p.id === entry.question_plan_id)
     const result = await Swal.fire({
-      ...questionCompletionOptions(String(entry.solved_questions), entry.correct_questions, entry.wrong_questions, false, plan?.target_questions, { note: entry.note, ownerId: userId, subjectId: plan?.subject_id }),
+      ...questionCompletionOptions(String(entry.solved_questions), entry.correct_questions, entry.wrong_questions, false, plan?.target_questions, { note: entry.note, boundNote: plan?.note, ownerId: userId, subjectId: plan?.subject_id }),
       title: 'Çözüm kaydını düzenle', showCancelButton: true, confirmButtonText: 'Kaydet', cancelButtonText: 'İptal', confirmButtonColor: '#4269a8',
       showLoaderOnConfirm: true, allowOutsideClick: () => !Swal.isLoading(),
       preConfirm: async value => {
@@ -174,7 +186,7 @@ export default function QuestionPlan() {
   }
   const matches = (name: string) => name.toLocaleLowerCase('tr-TR').includes(search.toLocaleLowerCase('tr-TR').trim())
   const weekPlans = plans.filter(plan => isQuestionTarget(plan) && inWeek(plan.date))
-  const visiblePlans = weekPlans.filter(plan => matches(`${plan.subjects?.name || ''} ${plan.resources?.name || ''}`))
+  const visiblePlans = weekPlans.filter(plan => matches(`${plan.subjects?.name || ''} ${plan.resources?.name || ''} ${plan.note || ''}`))
   const weekLessons = lessons.filter(lesson => inWeek(lesson.date))
   const visibleLessons = weekLessons.filter(lesson => matches(`${lesson.resources?.subjects?.name || ''} ${lesson.resources?.name || ''}`))
   const weekLogs = logs.filter(log => inWeek(localDayKey(new Date(log.created_at))))
@@ -189,12 +201,12 @@ export default function QuestionPlan() {
     {error && <div className="question-error" role="alert"><span>{error}</span><button onClick={() => userId && void load(userId)}><RefreshCw size={16} /> Tekrar dene</button></div>}
     {loading ? <div className="question-empty">Yükleniyor…</div> : !error && (tab === 'planner' && userId ? <QuestionWeekPlanner key={`${userId}:${week}`} userId={userId} week={week} plans={plans} subjects={subjects} onSaved={() => void afterSave()} /> : tab === 'plans' ? <div className="question-plan-layout">
       <QuestionWeekBoard week={week} today={today} selectedDate={selectedDate} plans={visiblePlans} onSelectDate={date => setSelectedDay(days.findIndex(day => day.date === date))} onAdd={date => void saveTarget(undefined, undefined, date)} onEdit={plan => void saveTarget(lessons.find(lesson => lesson.id === plan.video_plan_item_id), plan)} onSolved={plan => void addSolved(plan)} onRemove={plan => void remove(plan.id, 'plan')} />
-      {visiblePlans.some(plan => plan.period === 'week') && <section className="question-weekly-targets"><header><h2>Genel haftalık hedefler</h2><p>Bu hedefler dersin günlük soru görevlerini kapsar; toplama tekrar eklenmez.</p></header><div className="question-cards">
+      {visiblePlans.some(plan => plan.period === 'week') && <section className="question-weekly-targets"><header><h2>Genel haftalık hedefler</h2><p>Genel hedefler dersin tüm çözümlerini, konu belirtilen hedefler yalnızca kendi çözümlerini kapsar.</p></header><div className="question-cards">
       {visiblePlans.filter(plan => plan.period === 'week').map(plan => {
         const done = plan.target_questions != null && plan.solved_questions >= plan.target_questions
         return <article className={`question-card ${done ? 'is-done' : ''}`} key={plan.id}>
           <div className="question-card-top"><span>{plan.period === 'week' ? 'Haftalık hedef' : dateLabel(plan.date)}{plan.period !== 'week' && plan.date < today && !done ? ' · Bekliyor' : ''}</span>{done && <span><Check size={14} /> Tamamlandı</span>}</div>
-          <h2>{plan.subjects?.name || 'Ders kaldırıldı'}</h2><p>{plan.resources?.name || (plan.period === 'week' ? 'Bu dersteki tüm soru çözümleri' : 'Ders hedefi')}</p>
+          <h2>{plan.subjects?.name || 'Ders kaldırıldı'}</h2><p className={plan.note ? 'question-plan-note' : undefined}>{plan.note || plan.resources?.name || (plan.period === 'week' ? 'Bu dersteki tüm soru çözümleri' : 'Ders hedefi')}</p>
           <div className="question-count"><strong>{plan.solved_questions}</strong><span>{plan.target_questions ? `/ ${plan.target_questions} soru` : 'soru'}</span></div>
           {plan.target_questions != null && <div className="question-progress" role="progressbar" aria-label="Çözülen sorular" aria-valuenow={Math.min(plan.solved_questions, plan.target_questions)} aria-valuemin={0} aria-valuemax={plan.target_questions}><i style={{ width: `${Math.min(100, plan.solved_questions / plan.target_questions * 100)}%` }} /></div>}
           <div className="question-answers">{plan.answers_recorded && <span>{[plan.correct_recorded ? `${plan.correct_questions} doğru` : '', plan.wrong_recorded ? `${plan.wrong_questions} yanlış` : ''].filter(Boolean).join(' · ')}</span>}</div><div className="question-card-actions"><button className="question-button" onClick={() => void addSolved(plan)}><Plus size={15} /> Çözülen ekle</button><button className="question-icon-button" aria-label={`${plan.subjects?.name || 'Ders'} hedefini düzenle`} onClick={() => void saveTarget(undefined, plan)}><Pencil size={16} /></button><button className="question-icon-button is-danger" aria-label={`${plan.subjects?.name || 'Ders'} planını sil`} onClick={() => void remove(plan.id, 'plan')}><Trash2 size={16} /></button></div>

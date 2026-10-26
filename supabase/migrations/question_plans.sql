@@ -1,5 +1,7 @@
 -- Run this entire updated file in Supabase SQL Editor (also safe after the first version).
 -- Adds question planning; existing videos, plans and study records are preserved.
+-- Topic notes stay attached to their own goal. Once a solution exists the topic
+-- cannot be renamed; create a separate goal for another topic instead.
 BEGIN;
 
 CREATE TABLE IF NOT EXISTS public.question_plans (
@@ -16,12 +18,16 @@ CREATE TABLE IF NOT EXISTS public.question_plans (
 );
 ALTER TABLE public.question_plans ADD COLUMN IF NOT EXISTS period text NOT NULL DEFAULT 'day' CHECK (period IN ('day', 'week'));
 ALTER TABLE public.question_plans ADD COLUMN IF NOT EXISTS archived_at timestamptz;
+ALTER TABLE public.question_plans ADD COLUMN IF NOT EXISTS note text CHECK (char_length(note) <= 1000);
 
 CREATE INDEX IF NOT EXISTS question_plans_user_date ON public.question_plans(user_id, date);
--- Replaces only an index; no question rows are removed.
+-- Replaces only an index; no question rows are removed. A fixed-width note hash
+-- supports the full 1000-character limit even for multibyte text. Upserts also
+-- compare the actual note so a hash collision cannot merge unrelated topics.
 DROP INDEX IF EXISTS public.question_plans_extra_subject_day;
-CREATE UNIQUE INDEX IF NOT EXISTS question_plans_extra_subject_period
-  ON public.question_plans(user_id, subject_id, date, period) WHERE kind = 'extra';
+DROP INDEX IF EXISTS public.question_plans_extra_subject_period;
+CREATE UNIQUE INDEX IF NOT EXISTS question_plans_extra_subject_period_note
+  ON public.question_plans(user_id, subject_id, date, period, (md5(COALESCE(note, '')))) WHERE kind = 'extra';
 
 CREATE TABLE IF NOT EXISTS public.question_session_results (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -96,8 +102,8 @@ BEGIN
     END IF;
     INSERT INTO public.question_plans(user_id, subject_id, date, kind)
     VALUES (p_user_id, p_subject_id, p_date, 'extra')
-    ON CONFLICT (user_id, subject_id, date, period) WHERE kind = 'extra'
-    DO UPDATE SET date = EXCLUDED.date RETURNING * INTO plan;
+    ON CONFLICT (user_id, subject_id, date, period, (md5(COALESCE(note, '')))) WHERE kind = 'extra'
+    DO UPDATE SET date = EXCLUDED.date WHERE question_plans.note IS NULL RETURNING * INTO plan;
   ELSE
     SELECT * INTO plan FROM public.question_plans WHERE id = p_question_plan_id FOR UPDATE;
     IF NOT FOUND OR plan.user_id <> p_user_id OR plan.subject_id IS DISTINCT FROM p_subject_id THEN
@@ -105,6 +111,10 @@ BEGIN
     END IF;
   END IF;
   IF plan.subject_id IS NULL THEN RAISE EXCEPTION 'Subject removed'; END IF;
+  IF plan.note IS NOT NULL AND saved_note IS NOT NULL AND saved_note IS DISTINCT FROM plan.note THEN
+    RAISE EXCEPTION 'QUESTION_PLAN_NOTE_MISMATCH' USING ERRCODE = '22023';
+  END IF;
+  saved_note := COALESCE(plan.note, saved_note);
   SELECT * INTO previous FROM public.question_session_results WHERE session_id = p_session_id;
   IF FOUND THEN
     IF previous.question_plan_id <> plan.id OR previous.user_id <> plan.user_id OR previous.solved_questions <> p_questions
@@ -145,6 +155,10 @@ BEGIN
     OR COALESCE(p_correct, 0) + COALESCE(p_wrong, 0) > p_questions THEN
     RAISE EXCEPTION 'Invalid question count';
   END IF;
+  IF plan.note IS NOT NULL AND saved_note IS NOT NULL AND saved_note IS DISTINCT FROM plan.note THEN
+    RAISE EXCEPTION 'QUESTION_PLAN_NOTE_MISMATCH' USING ERRCODE = '22023';
+  END IF;
+  saved_note := COALESCE(plan.note, saved_note);
   SELECT * INTO previous FROM public.question_session_results WHERE id = p_entry_id;
   IF FOUND THEN
     IF previous.question_plan_id <> plan.id OR previous.user_id <> plan.user_id OR previous.solved_questions <> p_questions OR previous.session_id IS NOT NULL
@@ -163,19 +177,20 @@ GRANT EXECUTE ON FUNCTION public.add_solved_questions(uuid, uuid, integer, integ
 
 -- Create/edit a video goal or a standalone day/week subject goal.
 -- User, subject and video associations cannot be changed through a goal edit.
-CREATE OR REPLACE FUNCTION public.set_question_target(
-  p_user_id uuid, p_subject_id uuid, p_date date, p_target integer,
+CREATE OR REPLACE FUNCTION public.set_question_target_with_note(
+  p_user_id uuid, p_subject_id uuid, p_date date, p_target integer, p_note text,
   p_period text DEFAULT 'day', p_video_id uuid DEFAULT NULL, p_plan_id uuid DEFAULT NULL
 ) RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 DECLARE
   plan public.question_plans%ROWTYPE;
   resource uuid;
   goal_date date;
+  saved_note text := nullif(btrim(p_note), '');
 BEGIN
   IF auth.uid() IS NULL OR p_user_id IS NULL OR (p_user_id <> auth.uid() AND NOT EXISTS (
     SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'
   )) THEN RAISE EXCEPTION 'Access denied' USING ERRCODE = '42501'; END IF;
-  IF p_target IS NULL OR p_target NOT BETWEEN 1 AND 100000 OR p_date IS NULL
+  IF char_length(saved_note) > 1000 OR p_target IS NULL OR p_target NOT BETWEEN 1 AND 100000 OR p_date IS NULL
     OR p_period IS NULL OR p_period NOT IN ('day', 'week') THEN RAISE EXCEPTION 'Invalid target'; END IF;
   IF NOT EXISTS (SELECT 1 FROM public.subjects WHERE id = p_subject_id AND user_id = p_user_id) THEN
     RAISE EXCEPTION 'Subject not found' USING ERRCODE = '42501';
@@ -194,20 +209,50 @@ BEGIN
       OR plan.video_plan_item_id IS DISTINCT FROM p_video_id OR plan.period <> p_period THEN
       RAISE EXCEPTION 'Question plan not found' USING ERRCODE = '42501';
     END IF;
-    UPDATE public.question_plans SET date = goal_date, target_questions = p_target, archived_at = NULL WHERE id = plan.id;
+    IF plan.note IS DISTINCT FROM saved_note AND EXISTS (SELECT 1 FROM public.question_session_results WHERE question_plan_id = plan.id) THEN
+      RAISE EXCEPTION 'QUESTION_PLAN_NOTE_LOCKED' USING ERRCODE = '22023';
+    END IF;
+    UPDATE public.question_plans SET date = goal_date, target_questions = p_target, note = saved_note, archived_at = NULL WHERE id = plan.id;
     RETURN plan.id;
   ELSIF p_video_id IS NOT NULL THEN
-    INSERT INTO public.question_plans(user_id, subject_id, resource_id, video_plan_item_id, date, kind, period, target_questions)
-    VALUES (p_user_id, p_subject_id, resource, p_video_id, goal_date, 'video', 'day', p_target)
-    ON CONFLICT (user_id, video_plan_item_id) DO UPDATE SET date = EXCLUDED.date,
-      target_questions = EXCLUDED.target_questions, archived_at = NULL RETURNING id INTO plan.id;
+    SELECT * INTO plan FROM public.question_plans WHERE user_id = p_user_id AND video_plan_item_id = p_video_id FOR UPDATE;
+    IF FOUND THEN
+      RETURN public.set_question_target_with_note(p_user_id, p_subject_id, p_date, p_target, p_note, p_period, p_video_id, plan.id);
+    END IF;
+    INSERT INTO public.question_plans(user_id, subject_id, resource_id, video_plan_item_id, date, kind, period, target_questions, note)
+    VALUES (p_user_id, p_subject_id, resource, p_video_id, goal_date, 'video', 'day', p_target, saved_note)
+    ON CONFLICT (user_id, video_plan_item_id) DO NOTHING RETURNING id INTO plan.id;
+    IF plan.id IS NULL THEN
+      SELECT id INTO plan.id FROM public.question_plans WHERE user_id = p_user_id AND video_plan_item_id = p_video_id;
+      RETURN public.set_question_target_with_note(p_user_id, p_subject_id, p_date, p_target, p_note, p_period, p_video_id, plan.id);
+    END IF;
   ELSE
-    INSERT INTO public.question_plans(user_id, subject_id, date, kind, period, target_questions)
-    VALUES (p_user_id, p_subject_id, goal_date, 'extra', p_period, p_target)
-    ON CONFLICT (user_id, subject_id, date, period) WHERE kind = 'extra'
-    DO UPDATE SET target_questions = EXCLUDED.target_questions, archived_at = NULL RETURNING id INTO plan.id;
+    INSERT INTO public.question_plans(user_id, subject_id, date, kind, period, target_questions, note)
+    VALUES (p_user_id, p_subject_id, goal_date, 'extra', p_period, p_target, saved_note)
+    ON CONFLICT (user_id, subject_id, date, period, (md5(COALESCE(note, '')))) WHERE kind = 'extra'
+    DO UPDATE SET target_questions = EXCLUDED.target_questions, archived_at = NULL
+      WHERE question_plans.note IS NOT DISTINCT FROM EXCLUDED.note RETURNING id INTO plan.id;
   END IF;
+  IF plan.id IS NULL THEN RAISE EXCEPTION 'Question goal could not be saved'; END IF;
   RETURN plan.id;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.set_question_target_with_note(uuid, uuid, date, integer, text, text, uuid, uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.set_question_target_with_note(uuid, uuid, date, integer, text, text, uuid, uuid) TO authenticated;
+
+-- Keep older clients and note-free week planners compatible without erasing a topic.
+CREATE OR REPLACE FUNCTION public.set_question_target(
+  p_user_id uuid, p_subject_id uuid, p_date date, p_target integer,
+  p_period text DEFAULT 'day', p_video_id uuid DEFAULT NULL, p_plan_id uuid DEFAULT NULL
+) RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE saved_note text;
+BEGIN
+  IF p_plan_id IS NOT NULL THEN
+    SELECT note INTO saved_note FROM public.question_plans WHERE id = p_plan_id;
+  ELSIF p_video_id IS NOT NULL THEN
+    SELECT note INTO saved_note FROM public.question_plans WHERE user_id = p_user_id AND video_plan_item_id = p_video_id;
+  END IF;
+  RETURN public.set_question_target_with_note(p_user_id, p_subject_id, p_date, p_target, saved_note, p_period, p_video_id, p_plan_id);
 END;
 $$;
 REVOKE ALL ON FUNCTION public.set_question_target(uuid, uuid, date, integer, text, uuid, uuid) FROM PUBLIC;
@@ -243,6 +288,10 @@ BEGIN
     SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'
   )) THEN RAISE EXCEPTION 'Access denied' USING ERRCODE = '42501'; END IF;
   IF entry.deleted_at IS NOT NULL THEN RAISE EXCEPTION 'Entry removed'; END IF;
+  IF saved_note IS NOT NULL AND EXISTS (SELECT 1 FROM public.question_plans WHERE id = entry.question_plan_id AND note IS NOT NULL AND note IS DISTINCT FROM saved_note) THEN
+    RAISE EXCEPTION 'QUESTION_PLAN_NOTE_MISMATCH' USING ERRCODE = '22023';
+  END IF;
+  saved_note := COALESCE((SELECT note FROM public.question_plans WHERE id = entry.question_plan_id), saved_note);
   IF char_length(saved_note) > 1000 OR p_questions IS NULL OR p_questions NOT BETWEEN 0 AND 100000
     OR p_correct < 0 OR p_correct > 100000 OR p_wrong < 0 OR p_wrong > 100000
     OR COALESCE(p_correct, 0) + COALESCE(p_wrong, 0) > p_questions THEN RAISE EXCEPTION 'Invalid question count'; END IF;
@@ -296,11 +345,26 @@ BEGIN
       OR NOT EXISTS (SELECT 1 FROM generate_series(0, 6) AS d WHERE to_char(week_start + d, 'YYYY-MM-DD') = entry->>'date') THEN
       RAISE EXCEPTION 'Invalid week target' USING ERRCODE = '22023';
     END IF;
+    IF (entry ? 'note' AND jsonb_typeof(entry->'note') NOT IN ('string', 'null')) OR char_length(entry->>'note') > 1000 THEN
+      RAISE EXCEPTION 'Invalid question note' USING ERRCODE = '22023';
+    END IF;
     IF (entry->>'target')::integer NOT BETWEEN 1 AND 100000 THEN RAISE EXCEPTION 'Invalid week target' USING ERRCODE = '22023'; END IF;
   END LOOP;
   PERFORM pg_advisory_xact_lock(hashtextextended('question-week:' || p_user_id::text || ':' || week_start::text, 0));
   FOR entry IN SELECT value FROM jsonb_array_elements(p_targets) ORDER BY value->>'date' LOOP
-    PERFORM public.set_question_target(p_user_id, p_subject_id, (entry->>'date')::date, (entry->>'target')::integer, 'day');
+    -- Named plans stay on their own row; the core RPC checks ownership and locks topics with history.
+    IF entry->>'plan_id' IS NOT NULL THEN
+      IF entry->>'plan_id' !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
+        RAISE EXCEPTION 'Invalid question plan' USING ERRCODE = '22023';
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM public.question_plans WHERE id = (entry->>'plan_id')::uuid
+        AND user_id = p_user_id AND subject_id = p_subject_id AND date = (entry->>'date')::date
+        AND kind = 'extra' AND period = 'day') THEN
+        RAISE EXCEPTION 'Question plan not found' USING ERRCODE = '42501';
+      END IF;
+    END IF;
+    PERFORM public.set_question_target_with_note(p_user_id, p_subject_id, (entry->>'date')::date,
+      (entry->>'target')::integer, entry->>'note', 'day', NULL, (entry->>'plan_id')::uuid);
     saved := saved + 1;
   END LOOP;
   RETURN jsonb_build_object('saved', saved);
@@ -308,6 +372,15 @@ END;
 $$;
 REVOKE ALL ON FUNCTION public.save_question_week_targets(uuid, uuid, date, jsonb) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.save_question_week_targets(uuid, uuid, date, jsonb) TO authenticated;
+
+-- Separate RPC name prevents old installations silently discarding supplied topic notes.
+CREATE OR REPLACE FUNCTION public.save_question_week_targets_with_notes(
+  p_user_id uuid, p_subject_id uuid, p_week_start date, p_targets jsonb
+) RETURNS jsonb LANGUAGE sql SECURITY DEFINER SET search_path = '' AS $$
+  SELECT public.save_question_week_targets(p_user_id, p_subject_id, p_week_start, p_targets);
+$$;
+REVOKE ALL ON FUNCTION public.save_question_week_targets_with_notes(uuid, uuid, date, jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.save_question_week_targets_with_notes(uuid, uuid, date, jsonb) TO authenticated;
 
 -- Admin-only, additive copy. Subject/exam names must resolve to exactly one owned target subject.
 -- Video/resource foreign IDs, solved counts, sessions and notes are never copied.
@@ -367,9 +440,9 @@ BEGIN
     inserted := NULL;
     INSERT INTO public.question_plans AS existing(user_id, subject_id, date, kind, period, target_questions)
       VALUES (p_target_user_id, target_subject, entry.date, 'extra', entry.period, entry.target::integer)
-      ON CONFLICT (user_id, subject_id, date, period) WHERE kind = 'extra'
+      ON CONFLICT (user_id, subject_id, date, period, (md5(COALESCE(note, '')))) WHERE kind = 'extra'
       DO UPDATE SET target_questions = EXCLUDED.target_questions, archived_at = NULL
-        WHERE existing.archived_at IS NOT NULL OR existing.target_questions IS NULL
+        WHERE existing.note IS NULL AND (existing.archived_at IS NOT NULL OR existing.target_questions IS NULL)
       RETURNING id INTO inserted;
     IF inserted IS NULL THEN skipped := skipped + 1; ELSE copied := copied + 1; END IF;
   END LOOP;

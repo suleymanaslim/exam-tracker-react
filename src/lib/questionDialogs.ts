@@ -19,7 +19,7 @@ export function questionInputOptions(initial = '', allowZero = false, presets: r
     inputValidator: (value: string) => questionCount(value, allowZero) === null ? 'Geçerli bir tam sayı girin.' : undefined,
   }
 }
-interface QuestionDialogContext { note?: string | null; ownerId?: string | null; subjectId?: string | null }
+interface QuestionDialogContext { boundNote?: string | null; note?: string | null; ownerId?: string | null; subjectId?: string | null }
 export function questionCompletionOptions(initial = '', correct?: number | null, wrong?: number | null, locked = false, target?: number | null, context: QuestionDialogContext = {}) {
   const options = questionInputOptions(initial, true, solvedQuestionPresets(target))
   return { ...options, didOpen: () => {
@@ -32,7 +32,14 @@ export function questionCompletionOptions(initial = '', correct?: number | null,
     if (!popup || !input || !correctInput || !wrongInput || !noteInput) return
     correctInput.value = correct == null ? '' : String(correct)
     wrongInput.value = wrong == null ? '' : String(wrong)
-    noteInput.value = context.note || ''
+    noteInput.value = context.boundNote || context.note || ''
+    if (context.boundNote) {
+      noteInput.readOnly = true
+      noteInput.setAttribute('aria-describedby', 'question-bound-note-help')
+      const help = document.createElement('small'); help.id = 'question-bound-note-help'
+      help.textContent = 'Bu çözüm seçtiğin planın konusuna kaydedilecek.'
+      noteInput.parentElement?.append(help)
+    }
     if (correct != null || wrong != null) popup.querySelector('details')?.setAttribute('open', '')
     let manualTotal = initial
     const synchronizeTotal = () => {
@@ -50,7 +57,7 @@ export function questionCompletionOptions(initial = '', correct?: number | null,
     wrongInput.addEventListener('input', synchronizeTotal)
     input.addEventListener('input', () => { if (popup.dataset.autoQuestions !== 'true') manualTotal = input.value })
     if (locked) lockQuestionInputs()
-    else if (context.ownerId && context.subjectId) {
+    else if (!context.boundNote && context.ownerId && context.subjectId) {
       void fetchQuestionNotes(context.ownerId, context.subjectId).then(notes => {
         if (Swal.getPopup() !== popup || noteInput.readOnly) return
         const list = popup.querySelector('#question-note-list')

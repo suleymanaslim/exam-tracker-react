@@ -382,3 +382,19 @@ test('forgetting a failed three-second question session clears the persisted pro
   assert.notEqual(useTimerStore.getState().sessionId, session.id)
   assert.equal(useTimerStore.getState().selSubject, 'english')
 })
+
+test('selected topic survives reload and recovery, and is cleared for the next unrelated session', () => {
+  bindTimerOwner(null); storage.clear(); bindTimerOwner('alice')
+  const planId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  useTimerStore.getState().startQuestions({ examId: 'ags', subjectId: 'verbal', planId, note: '  Sözcükte anlam ', date: '2026-10-09' })
+  assert.equal(stored().questionPlanNote, 'Sözcükte anlam')
+  clock += 65000; reopen()
+  assert.equal(useTimerStore.getState().questionPlanNote, 'Sözcükte anlam')
+  assert.equal(useTimerStore.getState().recovery.questionPlanNote, 'Sözcükte anlam')
+  const snapshot = stored()
+  assert.equal(readTimerSnapshot(JSON.stringify({ ...snapshot, questionPlanNote: 'x'.repeat(1001) }), 'alice'), null)
+  useTimerStore.getState().resolveRecovery(true)
+  assert.equal(useTimerStore.getState().questionPlanNote, null)
+  useTimerStore.getState().startQuestions({ examId: 'ags', subjectId: 'math', date: '2026-10-09' })
+  assert.equal(useTimerStore.getState().questionPlanNote, null)
+})

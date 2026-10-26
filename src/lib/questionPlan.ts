@@ -9,6 +9,8 @@ export interface QuestionPlan {
   period?: 'day' | 'week'
   kind?: 'video' | 'extra'
   archived_at?: string | null
+  note?: string | null
+  note_locked?: boolean
   target_questions: number | null
   subjects?: { name: string; exam_id: string } | null
   resources?: { name: string } | null

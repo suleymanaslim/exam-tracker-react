@@ -18,6 +18,7 @@ export interface TimerSnapshot {
   questionPlanId?: string | null
   questionDate?: string | null
   questionTarget?: number | null
+  questionPlanNote?: string | null
   previousStudyMode?: Exclude<TimerMode, 'questions'>
 }
 export interface RecoverySession {
@@ -36,6 +37,7 @@ export interface RecoverySession {
   questionPlanId?: string | null
   questionDate?: string | null
   questionTarget?: number | null
+  questionPlanNote?: string | null
   solvedQuestions?: number
   correctQuestions?: number | null
   wrongQuestions?: number | null
@@ -59,7 +61,7 @@ export function recoveryFor(snapshot: TimerSnapshot, now: number): RecoverySessi
   return {
     id: snapshot.sessionId, ownerId: snapshot.ownerId, subjectId: snapshot.selSubject,
     resourceId: snapshot.selResource, mode: snapshot.mode, startedAt: snapshot.startedAt,
-    questionPlanId: snapshot.questionPlanId || null, questionDate: snapshot.questionDate || null, questionTarget: snapshot.questionTarget ?? null,
+    questionPlanId: snapshot.questionPlanId || null, questionDate: snapshot.questionDate || null, questionTarget: snapshot.questionTarget ?? null, questionPlanNote: snapshot.questionPlanNote || null,
     endedAt: new Date(stopwatch ? Date.parse(snapshot.startedAt) + elapsed * 1000 : Math.min(now, snapshot.deadlineEpoch ?? now)).toISOString(),
     durationMinutes: stopwatch ? elapsed / 60 : Math.floor(elapsed / 60), remainingSeconds: remaining, resume: snapshot.isRunning, reason: 'reopened',
   }
@@ -82,6 +84,8 @@ export function readTimerSnapshot(raw: string | null, ownerId: string): TimerSna
     if (value.previousStudyMode != null && !['pomodoro_long', 'pomodoro_short', 'manual', 'stopwatch'].includes(value.previousStudyMode)) return null
     if (value.questionTarget != null && (!Number.isInteger(value.questionTarget) || value.questionTarget < 1 || value.questionTarget > 100000)) return null
     if (value.recovery?.solvedQuestions != null && (!Number.isInteger(value.recovery.solvedQuestions) || value.recovery.solvedQuestions < 0 || value.recovery.solvedQuestions > 100000)) return null
+    if (value.questionPlanNote != null && (typeof value.questionPlanNote !== 'string' || value.questionPlanNote.length > 1000)) return null
+    if (value.recovery?.questionPlanNote != null && (typeof value.recovery.questionPlanNote !== 'string' || value.recovery.questionPlanNote.length > 1000)) return null
     if (value.recovery?.questionNote != null && (typeof value.recovery.questionNote !== 'string' || value.recovery.questionNote.length > 1000)) return null
     if (value.recovery) {
       for (const key of ['correctQuestions', 'wrongQuestions'] as const) {
