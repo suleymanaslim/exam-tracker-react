@@ -25,6 +25,7 @@ let videos = [
   { id: 'single', user_id: uid, resource_id: rid, date: '2026-10-22', video_count: 1, watched_count: 0, is_completed: false, sort_order: 1, watch_parts_total: 1, watch_parts_done: 0, completion_week: null },
   { id: 'multi', user_id: uid, resource_id: rid, date: '2026-10-22', video_count: 3, watched_count: 0, is_completed: false, sort_order: 2, watch_parts_total: 1, watch_parts_done: 0, completion_week: null },
 ]
+let failMove = true, moveRequests = 0
 let failSave = true, deleteRequests = 0, visualMode = false
 const visualResources = [
   ['education', 'Eğitim Bilimleri ve Türk Milli Eğitim Sistemi', 'Eğitim Bilimleri ve Türk Milli Eğitim Sistemi Video Ders Notları', 40],
@@ -69,7 +70,16 @@ try {
     else if (table === 'study_sessions') data = sessions
     else if (table === 'video_plan_items') {
       if (method === 'DELETE') { deleteRequests++; const id = url.searchParams.get('id').slice(3); videos = videos.filter(item => item.id !== id); data = null }
-      else data = videos
+      else if (method === 'PATCH') {
+        moveRequests++
+        if (failMove) { failMove = false; await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ code: '503', message: 'fixture failure' }) }); return }
+        const item = videos.find(item => item.id === url.searchParams.get('id').slice(3))
+        assert.equal(url.searchParams.get('user_id'), `eq.${uid}`)
+        assert.equal(url.searchParams.get('date'), `eq.${item.date}`)
+        assert.equal(url.searchParams.get('completion_week'), 'is.null')
+        assert.deepEqual(Object.keys(payload).sort(), ['date', 'sort_order'])
+        Object.assign(item, payload); data = item
+      } else data = videos
     } else if (table === 'set_video_watch_parts') {
       if (failSave) { failSave = false; await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ code: '503', message: 'fixture outage' }) }); return }
       const item = videos.find(item => item.id === payload.p_item_id), done = payload.p_done === payload.p_total
@@ -110,6 +120,45 @@ try {
   console.log('Questions ready')
   // Save failure stays in the dialog; partial never counts as watched.
   await page.locator('.app-sidebar a[href="/videos"]').click()
+  await page.setViewportSize({ width: 1920, height: 1080 })
+  const card = id => page.locator(`[data-video-id="${id}"]`)
+  async function mouseMoveCard(id, date) {
+    const start = await card(id).locator('.video-card-open').boundingBox()
+    const target = await page.locator(`[data-date="${date}"] .video-day-heading`).boundingBox()
+    await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2, { steps: 12 })
+    await page.mouse.up()
+  }
+  await card('multi').waitFor()
+  await mouseMoveCard('multi', '2026-10-23')
+  await page.getByRole('heading', { name: 'Taşınamadı', exact: true }).waitFor()
+  assert.equal(videos[1].date, '2026-10-22')
+  await page.getByRole('button', { name: 'OK', exact: true }).click()
+  await page.locator('.swal2-popup').waitFor({ state: 'hidden' })
+  await mouseMoveCard('multi', '2026-10-23')
+  await page.locator('[data-date="2026-10-23"] [data-video-id="multi"]').waitFor()
+  assert.equal(videos[0].date, '2026-10-22')
+  assert.equal(await page.locator('.swal2-popup:visible').count(), 0)
+  await card('multi').locator('.video-card-drag-handle').focus()
+  await page.keyboard.press('ArrowLeft')
+  await page.locator('[data-date="2026-10-22"] [data-video-id="multi"]').waitFor()
+  await page.waitForFunction(() => document.activeElement?.closest('[data-video-id]')?.getAttribute('data-video-id') === 'multi')
+  // Touch uses the grip so vertical scrolling on the card remains available.
+  await page.setViewportSize({ width: 540, height: 1100 })
+  const handle = card('multi').locator('.video-card-drag-handle')
+  await handle.scrollIntoViewIfNeeded()
+  const touchStart = await handle.boundingBox()
+  const touchEnd = await page.locator('.video-mobile-days [data-video-drop-date="2026-10-23"]').boundingBox()
+  const cdp = await context.newCDPSession(page)
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: touchStart.x + 14, y: touchStart.y + 14 }] })
+  for (let i = 1; i <= 12; i++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: touchStart.x + 14 + (touchEnd.x + 15 - touchStart.x - 14) * i / 12, y: touchStart.y + 14 + (touchEnd.y + 15 - touchStart.y - 14) * i / 12 }] })
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+  await page.locator('[data-date="2026-10-23"] [data-video-id="multi"]').waitFor({ state: 'visible' })
+  await card('multi').locator('.video-card-drag-handle').focus(); await page.keyboard.press('ArrowLeft')
+  await page.locator('[data-date="2026-10-22"] [data-video-id="multi"]').waitFor({ state: 'visible' })
+  await cdp.detach()
+  console.log('Card move: failed save preserved, mouse drag, keyboard and touch day drop passed')
   await page.setViewportSize({ width: 768, height: 1024 })
   await page.getByRole('button', { name: 'Dil dersleri izleme ilerlemesi', exact: true }).first().click()
   await page.getByRole('button', { name: '2 parçadan 1 tamamlandı', exact: true }).click()
@@ -122,6 +171,15 @@ try {
   assert.match(await page.locator('.video-resume-item').innerText(), /1\/2/)
   await page.screenshot({ path: '/tmp/exam-plan-partial-tablet.png', fullPage: true })
   console.log('Partial saved')
+  await page.locator('.swal2-popup').waitFor({ state: 'hidden' })
+  const progressBeforeMove = { ...videos[0] }
+  await card('single').locator('.video-card-drag-handle').focus(); await page.keyboard.press('ArrowRight')
+  await page.locator('[data-date="2026-10-23"] [data-video-id="single"]').waitFor()
+  assert.equal(videos[0].watch_parts_done, progressBeforeMove.watch_parts_done)
+  assert.equal(videos[0].watch_parts_total, progressBeforeMove.watch_parts_total)
+  await card('single').locator('.video-card-drag-handle').focus(); await page.keyboard.press('ArrowLeft')
+  await page.locator('[data-date="2026-10-22"] [data-video-id="single"]').waitFor()
+
   // Reopen on another calendar week and finish from the persistent left shelf.
   await page.reload()
   await page.locator('.video-resume-item').waitFor()
@@ -136,6 +194,8 @@ try {
   const completed = page.getByRole('button', { name: 'Pazartesiye kaydedilen 1 video', exact: true })
   await completed.waitFor()
   assert.equal(await completed.isDisabled(), true)
+  assert.equal(await card('single').locator('.video-card-drag-handle').count(), 0)
+  assert.ok(moveRequests >= 6)
   assert.equal(videos[0].date, '2026-10-19')
   assert.equal(videos[0].watched_count, 1)
   assert.equal(await page.locator('.video-resume-item').count(), 0)

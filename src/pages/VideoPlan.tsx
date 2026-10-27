@@ -431,6 +431,26 @@ export default function VideoPlan() {
     if (selectedResId === res.id) setSelectedResId(null)
   }
 
+  const movingItem = useRef(false)
+  const handleMoveItem = async (item: VideoPlanItem, date: string): Promise<boolean> => {
+    const current = planItems.find(value => value.id === item.id)
+    if (!userId || ownerRef.current !== userId || movingItem.current || !current || current.completion_week || current.date === date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return false
+    const owner = userId
+    movingItem.current = true
+    try {
+      const sortOrder = Math.max(-1, ...planItems.filter(value => value.date === date).map(value => value.sort_order || 0)) + 1
+      const { data, error } = await supabase.from('video_plan_items').update({ date, sort_order: sortOrder })
+        .eq('id', item.id).eq('user_id', owner).eq('date', current.date).is('completion_week', null).select().single()
+      if (error || !data || data.id !== item.id || data.date !== date) throw error || new Error('Move could not be verified')
+      if (ownerRef.current !== owner) return false
+      setPlanItems(previous => previous.map(value => value.id === item.id ? data as VideoPlanItem : value))
+      return true
+    } catch {
+      if (ownerRef.current === owner) void Swal.fire('Taşınamadı', 'Video taşınamadı. Planı yenileyip tekrar deneyin; izleme ilerlemeniz korunuyor.', 'error')
+      return false
+    } finally { movingItem.current = false }
+  }
+
   /* reorder items within a day */
   const handleReorderItem = async (item: VideoPlanItem, dir: -1 | 1) => {
     if (item.completion_week) return
@@ -596,7 +616,7 @@ export default function VideoPlan() {
             onProgress={(item, resource) => void handleProgressClick(item, resource)}
             onDelete={id => void handleDeleteItem(id)} onReorder={(item, direction) => void handleReorderItem(item, direction)}
             onClear={date => void handleClearDay(date)} onShift={date => void handleShiftPlan(date)}
-            onCompleteDay={items => void handleMarkDayWatched(items)} onSwap={(from, to) => void handleSwapDays(from, to)} />
+            onMove={handleMoveItem} onCompleteDay={items => void handleMarkDayWatched(items)} onSwap={(from, to) => void handleSwapDays(from, to)} />
         </div>
       </div>
     </div>
