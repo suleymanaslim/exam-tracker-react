@@ -16,7 +16,7 @@ const origin = `http://127.0.0.1:${server.address().port}`
 const uid = '11111111-1111-4111-8111-111111111111', sid = '22222222-2222-4222-8222-222222222222', examId = '33333333-3333-4333-8333-333333333333'
 const user = { id: uid, aud: 'authenticated', role: 'authenticated', email: 'fixture@example.com', created_at: '2026-01-01T00:00:00Z', app_metadata: { provider: 'email' }, user_metadata: { display_name: 'Test' } }
 const plans = [], logs = [], sessions = [], writes = [], errors = []
-let failTarget = true
+let failTarget = true, failTransfer = true
 const target = payload => {
   let plan = plans.find(plan => payload.p_plan_id ? plan.id === payload.p_plan_id : plan.date === payload.p_date && plan.note === payload.p_note)
   if (!plan) {
@@ -30,7 +30,7 @@ const deadline = setTimeout(() => { console.error('Question note browser test ti
 let browser
 try {
   browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH, args: ['--no-sandbox', '--disable-gpu', '--disable-software-rasterizer', '--no-zygote', '--single-process'] } : {}) })
-  const context = await browser.newContext({ viewport: { width: 1365, height: 1000 }, timezoneId: 'Europe/Istanbul' })
+  const context = await browser.newContext({ viewport: { width: 1365, height: 1000 }, timezoneId: 'Europe/Istanbul', hasTouch: true })
   const page = await context.newPage(); page.setDefaultTimeout(10000)
   page.on('pageerror', error => errors.push(error.message))
   await page.clock.setFixedTime(new Date('2026-10-22T10:00:00Z'))
@@ -50,6 +50,17 @@ try {
       writes.push({ table, payload })
       if (failTarget) { failTarget = false; await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ code: '503', message: 'fixture failure' }) }); return }
       data = target(payload)
+    } else if (table === 'transfer_question_target') {
+      if (failTransfer) { failTransfer = false; await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ code: '503', message: 'fixture failure' }) }); return }
+      const source = plans.find(plan => plan.id === payload.p_plan_id)
+      assert.equal(payload.p_expected_date, source.date)
+      const existing = plans.find(plan => plan.subject_id === source.subject_id && plan.note === source.note && plan.date === payload.p_date)
+      if (existing) data = { status: 'exists', id: existing.id }
+      else if (payload.p_mode === 'move') { source.date = payload.p_date; data = { status: 'move', id: source.id } }
+      else {
+        const copy = { ...source, id: crypto.randomUUID(), date: payload.p_date, video_plan_item_id: null, kind: 'extra' }
+        plans.push(copy); data = { status: 'copy', id: copy.id }
+      }
     } else if (table === 'copy_previous_question_week') {
       const sources = [{ date: '2026-10-22', note: 'Cümlede anlam', count: 30 }, { date: '2026-10-22', note: 'Önceki haftadan gelen konu', count: 20 }]
       let copied = 0, skipped = 0
@@ -178,6 +189,51 @@ try {
   await page.getByRole('button', { name: 'Günlere kaydet', exact: true }).click()
   await page.getByText('Hedefler günlere eklendi. Planım sekmesinde görebilirsin.', { exact: true }).waitFor()
   assert.equal(writes.find(write => write.table === 'save_question_week_targets_with_notes').payload.p_targets.find(row => row.date === '2026-10-19').note, 'Paragraf')
+  await page.getByRole('button', { name: /^Planım/ }).click()
+  const original = plans.find(plan => plan.note === 'Sözcükte anlam')
+  const goalCard = id => page.locator(`[data-question-id="${id}"]`)
+  const historyBeforeTransfer = JSON.stringify([logs, sessions])
+  await goalCard(original.id).getByRole('button', { name: 'Hedefi kopyala', exact: true }).click()
+  await page.locator('.question-day-nav').getByRole('button', { name: 'Cuma gününe yapıştır', exact: true }).click()
+  await page.getByRole('alert').waitFor()
+  assert.equal(plans.filter(plan => plan.note === original.note).length, 1)
+  await page.locator('.question-day-nav').getByRole('button', { name: 'Cuma gününe yapıştır', exact: true }).click()
+  await page.locator('.question-copy-selection').waitFor({ state: 'hidden' })
+  const copy = plans.find(plan => plan.note === original.note && plan.id !== original.id)
+  assert.equal(original.date, '2026-10-22'); assert.equal(copy.date, '2026-10-23')
+  await goalCard(copy.id).getByText('0 çözüldü', { exact: true }).waitFor()
+  await goalCard(original.id).getByText('12 çözüldü', { exact: true }).waitFor()
+  await goalCard(original.id).getByRole('button', { name: 'Hedefi kopyala', exact: true }).click()
+  await page.locator('.question-day-nav').getByRole('button', { name: 'Cuma gününe yapıştır', exact: true }).click()
+  await page.getByText('Bu günde aynı ders ve konu için bir hedef var. Mevcut hedef değiştirilmedi; farklı gün seçebilirsin.', { exact: true }).waitFor()
+  assert.equal(plans.filter(plan => plan.note === original.note).length, 2)
+  await page.getByRole('button', { name: 'Vazgeç', exact: true }).click()
+  const from = await goalCard(copy.id).locator('.question-task-main').boundingBox()
+  const to = await page.locator('.question-day[data-question-drop-date="2026-10-24"] header').boundingBox()
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2); await page.mouse.down()
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 12 }); await page.mouse.up()
+  await page.locator('.question-day[data-question-drop-date="2026-10-24"] [data-question-id]').waitFor()
+  assert.equal(copy.date, '2026-10-24')
+  await goalCard(copy.id).locator('.question-drag-handle').focus(); await page.keyboard.press('ArrowLeft')
+  await page.locator('.question-day[data-question-drop-date="2026-10-23"] [data-question-id]').waitFor()
+  assert.equal(copy.date, '2026-10-23')
+  assert.equal(JSON.stringify([logs, sessions]), historyBeforeTransfer)
+  await page.setViewportSize({ width: 540, height: 1100 })
+  await page.locator('.question-day-nav [data-question-drop-date="2026-10-23"]').click()
+  const grip = goalCard(copy.id).locator('.question-drag-handle')
+  await grip.scrollIntoViewIfNeeded()
+  const touchStart = await grip.boundingBox(), touchEnd = await page.locator('.question-day-nav [data-question-drop-date="2026-10-24"]').boundingBox()
+  const cdp = await context.newCDPSession(page)
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: touchStart.x + 10, y: touchStart.y + 10 }] })
+  for (let i = 1; i <= 12; i++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: touchStart.x + 10 + (touchEnd.x + 10 - touchStart.x - 10) * i / 12, y: touchStart.y + 10 + (touchEnd.y + 10 - touchStart.y - 10) * i / 12 }] })
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+  await page.locator('.question-day[data-question-drop-date="2026-10-24"] [data-question-id]').waitFor({ state: 'visible' })
+  assert.equal(copy.date, '2026-10-24')
+  await goalCard(copy.id).locator('.question-drag-handle').focus(); await page.keyboard.press('ArrowLeft')
+  await page.locator('.question-day[data-question-drop-date="2026-10-23"] [data-question-id]').waitFor({ state: 'visible' })
+  await cdp.detach()
+  await page.setViewportSize({ width: 1365, height: 1000 })
+  console.log('PASS single-plan copy/paste, save retry, duplicate protection, drag/keyboard move and unchanged history')
   const countsBeforeCopy = [logs.length, sessions.length]
   await page.getByRole('button', { name: 'Önceki haftayı kopyala', exact: true }).click()
   await page.getByRole('button', { name: 'Hedefleri kopyala', exact: true }).click()

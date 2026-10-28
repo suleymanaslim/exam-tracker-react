@@ -2,18 +2,20 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PointerEvent } from 'react'
 import type { CalendarVideo } from '../components/VideoWeekCalendar'
 
-interface ActiveDrag { item: CalendarVideo; pointer: number; element: HTMLElement; startX: number; startY: number; x: number; y: number; moved: boolean }
-interface DragPreview { item: CalendarVideo; x: number; y: number; target: string | null }
+interface DragItem { id: string; date: string; completion_week?: string | null }
+interface ActiveDrag<T> { item: T; pointer: number; element: HTMLElement; startX: number; startY: number; x: number; y: number; moved: boolean }
+interface DragPreview<T> { item: T; x: number; y: number; target: string | null }
 
-export function useVideoCardDrag(onMove: (item: CalendarVideo, date: string) => Promise<boolean>, onMoved: (date: string) => void) {
-  const active = useRef<ActiveDrag | null>(null)
+export function useCalendarCardDrag<T extends DragItem>(onMove: (item: T, date: string) => Promise<boolean>, onMoved: (date: string) => void,
+  { dropAttribute = 'data-video-drop-date', cardAttribute = 'data-video-id', handleSelector = '.video-card-drag-handle', scrollSelector = '.video-week-scroll' } = {}) {
+  const active = useRef<ActiveDrag<T> | null>(null)
   const frame = useRef(0)
   const mounted = useRef(true)
   const suppressClick = useRef(false)
-  const [preview, setPreview] = useState<DragPreview | null>(null)
+  const [preview, setPreview] = useState<DragPreview<T> | null>(null)
   const [moving, setMoving] = useState(false)
   const pending = useRef(false)
-  const dropDate = (x: number, y: number) => document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-video-drop-date]')?.dataset.videoDropDate || null
+  const dropDate = (x: number, y: number) => document.elementFromPoint(x, y)?.closest<HTMLElement>(`[${dropAttribute}]`)?.getAttribute(dropAttribute) || null
   const cancel = useCallback(() => {
     cancelAnimationFrame(frame.current)
     const drag = active.current; active.current = null
@@ -30,7 +32,7 @@ export function useVideoCardDrag(onMove: (item: CalendarVideo, date: string) => 
   const tick = () => {
     const drag = active.current
     if (!drag?.moved) return
-    const scroller = drag.element.closest('.video-week-scroll')
+    const scroller = drag.element.closest(scrollSelector)
     if (scroller) {
       const box = scroller.getBoundingClientRect()
       if (drag.y >= box.top && drag.y <= box.bottom && drag.x >= box.left && drag.x <= box.right) {
@@ -41,7 +43,7 @@ export function useVideoCardDrag(onMove: (item: CalendarVideo, date: string) => 
     setPreview(previous => previous?.x === drag.x && previous.y === drag.y && previous.target === target ? previous : { item: drag.item, x: drag.x, y: drag.y, target })
     frame.current = requestAnimationFrame(tick)
   }
-  const start = (event: PointerEvent<HTMLElement>, item: CalendarVideo) => {
+  const start = (event: PointerEvent<HTMLElement>, item: T) => {
     if (pending.current || active.current || item.completion_week || !event.isPrimary || event.button !== 0) return
     active.current = { item, element: event.currentTarget, pointer: event.pointerId, startX: event.clientX, startY: event.clientY, x: event.clientX, y: event.clientY, moved: false }
     event.currentTarget.setPointerCapture(event.pointerId)
@@ -55,7 +57,7 @@ export function useVideoCardDrag(onMove: (item: CalendarVideo, date: string) => 
     }
     if (drag.moved) event.preventDefault()
   }
-  const saveMove = async (item: CalendarVideo, date: string, restoreFocus = false) => {
+  const saveMove = async (item: T, date: string, restoreFocus = false) => {
     if (pending.current || item.completion_week || date === item.date) return
     pending.current = true; setMoving(true)
     try {
@@ -63,8 +65,8 @@ export function useVideoCardDrag(onMove: (item: CalendarVideo, date: string) => 
         onMoved(date)
         if (restoreFocus) requestAnimationFrame(() => {
           if (!mounted.current) return
-          const card = [...document.querySelectorAll<HTMLElement>('[data-video-id]')].find(value => value.dataset.videoId === item.id)
-          card?.querySelector<HTMLButtonElement>('.video-card-drag-handle')?.focus({ preventScroll: false })
+          const card = [...document.querySelectorAll<HTMLElement>(`[${cardAttribute}]`)].find(value => value.getAttribute(cardAttribute) === item.id)
+          card?.querySelector<HTMLButtonElement>(handleSelector)?.focus({ preventScroll: false })
         })
       }
     }
@@ -79,4 +81,8 @@ export function useVideoCardDrag(onMove: (item: CalendarVideo, date: string) => 
     if (target) void saveMove(drag.item, target)
   }
   return { preview, moving, start, move, end, cancel, saveMove, consumeClick: () => { const blocked = suppressClick.current; suppressClick.current = false; return blocked } }
+}
+
+export function useVideoCardDrag(onMove: (item: CalendarVideo, date: string) => Promise<boolean>, onMoved: (date: string) => void) {
+  return useCalendarCardDrag(onMove, onMoved)
 }

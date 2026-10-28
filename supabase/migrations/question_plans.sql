@@ -501,5 +501,52 @@ $$;
 REVOKE ALL ON FUNCTION public.copy_previous_question_week(uuid, date) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.copy_previous_question_week(uuid, date) TO authenticated;
 
+-- Transfer a single daily goal. A copy gets a new identity and no solution logs.
+-- Destination conflicts fail safely instead of overwriting an existing goal.
+CREATE OR REPLACE FUNCTION public.transfer_question_target(p_plan_id uuid, p_expected_date date, p_date date, p_mode text)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE source public.question_plans%ROWTYPE; destination uuid;
+BEGIN
+  SELECT * INTO source FROM public.question_plans WHERE id = p_plan_id;
+  IF NOT FOUND OR auth.uid() IS NULL OR (source.user_id <> auth.uid() AND NOT EXISTS (
+    SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'
+  )) THEN RAISE EXCEPTION 'Access denied' USING ERRCODE = '42501'; END IF;
+  IF p_date IS NULL OR NOT isfinite(p_date) OR p_expected_date IS NULL OR p_mode IS NULL OR p_mode NOT IN ('move', 'copy') THEN
+    RAISE EXCEPTION 'Invalid transfer' USING ERRCODE = '22023';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtextextended('question-transfer:' || source.user_id::text, 0));
+  SELECT * INTO source FROM public.question_plans WHERE id = p_plan_id FOR UPDATE;
+  IF FOUND AND source.user_id <> auth.uid() AND NOT EXISTS (
+    SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'
+  ) THEN RAISE EXCEPTION 'Access denied' USING ERRCODE = '42501'; END IF;
+  IF NOT FOUND OR source.archived_at IS NOT NULL OR source.target_questions IS NULL OR source.period <> 'day'
+    OR source.date IS DISTINCT FROM p_expected_date THEN
+    RAISE EXCEPTION 'QUESTION_TRANSFER_STALE' USING ERRCODE = '22023';
+  END IF;
+  IF source.subject_id IS NULL OR NOT EXISTS (SELECT 1 FROM public.subjects WHERE id = source.subject_id AND user_id = source.user_id) THEN
+    RAISE EXCEPTION 'Subject not found' USING ERRCODE = '42501';
+  END IF;
+  IF source.date = p_date THEN RETURN jsonb_build_object('status','same_day','id',source.id); END IF;
+  SELECT id INTO destination FROM public.question_plans WHERE user_id = source.user_id AND subject_id = source.subject_id
+    AND date = p_date AND period = 'day' AND note IS NOT DISTINCT FROM source.note LIMIT 1;
+  IF FOUND THEN RETURN jsonb_build_object('status','exists','id',destination); END IF;
+  IF p_mode = 'move' THEN
+    UPDATE public.question_plans SET date = p_date WHERE id = source.id;
+    destination := source.id;
+  ELSE
+    INSERT INTO public.question_plans(user_id, subject_id, resource_id, date, kind, period, target_questions, note)
+    VALUES (source.user_id, source.subject_id, source.resource_id, p_date, 'extra', 'day', source.target_questions, source.note)
+    ON CONFLICT (user_id, subject_id, date, period, (md5(COALESCE(note, '')))) WHERE kind = 'extra'
+    DO NOTHING RETURNING id INTO destination;
+    IF destination IS NULL THEN RETURN jsonb_build_object('status','exists'); END IF;
+  END IF;
+  RETURN jsonb_build_object('status',p_mode,'id',destination);
+EXCEPTION WHEN unique_violation THEN
+  RETURN jsonb_build_object('status','exists');
+END;
+$$;
+REVOKE ALL ON FUNCTION public.transfer_question_target(uuid, date, date, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.transfer_question_target(uuid, date, date, text) TO authenticated;
+
 NOTIFY pgrst, 'reload schema';
 COMMIT;

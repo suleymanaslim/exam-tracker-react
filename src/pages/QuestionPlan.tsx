@@ -32,6 +32,10 @@ export default function QuestionPlan() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [tab, setTab] = useState<'plans' | 'videos' | 'logs' | 'planner'>('plans')
+  const [copiedPlan, setCopiedPlan] = useState<QuestionTask | null>(null)
+  const [transferring, setTransferring] = useState(false)
+  const transferBusy = useRef(false)
+  const [transferError, setTransferError] = useState('')
   const [search, setSearch] = useState('')
   const [today] = useState(() => localDayKey(new Date()))
   const [week, setWeek] = useState(() => localDayKey(mondayOf(new Date())))
@@ -61,7 +65,7 @@ export default function QuestionPlan() {
   useEffect(() => {
     let cancelled = false
     loadVersion.current++
-    ownerRef.current = null; setCopyScope(null)
+    ownerRef.current = null; setCopyScope(null); setCopiedPlan(null); setTransferError(''); setTransferring(false)
     setPlans([]); setLessons([]); setLogs([]); setSubjects([]); setUserId(null); setError(''); setLoading(true)
     void getCurrentUser().then(({ data: { user } }) => {
       if (cancelled) return
@@ -81,6 +85,30 @@ export default function QuestionPlan() {
   const afterSave = async () => {
     window.dispatchEvent(new Event('question-data-changed'))
     if (userId && ownerRef.current === userId) await load(userId, true)
+  }
+  const transferTarget = async (plan: QuestionTask, date: string, mode: 'move' | 'copy'): Promise<boolean> => {
+    if (!userId || ownerRef.current !== userId || transferBusy.current) return false
+    const owner = userId
+    transferBusy.current = true; setTransferring(true); setTransferError('')
+    try {
+      const { data, error: failure } = await supabase.rpc('transfer_question_target', { p_plan_id: plan.id, p_expected_date: plan.date, p_date: date, p_mode: mode })
+      if (ownerRef.current !== owner) return false
+      if (failure) throw failure
+      if (!data || !['move', 'copy', 'exists', 'same_day'].includes(data.status)) throw new Error('Unverified transfer')
+      if (data.status === 'exists') { setTransferError('Bu günde aynı ders ve konu için bir hedef var. Mevcut hedef değiştirilmedi; farklı gün seçebilirsin.'); return false }
+      if (data.status === 'same_day') { setTransferError('Kaynak plandan farklı bir gün seç.'); return false }
+      setCopiedPlan(null)
+      setWeek(localDayKey(mondayOf(new Date(`${date}T12:00:00`))))
+      setSelectedDay((new Date(`${date}T12:00:00`).getDay() + 6) % 7)
+      await afterSave()
+      return true
+    } catch (failure) {
+      if (ownerRef.current === owner) {
+        const problem = failure as { code?: string; message?: string }
+        setTransferError(problem.message === 'QUESTION_TRANSFER_STALE' ? 'Kaynak hedef değişmiş. Planı yenileyip tekrar seç; mevcut kayıtlar korundu.' : problem.code ? questionPlanError(problem) : 'İşlem doğrulanamadı. Aynı güne tekrar denemek mükerrer hedef oluşturmaz.')
+      }
+      return false
+    } finally { transferBusy.current = false; if (ownerRef.current === owner) setTransferring(false) }
   }
   const copyPreviousWeek = async () => {
     if (!userId) return
@@ -233,7 +261,9 @@ export default function QuestionPlan() {
     <div className="question-toolbar"><div className="question-tabs" role="group" aria-label="Soru planı görünümü"><button aria-pressed={tab === 'plans'} onClick={() => setTab('plans')}>Planım <span>{weekPlans.length}</span></button><button aria-pressed={tab === 'videos'} onClick={() => setTab('videos')}>Videodan ekle <span>{weekLessons.length}</span></button><button aria-pressed={tab === 'planner'} onClick={() => setTab('planner')}>Haftayı planla</button><button aria-pressed={tab === 'logs'} onClick={() => setTab('logs')}>Kayıtlar <span>{weekLogs.length}</span></button></div><input type="search" aria-label="Ders veya konu ara" placeholder="Ders veya konu ara…" value={search} onChange={event => setSearch(event.target.value)} /></div>
     {error && <div className="question-error" role="alert"><span>{error}</span><button onClick={() => userId && void load(userId)}><RefreshCw size={16} /> Tekrar dene</button></div>}
     {loading ? <div className="question-empty">Yükleniyor…</div> : !error && (tab === 'planner' && userId ? <QuestionWeekPlanner key={`${userId}:${week}`} userId={userId} week={week} plans={plans} subjects={subjects} onSaved={() => void afterSave()} /> : tab === 'plans' ? <div className="question-plan-layout">
-      <QuestionWeekBoard week={week} today={today} selectedDate={selectedDate} plans={visiblePlans} onSelectDate={date => setSelectedDay(days.findIndex(day => day.date === date))} onAdd={date => void saveTarget(undefined, undefined, date)} onEdit={plan => void saveTarget(lessons.find(lesson => lesson.id === plan.video_plan_item_id), plan)} onSolved={plan => void addSolved(plan)} onRemove={plan => void remove(plan.id, 'plan')} />
+      {copiedPlan && <div className="question-copy-selection" role="status"><div><strong>{copiedPlan.note || copiedPlan.subjects?.name || 'Soru hedefi'} · {copiedPlan.target_questions} soru</strong><span>{transferring ? 'Yapıştırılıyor…' : 'Kopyalamak için bir güne tıkla. Asıl hedef yerinde kalır.'}</span></div><button type="button" disabled={transferring} onClick={() => { setCopiedPlan(null); setTransferError('') }}>Vazgeç</button></div>}
+      {transferError && <p className="question-panel-error" role="alert">{transferError}</p>}
+      <QuestionWeekBoard clipboardId={copiedPlan?.id || null} busy={transferring} onCopy={plan => { setCopiedPlan(plan); setTransferError('') }} onPaste={date => copiedPlan && void transferTarget(copiedPlan, date, 'copy')} onMove={(plan, date) => transferTarget(plan, date, 'move')} week={week} today={today} selectedDate={selectedDate} plans={visiblePlans} onSelectDate={date => setSelectedDay(days.findIndex(day => day.date === date))} onAdd={date => void saveTarget(undefined, undefined, date)} onEdit={plan => void saveTarget(lessons.find(lesson => lesson.id === plan.video_plan_item_id), plan)} onSolved={plan => void addSolved(plan)} onRemove={plan => void remove(plan.id, 'plan')} />
       {visiblePlans.some(plan => plan.period === 'week') && <section className="question-weekly-targets"><header><h2>Genel haftalık hedefler</h2><p>Genel hedefler dersin tüm çözümlerini, konu belirtilen hedefler yalnızca kendi çözümlerini kapsar.</p></header><div className="question-cards">
       {visiblePlans.filter(plan => plan.period === 'week').map(plan => {
         const done = plan.target_questions != null && plan.solved_questions >= plan.target_questions
