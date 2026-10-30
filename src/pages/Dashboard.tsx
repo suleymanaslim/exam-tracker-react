@@ -5,7 +5,7 @@ import { localDayKey, mondayOf } from '../lib/statsPeriod'
 import { DailyProgress, WeeklyProgress, DashboardSummary } from '../components/DashboardProgress'
 import { useEffect, useState, useMemo, useRef } from 'react'
 import { supabase, getCurrentUser } from '../lib/supabase'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useTimerStore } from '../lib/timerStore'
 import { useAdminStore } from '../lib/adminStore'
 import Swal from 'sweetalert2'
@@ -28,19 +28,6 @@ const examMeta: Record<string, { icon: LucideIcon; gradient: string; accent: str
   YDS:   { icon: Globe,      gradient: 'from-[#1a365d] to-[#0891b2]', accent: '#0891b2' },
   IELTS: { icon: BookOpen,   gradient: 'from-[#1e293b] to-[#7c3aed]', accent: '#7c3aed' },
   ALES:  { icon: Calculator, gradient: 'from-[#1a2744] to-[#059669]', accent: '#059669' },
-}
-
-// ─── Motivasyon sözleri ───────────────────────────────────────────────────────
-const QUOTES = [
-  { text: 'Dünyada her şey için, medeniyet için, hayat için, muvaffakiyet için en hakiki mürşit ilimdir, fendir.', author: 'Mustafa Kemal Atatürk', source: 'https://atam.gov.tr/wp-content/uploads/2024/03/Ataturkun-Soylev-ve-Demecleri-C2.pdf' },
-  { text: 'İyimser olabilir, var olan fırsatları değerlendirebilir ve dünyayı daha iyi bir yer yapmaya katkıda bulunabiliriz.', author: 'Noam Chomsky', source: 'https://chomsky.info/why-i-choose-optimism-over-despair/' },
-  { text: 'Eğitim, dünyayı değiştirmek için kullanabileceğiniz en güçlü silahtır.', author: 'Nelson Mandela', source: 'https://www.nelsonmandela.org/nm100-education' },
-  { text: 'Yaratamadığım şeyi anlayamam.', author: 'Richard Feynman', source: 'https://www.preskill.caltech.edu/talks/APS-April-2018-Feynman-4-3.pdf' },
-]
-
-function getDailyQuote() {
-  const day = Math.floor(Date.UTC(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()) / 86400000)
-  return QUOTES[day % QUOTES.length]
 }
 
 // ─── Tarih yardımcıları ───────────────────────────────────────────────────────
@@ -129,8 +116,6 @@ export default function Dashboard() {
   const dailyMessageDirty = useRef(false)
   const [isSavingMessage, setIsSavingMessage] = useState(false)
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null)
-
-  const quote = getDailyQuote()
 
   useEffect(() => {
     supabase.from('system_settings').select('value').eq('key', 'yks_vocabulary_program').single()
@@ -596,7 +581,23 @@ export default function Dashboard() {
         </div>
       )}
 
-      <aside className="dash-quote"><p>“{quote.text}”</p><a href={quote.source} target="_blank" rel="noopener noreferrer" title="Sözün kaynağı">{quote.author}</a></aside>
+      <nav className="dash-shortcuts" aria-label="Hızlı erişim">
+        <Link to="/study" className="dash-shortcut dash-shortcut-primary">
+          <span className="dash-shortcut-icon"><Play size={19} aria-hidden="true" /></span>
+          <span className="dash-shortcut-copy"><strong>Çalışmaya geç</strong><span>{todayPlanItems.length > 0 ? `Bugün ${todayPlanItems.length} planlı çalışma` : 'Oturum başlat veya kaldığın yerden sürdür'}</span></span>
+          <ChevronRight className="dash-shortcut-arrow" size={17} aria-hidden="true" />
+        </Link>
+        <Link to="/questions" className="dash-shortcut">
+          <span className="dash-shortcut-icon"><Target size={19} aria-hidden="true" /></span>
+          <span className="dash-shortcut-copy"><strong>Soru hedefleri</strong><span>Konular ve günlük hedefler</span></span>
+          <ChevronRight className="dash-shortcut-arrow" size={17} aria-hidden="true" />
+        </Link>
+        <Link to="/videos" className="dash-shortcut">
+          <span className="dash-shortcut-icon"><BookOpen size={19} aria-hidden="true" /></span>
+          <span className="dash-shortcut-copy"><strong>Video planı</strong><span>{todayPlanItems.some(item => item.isVideo) ? `Bugün ${todayPlanItems.filter(item => item.isVideo).length} video görevi` : 'Haftalık izleme planını aç'}</span></span>
+          <ChevronRight className="dash-shortcut-arrow" size={17} aria-hidden="true" />
+        </Link>
+      </nav>
       <header className="dash-header">
         <div><p className="dash-eyebrow">ÇALIŞMA ALANIN</p><h1>Merhaba, {displayName}</h1><p className="dash-date">{new Date().toLocaleDateString('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' })}</p></div>
         <DashboardSummary streak={streak} studied={totalWeekMinutes} planned={totalWeekPlannedMinutes} />
