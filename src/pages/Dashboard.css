@@ -17,20 +17,5 @@
 @media(max-width:850px){.dash-main-grid{grid-template-columns:1fr}.dash-side{height:auto}.dash-summary strong{font-size:16px}.dash-summary span{font-size:11px}.dash-daily-values strong{font-size:15px}.dash-daily-title,.dash-daily-values span{font-size:12px}.dash-chart-value{font-size:11px}.dash-chart-day{font-size:12px}.dash-daily-progress>div:first-child,.dash-daily-source{font-size:11px}.dash-exam strong{font-size:17px}}
 @media(max-width:380px){.dash-summary strong{font-size:15px}.dash-daily-values strong{font-size:14px}.dash-chart{padding-left:12px;padding-right:12px}.dash-chart-value{font-size:10px}.dash-play{width:28px;height:28px}.dash-plan-meta>b{font-size:12px}.dash-text-button{font-size:12px}.dashboard h2{font-size:19px}}
 
-/* Dashboard shortcuts use existing page data and keep every destination visible. */
-.dash-shortcuts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
-.dash-shortcut{display:flex;align-items:center;gap:12px;min-width:0;min-height:80px;padding:14px 16px;border:1px solid #e1e7ee;border-radius:14px;background:#fff;color:var(--dash-ink);text-decoration:none;transition:background .15s,border-color .15s}
-.dash-shortcut:hover{background:#f7f9fc;border-color:#b9cbe2}
-.dash-shortcut:focus-visible{outline:2px solid var(--dash-blue);outline-offset:3px}
-.dash-shortcut-primary{background:#edf3fb;border-color:#dce6f4}
-.dash-shortcut-primary:hover{background:#e6eef9}
-.dash-shortcut-icon{display:flex;align-items:center;justify-content:center;width:36px;height:36px;flex-shrink:0;border-radius:10px;background:#f0f4fa;color:var(--dash-blue)}
-.dash-shortcut-primary .dash-shortcut-icon{background:#dce8f8}
-.dash-shortcut-copy{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
-.dash-shortcut-copy strong{font-size:15px;font-weight:600;line-height:1.3}
-.dash-shortcut-copy>span{font-size:12px;line-height:1.4;color:var(--dash-muted);overflow-wrap:anywhere}
-.dash-shortcut-arrow{flex-shrink:0;color:var(--dash-blue)}
-@media(max-width:700px){.dash-shortcuts{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.dash-shortcut{gap:8px;min-height:68px;padding:10px}.dash-shortcut-primary{grid-column:1/-1}.dash-shortcut-icon{width:30px;height:30px;border-radius:8px}.dash-shortcut-copy strong{font-size:14px}.dash-shortcut-arrow{display:none}.dash-shortcut-primary .dash-shortcut-arrow{display:block}}
-
 
 .dash-overview-grid.dash-overview-single{grid-template-columns:minmax(0,1fr)}

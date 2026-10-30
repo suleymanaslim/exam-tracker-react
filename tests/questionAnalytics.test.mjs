@@ -140,3 +140,27 @@ test('resumed old weekly goals count their explicit later solutions in Study wit
   assert.deepEqual(withWeeklyQuestionProgress(study, logs, '2026-10-12'), study)
   assert.deepEqual(logs, before)
 })
+
+
+test('lifetime solved count stays constant across selected weeks and the 12-week chart window', () => {
+  const plans = [plan('old', 'verbal', 500, '2024-01-01', { archived_at: '2026-01-01' }), plan('current')]
+  const logs = [result('old', 1200, '2024-01-01T10:00:00Z'), result('current', 35), result('current', 15, '2026-10-12T10:00:00Z', { session_id: 'timed-session' }), result('current', 70, undefined, { deleted_at: '2026-10-10' })]
+  const snapshot = structuredClone(logs)
+  for (const week of [null, '2026-10-05', '2026-10-12', '2026-10-19']) {
+    const data = analyzeQuestions(plans, logs, week, '2026-10-12')
+    assert.equal(data.allTimeSolved, 1250)
+    if (week === '2026-10-05') assert.equal(data.solved, 35)
+    if (week === '2026-10-12') assert.equal(data.solved, 15)
+    if (week === '2026-10-19') assert.equal(data.solved, 0)
+  }
+  const manyWeeks = Array.from({ length: 20 }, (_, index) => result('current', 10, new Date(Date.UTC(2026, 0, 5 + index * 7)).toISOString()))
+  const all = analyzeQuestions(plans, manyWeeks, null)
+  assert.equal(all.buckets.length, 12)
+  assert.equal(all.allTimeSolved, 200)
+  assert.equal(all.buckets.reduce((sum, bucket) => sum + bucket.solved, 0), 120)
+  assert.deepEqual(logs, snapshot)
+})
+test('lifetime solved count is zero for empty or deleted-only history', () => {
+  assert.equal(analyzeQuestions([], [], null).allTimeSolved, 0)
+  assert.equal(analyzeQuestions([plan('a')], [result('a', 100, undefined, { deleted_at: '2026-10-10' })], '2026-10-05').allTimeSolved, 0)
+})

@@ -75,7 +75,7 @@ export function analyzeQuestions(plans: QuestionPlan[], logs: QuestionLog[], wee
     const key = localDayKey(start)
     previous = active.filter(log => weekKey(logDay(log)) === key).reduce((sum, log) => sum + log.solved_questions, 0)
   }
-  return { target, remaining, solved, progress: target ? Math.round((target - remaining) / target * 100) : null,
+  return { target, remaining, solved, allTimeSolved: active.reduce((sum, log) => sum + log.solved_questions, 0), progress: target ? Math.round((target - remaining) / target * 100) : null,
     today: active.filter(log => logDay(log) === today).reduce((sum, log) => sum + log.solved_questions, 0),
     bySubject: rows, selected, previous,
     buckets: [...buckets.values()].sort((a, b) => a.key.localeCompare(b.key)).slice(week ? 0 : -12),

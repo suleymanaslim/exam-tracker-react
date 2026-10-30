@@ -14,8 +14,13 @@ export default function QuestionProgress({ week, compact = false }: { week: stri
   return <section className={`question-stat `} aria-label="Soru çözüm istatistikleri">
     <header><h2><BookOpenCheck size={19} /> Soru çözümü</h2><Link to="/questions">Soru planı <ChevronRight size={15} /></Link></header>
     {source.loading ? <p className="question-stat-state" role="status">Sorular yükleniyor…</p> : source.error ? <div className="question-stat-state" role="status"><span>{source.error}</span><button onClick={source.retry}>Tekrar dene</button></div> : <>
+      <div className="question-stat-total" aria-label="Tüm zamanlarda çözülen soru">
+        <span className="question-stat-total-icon"><BookOpenCheck size={23} aria-hidden="true" /></span>
+        <div><span>Tüm zamanlarda çözülen soru</span><strong>{number(data.allTimeSolved)} <small>soru</small></strong></div>
+        <p>İlk çözüm kaydından bugüne</p>
+      </div>
       <div className="question-stat-values">{[
-        ['Çözülen', number(data.solved)], ['Hedef', data.target ? number(data.target) : '—'],
+        [week ? 'Seçili haftada çözülen' : 'Çözüm kaydı', number(week ? data.solved : data.selected.length)], ['Hedef', data.target ? number(data.target) : '—'],
         ['Kalan', data.target ? number(data.remaining) : '—'],
         ['Hedef ilerlemesi', data.progress == null ? '—' : `%${data.progress}`],
       ].map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>
