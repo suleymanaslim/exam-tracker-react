@@ -1,6 +1,7 @@
 import { examHasPoints } from '../lib/examTemplates'
 import './SuitePages.css'
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { supabase, getCurrentUser } from '../lib/supabase'
 import { seedAllData } from '../lib/seed'
 import Swal from 'sweetalert2'
@@ -15,6 +16,7 @@ import { defaultVocabularyText } from '../lib/defaultVocabulary'
 import { useSettingsStore } from '../lib/settingsStore'
 import AIStudyReportExport from '../components/AIStudyReportExport'
 import ExamTemplatePanel from '../components/ExamTemplatePanel'
+import PomodoroPresetSettings from '../components/PomodoroPresetSettings'
 import ResetVideoProgressButton from '../components/ResetVideoProgressButton'
 
 interface Exam { id: string; name: string; color: string; exam_date: string | null; wrong_penalty: number | null; point_per_net: number; base_template_key?: string | null }
@@ -31,7 +33,8 @@ type Tab = 'resources' | 'exam_settings' | 'pomodoro' | 'exam_dates' | 'export' 
 export default function Settings() {
   const { impersonatedUserId, isAdmin } = useAdminStore()
   const [userId, setUserId] = useState<string | null>(null)
-  const [tab, setTab] = useState<Tab>('resources')
+  const [searchParams] = useSearchParams()
+  const [tab, setTab] = useState<Tab>(() => searchParams.get('tab') === 'pomodoro' ? 'pomodoro' : 'resources')
   const [exams, setExams] = useState<Exam[]>([])
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [resources, setResources] = useState<Resource[]>([])
@@ -781,10 +784,11 @@ export default function Settings() {
           </div>
         )}
 
-        {tab === 'pomodoro' && pomSettings && (
-          <div className="h-full flex items-start justify-center pt-8">
+        {tab === 'pomodoro' && (
+          <div className="flex items-start justify-center py-4">
             <div className="w-full max-w-md rounded-2xl border border-[#e3e9f0] bg-white p-6 space-y-5">
               <h3 className="text-sm font-semibold text-[#24354a] flex items-center gap-2"><Clock className="h-4 w-4 text-[#4269a8]" /> Pomodoro Ayarları</h3>
+              {pomSettings && <>
               <div className="rounded-lg bg-[#f8fafc] p-4 space-y-3">
                 <h4 className="text-[14px] font-semibold text-[#24354a]">Uzun Pomodoro</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -823,6 +827,8 @@ export default function Settings() {
                 className="w-full h-9 rounded-lg bg-[#4269a8] text-white text-[14px] font-semibold hover:bg-[#365c96] disabled:opacity-40 flex items-center justify-center gap-1.5">
                 <Save className="h-3.5 w-3.5" /> {saving ? 'Kaydediliyor...' : saved ? '✓ Kaydedildi!' : 'Kaydet'}
               </button>
+              </>}
+              <PomodoroPresetSettings />
             </div>
           </div>
         )}

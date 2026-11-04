@@ -1,5 +1,7 @@
 import { examHasPoints } from '../lib/examTemplates'
 import './Dashboard.css'
+import { usePomodoroPreferences } from '../lib/usePomodoroPreferences'
+import { selectedPomodoro, pomodoroChoices, pomodoroMode, pomodoroLabel } from '../lib/pomodoroPresets'
 import QuestionProgress from '../components/QuestionProgress'
 import { localDayKey, mondayOf } from '../lib/statsPeriod'
 import { DailyProgress, WeeklyProgress, DashboardSummary } from '../components/DashboardProgress'
@@ -63,12 +65,11 @@ function duration(minutes: number) {
 
 export default function Dashboard() {
   const navigate = useNavigate()
+  const pomodoro = usePomodoroPreferences()
   const setSelExam = useTimerStore(state => state.setSelExam)
   const setSelSubject = useTimerStore(state => state.setSelSubject)
   const setSelResource = useTimerStore(state => state.setSelResource)
   const setMode = useTimerStore(state => state.setMode)
-  const setSecondsLeft = useTimerStore(state => state.setSecondsLeft)
-  const setTotalSeconds = useTimerStore(state => state.setTotalSeconds)
   const resetTimer = useTimerStore(state => state.resetTimer)
   const { impersonatedUserId, isAdmin } = useAdminStore()
   
@@ -82,7 +83,7 @@ export default function Dashboard() {
   const [resources, setResources] = useState<any[]>([])
   const [weekSessions, setWeekSessions] = useState<any[]>([])
   const [weekPlanItems, setWeekPlanItems] = useState<any[]>([])
-  const [pomSettings, setPomSettings] = useState({ long_focus_minutes: 50, short_focus_minutes: 25 })
+  const [pomSettings, setPomSettings] = useState({ long_focus_minutes: 50, long_break_minutes: 10, short_focus_minutes: 25, short_break_minutes: 5 })
 
   // Streak
   const [streak, setStreak] = useState(0)
@@ -100,7 +101,6 @@ export default function Dashboard() {
   const [quickExam, setQuickExam]     = useState('')
   const [quickSubject, setQuickSubject] = useState('')
   const [quickResource, setQuickResource] = useState('')
-  const [quickMode, setQuickMode]     = useState<'pomodoro_long' | 'pomodoro_short'>('pomodoro_long')
   const [quickOpen, setQuickOpen]     = useState(false)
   
   // YKS/YDT Vocabulary State
@@ -188,7 +188,7 @@ export default function Dashboard() {
       supabase.from('subjects').select('*').eq('user_id', targetUid).then(r => r.data && setSubjects(r.data))
       supabase.from('resources').select('*').eq('user_id', targetUid).then(r => r.data && setResources(r.data))
       supabase.from('pomodoro_settings').select('*').eq('user_id', targetUid).single().then(r => {
-        if (r.data) setPomSettings({ long_focus_minutes: r.data.long_focus_minutes, short_focus_minutes: r.data.short_focus_minutes })
+        if (r.data) setPomSettings(r.data)
       })
 
       // Bu haftanın oturumları
@@ -397,7 +397,14 @@ export default function Dashboard() {
   const todayDayOfWeekNum = todayDayOfWeek === 0 ? 7 : todayDayOfWeek
   const todayPlanItems = weekPlanItems.filter(p => p.day_of_week === todayDayOfWeekNum)
 
+  const selectedPreset = selectedPomodoro(pomSettings, pomodoro.preferences)
+  const preparePomodoro = () => {
+    setMode(pomodoroMode(selectedPreset.id))
+    resetTimer(selectedPreset.focusMinutes * 60)
+    useTimerStore.getState().setBreakSeconds(selectedPreset.breakMinutes * 60)
+  }
   const startFromPlan = (item: any) => {
+    if (pomodoro.loading || pomodoro.saving) return
     const timer = useTimerStore.getState()
     if (timer.isRunning || timer.startedAt || timer.recovery || timer.phase === 'break') { navigate('/study'); return }
     const sub = subjects.find(s => s.id === item.subject_id)
@@ -405,27 +412,24 @@ export default function Dashboard() {
     setSelExam(sub.exam_id)
     setSelSubject(item.subject_id)
     setSelResource(item.resource_id ?? '')
-    setMode('pomodoro_long')
-    const secs = pomSettings.long_focus_minutes * 60
-    setSecondsLeft(secs)
-    setTotalSeconds(secs)
+    preparePomodoro()
     navigate('/study')
   }
 
   const startQuick = () => {
+    if (pomodoro.loading || pomodoro.saving) return
     const timer = useTimerStore.getState()
     if (timer.isRunning || timer.startedAt || timer.recovery || timer.phase === 'break') { navigate('/study'); return }
     if (!quickSubject) return
     setSelExam(quickExam)
     setSelSubject(quickSubject)
     setSelResource(quickResource)
-    setMode(quickMode)
-    const secs = quickMode === 'pomodoro_long' ? pomSettings.long_focus_minutes * 60 : pomSettings.short_focus_minutes * 60
-    resetTimer(secs)
+    preparePomodoro()
     navigate('/study')
   }
 
   const startReview = (subjectId: string, resourceId: string | null) => {
+    if (pomodoro.loading || pomodoro.saving) return
     const timer = useTimerStore.getState()
     if (timer.isRunning || timer.startedAt || timer.recovery || timer.phase === 'break') { navigate('/study'); return }
     const sub = subjects.find(s => s.id === subjectId)
@@ -433,9 +437,7 @@ export default function Dashboard() {
     setSelExam(sub.exam_id)
     setSelSubject(subjectId)
     setSelResource(resourceId ?? '')
-    setMode('pomodoro_short')
-    const secs = pomSettings.short_focus_minutes * 60
-    resetTimer(secs)
+    preparePomodoro()
     navigate('/study')
   }
 
@@ -593,7 +595,7 @@ export default function Dashboard() {
           <div className="dash-plan-list">
             {todayPlanItems.length === 0 ? <div className="dash-empty"><BookOpen size={26} /><h3>Bugün için planın hazır değil</h3><p>Haftalık veya video planına eklediğin çalışmalar burada görünür.</p><button className="dash-secondary" onClick={() => navigate('/plan')}>Planına git</button></div> : todayPlanItems.map((p, index) => {
               const ex = exams.find(e => subjects.find(s => s.id === p.subject_id)?.exam_id === e.id)
-              return <button key={p.id} className="dash-plan-row" onClick={() => startFromPlan(p)} disabled={!p.subject_id}>
+              return <button key={p.id} className="dash-plan-row" onClick={() => startFromPlan(p)} disabled={!p.subject_id || pomodoro.loading || pomodoro.saving}>
                 <span className="dash-row-number">{String(index + 1).padStart(2, '0')}</span>
                 <span className="dash-row-copy"><strong>{getSubjectName(p.subject_id) || p.title || 'Çalışma'}</strong><span>{(p.isVideo ? p.title : getResourceName(p.resource_id)) || p.title || ex?.name || 'Genel çalışma'}</span></span>
                 <span className="dash-plan-meta"><span>{p.isVideo ? 'Video' : 'Ders'}</span><b>{duration(p.planned_minutes)}</b></span><span className="dash-play"><Play size={14} /></span>
@@ -605,8 +607,9 @@ export default function Dashboard() {
               <label>Sınav<select aria-label="Sınav" value={quickExam} onChange={e => { setQuickExam(e.target.value); setQuickSubject(''); setQuickResource('') }}><option value="">Sınav seç</option>{exams.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}</select></label>
               <label>Ders<select aria-label="Ders" value={quickSubject} disabled={!quickExam} onChange={e => { setQuickSubject(e.target.value); setQuickResource('') }}><option value="">Ders seç</option>{quickFilteredSubjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
               <label>Kaynak<select aria-label="Kaynak" value={quickResource} disabled={!quickSubject} onChange={e => setQuickResource(e.target.value)}><option value="">Kaynak (isteğe bağlı)</option>{quickFilteredResources.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select></label>
-              <label>Oturum<select aria-label="Oturum" value={quickMode} onChange={e => setQuickMode(e.target.value as typeof quickMode)}><option value="pomodoro_long">Uzun · {pomSettings.long_focus_minutes} dk</option><option value="pomodoro_short">Kısa · {pomSettings.short_focus_minutes} dk</option></select></label>
-              <button className="dash-primary" disabled={!quickSubject} onClick={startQuick}><Play size={14} /> Çalışmaya başla</button>
+              <label>Hazır sayaç<select aria-label="Oturum" disabled={pomodoro.loading || pomodoro.saving || pomodoro.readOnly} value={selectedPreset.id} onChange={event => { void pomodoro.save({ ...pomodoro.preferences, selectedId: event.target.value }) }}>{pomodoroChoices(pomSettings, pomodoro.preferences).map(preset => <option key={preset.id} value={preset.id}>{pomodoroLabel(preset)}</option>)}</select></label>
+              {pomodoro.error && <p role="alert">{pomodoro.error}</p>}
+              <button className="dash-primary" disabled={!quickSubject || pomodoro.loading || pomodoro.saving} onClick={startQuick}><Play size={14} /> Çalışmaya başla</button>
             </div>}
           </div>
         </section>
@@ -625,7 +628,7 @@ export default function Dashboard() {
           <div className="dash-community">{leaderboard.length === 0 ? <p className="dash-empty-note">Bugünün ilk çalışması henüz kaydedilmedi.</p> : leaderboard.map((u, i) => <div key={u.user_id}><button className="dash-community-row" aria-expanded={expandedUserId === u.user_id} onClick={() => setExpandedUserId(expandedUserId === u.user_id ? null : u.user_id)}><span className="dash-rank">{i + 1}</span><span className="dash-row-copy"><strong>{u.name}</strong>{u.message && <span>{u.message}</span>}</span><b>{duration(u.total)}</b><ChevronDown size={14} /></button>{expandedUserId === u.user_id && <div className="dash-user-details">{Object.entries(u.details).map(([k, mins]) => <div key={k}><span>{k}</span><b>{duration(Number(mins))}</b></div>)}</div>}</div>)}</div>
           {communitySharing && <form className="dash-message" onSubmit={e => { e.preventDefault(); saveDailyMessage() }}><input aria-label="Günlük durum mesajı" placeholder="Bugün için bir not bırak…" value={dailyMessage} onChange={e => { dailyMessageDirty.current = true; setDailyMessage(e.target.value) }} /><button className="dash-secondary" disabled={isSavingMessage} aria-label="Durum mesajını kaydet"><Check size={16} /></button></form>}
         </section>}
-        <section className="dash-panel"><div className="dash-section-head"><div><h3>Dünü hatırla</h3><p className="dash-muted">Kısa bir tekrar, kalıcı bir adım.</p></div><RotateCcw size={18} className="dash-muted" /></div><div className="dash-review">{yesterdayReview.length === 0 ? <p className="dash-empty-note">Dün için çalışma kaydı yok.</p> : yesterdayReview.map((r, i) => <button className="dash-plan-row" key={i} onClick={() => startReview(r.subjectId, r.resourceId)}><span className="dash-row-copy"><strong>{getSubjectName(r.subjectId) || 'Çalışma'}</strong><span>{getResourceName(r.resourceId)}</span></span><b className="dash-muted">{duration(r.mins)}</b><span className="dash-play"><Play size={14} /></span></button>)}</div></section>
+        <section className="dash-panel"><div className="dash-section-head"><div><h3>Dünü hatırla</h3><p className="dash-muted">Kısa bir tekrar, kalıcı bir adım.</p></div><RotateCcw size={18} className="dash-muted" /></div><div className="dash-review">{yesterdayReview.length === 0 ? <p className="dash-empty-note">Dün için çalışma kaydı yok.</p> : yesterdayReview.map((r, i) => <button className="dash-plan-row" key={i} disabled={pomodoro.loading || pomodoro.saving} onClick={() => startReview(r.subjectId, r.resourceId)}><span className="dash-row-copy"><strong>{getSubjectName(r.subjectId) || 'Çalışma'}</strong><span>{getResourceName(r.resourceId)}</span></span><b className="dash-muted">{duration(r.mins)}</b><span className="dash-play"><Play size={14} /></span></button>)}</div></section>
       </div>
 
       {isAdmin && <details className="dash-panel dash-admin"><summary>YKS / YDT kelime araçları</summary><p className="dash-muted">Paylaşmak istediğin günün kelimelerini kopyala.</p><div className="dash-admin-controls"><select aria-label="Kelime günü" value={selectedVocabDay} onChange={e => setSelectedVocabDay(e.target.value ? Number(e.target.value) : '')}><option value="">Gün seç</option>{availableDays.map(d => <option key={d} value={d}>Day {d}</option>)}</select><button className="dash-secondary" onClick={handleCopyVocab} disabled={!selectedVocabDay}><Copy size={15} /> Kopyala</button></div></details>}

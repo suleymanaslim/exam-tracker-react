@@ -1,4 +1,6 @@
 import './Study.css'
+import { usePomodoroPreferences } from '../lib/usePomodoroPreferences'
+import { selectedPomodoro, pomodoroChoices, pomodoroMode } from '../lib/pomodoroPresets'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase, getCurrentUser } from '../lib/supabase'
@@ -34,6 +36,7 @@ export default function Study({ mockExam = false }: { mockExam?: boolean }) {
   const mockActive = useMockExamStore(state => state.active)
   const navigate = useNavigate()
   const { impersonatedUserId } = useAdminStore()
+  const pomodoro = usePomodoroPreferences()
   // ── UI-only state ──────────────────────────────────────────────────
   const [userId, setUserId] = useState<string | null>(null)
   const [exams, setExams] = useState<Exam[]>([])
@@ -178,31 +181,24 @@ export default function Study({ mockExam = false }: { mockExam?: boolean }) {
       window.removeEventListener('question-data-changed', refresh) }
   }, [userId])
 
-  // ── Focus minutes from settings ────────────────────────────────────
-  let focusMinutes = settings.long_focus_minutes
-  if (mode === 'pomodoro_short') focusMinutes = settings.short_focus_minutes
-  else if (mode === 'manual') focusMinutes = settings.long_focus_minutes * pomodoroCount
+  const selectedPreset = selectedPomodoro(settings, pomodoro.preferences)
+  const presetMode = pomodoroMode(selectedPreset.id)
+  // Preferences apply only to the next idle timer. Active/paused sessions and
+  // recovery keep the focus and break durations captured when they started.
+  const focusMinutes = mode === 'manual' ? settings.long_focus_minutes * pomodoroCount : selectedPreset.focusMinutes
   const focusSeconds = isCountUp(mode) ? 0 : focusMinutes * 60
-
-  // ── Break seconds'ı ayarlardan store'a yaz ─────────────────────────
   useEffect(() => {
-    if (isRunning || startedAt || recovery || phase === 'break') return
-    const breakMins = mode === 'pomodoro_long' ? settings.long_break_minutes : settings.short_break_minutes
-    setBreakSeconds(breakMins * 60)
-  }, [mode, settings, isRunning, startedAt, recovery, phase, setBreakSeconds])
-
-  // ── Initialize timer when mode, settings, or pomodoro count change (only if not running) ──
-  useEffect(() => {
-    if (ownerId === userId && !isRunning && !startedAt && !recovery && phase === 'focus') {
-      setSecondsLeft(focusSeconds)
-      setTotalSeconds(focusSeconds)
-    }
-  }, [mode, focusSeconds, pomodoroCount, ownerId, userId, isRunning, startedAt, recovery, phase, setSecondsLeft, setTotalSeconds])
+    if (pomodoro.loading || !ownerId || ownerId !== userId || isRunning || startedAt || recovery || isFinishing || phase === 'break') return
+    if ((mode === 'pomodoro_long' || mode === 'pomodoro_short') && mode !== presetMode) setMode(presetMode)
+    setBreakSeconds(selectedPreset.breakMinutes * 60)
+    setSecondsLeft(focusSeconds)
+    setTotalSeconds(focusSeconds)
+  }, [pomodoro.loading, presetMode, selectedPreset.breakMinutes, mode, focusSeconds, ownerId, userId, isRunning, startedAt, recovery, isFinishing, phase, setMode, setBreakSeconds, setSecondsLeft, setTotalSeconds])
 
   // ── Toggle timer ───────────────────────────────────────────────────
   const toggleTimer = () => {
     const current = useTimerStore.getState()
-    if (mockActive || !current.selSubject || !userId || current.ownerId !== userId || current.recovery || current.isFinishing) return
+    if ((!current.startedAt && current.phase === 'focus' && (pomodoro.loading || pomodoro.saving)) || mockActive || !current.selSubject || !userId || current.ownerId !== userId || current.recovery || current.isFinishing) return
     if (current.isRunning) current.pauseTimer()
     else {
       unlockTimerAlarm()
@@ -417,9 +413,17 @@ export default function Study({ mockExam = false }: { mockExam?: boolean }) {
   const changeMode = (nextMode: SessionMode) => {
     const current = useTimerStore.getState()
     if (isTimerActive || current.isFinishing || current.ownerId !== userId) return
-    if (current.mode === 'questions' && nextMode === 'pomodoro_short' && current.previousStudyMode !== 'stopwatch') returnToStudy()
+    if (current.mode === 'questions' && nextMode === presetMode && current.previousStudyMode !== 'stopwatch') returnToStudy()
     else setMode(nextMode)
     if (nextMode === 'questions') { setSelectionSource('free'); setSelectedTaskId(null); setSelResource('') }
+  }
+  const choosePreset = async (id: string) => {
+    const current = useTimerStore.getState()
+    if (current.isRunning || current.startedAt || current.recovery || current.isFinishing || current.phase === 'break' || current.ownerId !== userId) return
+    if (await pomodoro.save({ ...pomodoro.preferences, selectedId: id })) {
+      const latest = useTimerStore.getState()
+      if (latest.ownerId === userId && !latest.isRunning && !latest.startedAt && !latest.recovery && latest.phase === 'focus') setMode(pomodoroMode(id))
+    }
   }
   const changeSource = (source: SelectionSource) => {
     if (isTimerActive || isFinishing || source === selectionSource) return
@@ -487,14 +491,14 @@ export default function Study({ mockExam = false }: { mockExam?: boolean }) {
           onSelectTask={id => { const item = todayPlan.find(task => task.id === id); if (item) { loadPlanItem(item); if (mockExam) navigate('/study') } }} onSelectQuestion={id => { selectQuestion(id); if (mockExam) navigate('/study') }} />
         <section className="study-focus-panel flex min-w-0 flex-col" aria-label={mockExam ? 'Deneme oturumu' : mode === 'questions' ? 'Soru çözümü' : 'Odak oturumu'}>
           {mockExam ? <TimedMockExam userId={userId} exams={exams} subjects={subjects} /> : <>
-          {!isTimerActive && <SessionSetup mode={mode} source={selectionSource} examId={selExam} subjectId={selSubject} resourceId={selResource} exams={exams} subjects={subjects} playlists={playlistResources} settings={settings} blocks={pomodoroCount}
+          {!isTimerActive && <SessionSetup mode={mode} source={selectionSource} examId={selExam} subjectId={selSubject} resourceId={selResource} exams={exams} subjects={subjects} playlists={playlistResources} settings={settings} blocks={pomodoroCount} presets={pomodoroChoices(settings, pomodoro.preferences)} selectedPresetId={selectedPreset.id} presetBusy={pomodoro.loading || pomodoro.saving || pomodoro.readOnly} presetError={pomodoro.error} onPreset={id => void choosePreset(id)}
             onSource={changeSource} onTimedMockExam={() => navigate('/timed-mock-exam')} onMode={changeMode}
             onExam={id => { setSelExam(id); setSelSubject(''); setSelResource(''); setSelectedTaskId(null) }}
             onSubject={id => { setSelSubject(id); setSelResource(''); setSelectedTaskId(null) }}
             onResource={setSelResource} onBlocks={setPomodoroCount} onSetting={(key, value) => setSettings(current => ({ ...current, [key]: value }))} />}
           <FocusTimer subject={selectedSubject?.name || ''} playlist={activePlaylistURL} seconds={secondsLeft} countUp={isCountUp(mode)} isBreak={isBreak} active={isTimerActive} running={isRunning} detail={timerDetail} videoCount={selectedVideoCount} progress={progress}>
             <TimerControls running={isRunning} started={!!startedAt} isBreak={isBreak} saving={isFinishing}
-              disabled={!!mockActive || !selSubject || !userId || ownerId !== userId || !!recovery || isFinishing || (mode === 'questions' && !!questionError)}
+              disabled={(!isTimerActive && (pomodoro.loading || pomodoro.saving)) || !!mockActive || !selSubject || !userId || ownerId !== userId || !!recovery || isFinishing || (mode === 'questions' && !!questionError)}
               onToggle={toggleTimer} onFinish={() => void endEarly()} onReset={() => void handleReset()} onSkipBreak={skipBreak} />
             {!selSubject && !isTimerActive && <p className="mt-2 text-xs text-[var(--study-muted)]">{selectionSource === 'plan' ? 'Planından bir görev seç.' : 'Başlamak için ders seç.'}</p>}
           </FocusTimer>

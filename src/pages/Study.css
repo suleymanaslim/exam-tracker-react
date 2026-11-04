@@ -227,3 +227,8 @@
   .study-reset-actions { flex-wrap: wrap; }
 }
 @media (prefers-reduced-motion: reduce) { .study-page *, .study-save-dialog * { transition: none !important; } }
+
+.study-focus-length label{font-size:11px;color:var(--study-muted)}
+.study-focus-length select{display:block;width:100%;min-width:0;max-width:100%;min-height:40px;margin-top:3px;border:1px solid var(--study-line);border-radius:8px;background:var(--study-surface);color:var(--study-ink);padding:6px 9px;font-size:13px;text-overflow:ellipsis}
+.study-focus-length button:disabled{opacity:.45;cursor:wait}
+@media(max-width:600px){.study-focus-length>label{flex-basis:100%}}

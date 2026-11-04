@@ -4,7 +4,7 @@ Sınav hazırlığını tek çalışma alanında yönetmek için geliştirilen w
 
 ## Özellikler
 
-- **Çalışma alanı:** Pomodoro, kronometre, kesintisiz odak ve soru çözümü oturumları; sekme yenilendiğinde oturum kurtarma.
+- **Çalışma alanı:** Pomodoro, kronometre, kesintisiz odak ve soru çözümü oturumları; sekme yenilendiğinde oturum kurtarma. Ayarlar → Pomodoro’dan ad, odak (1–180 dk) ve mola (0–60 dk) ile en fazla 20 hazır sayaç eklenebilir, düzenlenebilir ve silinebilir. Çalışma ekranından seçilen sayaç değiştirene kadar hesapta korunur; dashboard da bu seçimi kullanır. Aktif veya duraklatılmış oturumun süresi etkilenmez. Hazır sayaç tercihleri yalnızca ilgili kullanıcının hesap metaverisinde tutulur; ek SQL gerekmez.
 - **Deneme çözümü:** 80/180 dakika ve özel süre seçenekleri, kronometre, otomatik numaralı adlar, sekme kapandıktan sonra süreyi geri yükleme ve sonuç girişine geçiş.
 - **Planlama:** Haftalık çalışma planı, günlük ve haftalık soru hedefleri, video ders takvimi ve aylık konu hedefleri.
 - **Gelişim takibi:** Süreli ve süresiz soru çözümlerini birlikte gösteren çalışma geçmişi, ders dağılımı, deneme sonuçları, net değişimleri ve soru istatistikleri.
@@ -100,3 +100,5 @@ Hedef eklerken önceki plan ve çözüm notları ders bazında önerilir; yazdı
 Video planında tek kartı fareyle tutup başka bir günün üzerine bırakarak taşıyabilirsiniz. Dokunmatik cihazda kartın tutma simgesini kullanın; telefon görünümünde üstteki gün düğmelerine bırakabilirsiniz. Tutma simgesi odaktayken sol/sağ oklar da kartı komşu güne taşır. İzleme ilerlemesi korunur; pazartesiye sabit tamamlanmış kayıtlar taşınmaz. Bu işlem için ek SQL güncellemesi gerekmez.
 
 Soru planında günlük hedefler karttan sürüklenerek ya da tutamaç odaktayken sol/sağ oklarla başka güne taşınabilir. Karttaki “Kopyala” simgesinden sonra gün düğmesine, başlığına veya boş alanına tıklamak o güne yeni hedef ekler; kaynak hedef ve geçmişi korunur, çözüm sayıları kopyalanmaz. Mevcut aynı ders/konu hedefi değiştirilmez. Yeni `transfer_question_target` işlevi için güncel `supabase/migrations/question_plans.sql` dosyasının tamamı Supabase SQL Editor’de uygulanmalıdır.
+
+Hazır sayaçların gerçek tarayıcı kontrolü (üretim derlemesi, test Supabase URL/anahtarı): `npm run test:pomodoro-presets`. Bu test yalnızca yerel sahte hesapla ekleme/düzenleme/silme, hata sonrası yeniden deneme, yeniden girişte seçimin korunması, hesap ayrımı, oturum sürelerinin korunması ve mobil/tablet görünümünü denetler.
