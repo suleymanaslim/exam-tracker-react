@@ -80,6 +80,9 @@ function questionMonday(today: string) {
 export function isPreviousQuestionWeek(date: string, today: string) {
   return date < questionMonday(today)
 }
+export function isQuestionBacklog(plan: Pick<QuestionPlan, 'date' | 'period'>, today: string) {
+  return plan.period === 'week' ? isPreviousQuestionWeek(plan.date, today) : plan.date < today
+}
 export function openQuestionPlans(plans: QuestionPlan[], today: string) {
   const monday = questionMonday(today)
   return plans.filter(plan => !plan.archived_at && plan.target_questions != null && plan.target_questions > 0 && (plan.period === 'week'

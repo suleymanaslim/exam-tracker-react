@@ -16,7 +16,7 @@ import { unlockTimerAlarm, stopTimerAlarm } from '../lib/timerAudio'
 import { findWeeklyPlans } from '../lib/weeklyPlanDates'
 import { localDayKey } from '../lib/statsPeriod'
 import { fetchQuestionPlans, questionPlanError } from '../lib/questionPlanData'
-import { openQuestionPlans, isPreviousQuestionWeek } from '../lib/questionPlan'
+import { openQuestionPlans, isQuestionBacklog } from '../lib/questionPlan'
 import type { QuestionPlan as QuestionTask } from '../lib/questionPlan'
 import { questionCompletionOptions, readQuestionAnswers, lockQuestionInputs } from '../lib/questionDialogs'
 import { timerSaveError, timerSaveWasRejected } from '../lib/timerSaveError'
@@ -38,6 +38,7 @@ export default function Study({ mockExam = false }: { mockExam?: boolean }) {
   const { impersonatedUserId } = useAdminStore()
   const pomodoro = usePomodoroPreferences()
   // ── UI-only state ──────────────────────────────────────────────────
+  const [todayKey, setTodayKey] = useState(() => localDayKey(new Date()))
   const [userId, setUserId] = useState<string | null>(null)
   const [exams, setExams] = useState<Exam[]>([])
   const [subjects, setSubjects] = useState<Subject[]>([])
@@ -91,6 +92,15 @@ export default function Study({ mockExam = false }: { mockExam?: boolean }) {
     setBreakSeconds,
     resetTimer,
   } = useTimerStore()
+
+  // Reclassify overdue goals when a long-lived tab crosses into a new day.
+  useEffect(() => {
+    const refreshDay = () => setTodayKey(localDayKey(new Date()))
+    const interval = window.setInterval(refreshDay, 60000)
+    window.addEventListener('focus', refreshDay)
+    document.addEventListener('visibilitychange', refreshDay)
+    return () => { window.clearInterval(interval); window.removeEventListener('focus', refreshDay); document.removeEventListener('visibilitychange', refreshDay) }
+  }, [])
 
   // ── Data loading ───────────────────────────────────────────────────
   const loadTodaySessions = async (uid: string) => {
@@ -154,13 +164,13 @@ export default function Study({ mockExam = false }: { mockExam?: boolean }) {
         loadTodaySessions(targetUid)
       }
     })
-  }, [impersonatedUserId])
+  }, [impersonatedUserId, todayKey])
 
   useEffect(() => {
     const refresh = () => { if (userId) void loadTodaySessions(userId) }
     window.addEventListener('study-session-saved', refresh)
     return () => window.removeEventListener('study-session-saved', refresh)
-  }, [userId])
+  }, [userId, todayKey])
 
   useEffect(() => {
     if (!userId) return
@@ -179,7 +189,7 @@ export default function Study({ mockExam = false }: { mockExam?: boolean }) {
     window.addEventListener('question-data-changed', refresh)
     return () => { cancelled = true; window.removeEventListener('study-session-saved', refresh)
       window.removeEventListener('question-data-changed', refresh) }
-  }, [userId])
+  }, [userId, todayKey])
 
   const selectedPreset = selectedPomodoro(settings, pomodoro.preferences)
   const presetMode = pomodoroMode(selectedPreset.id)
@@ -397,7 +407,6 @@ export default function Study({ mockExam = false }: { mockExam?: boolean }) {
   // ── Derived values ─────────────────────────────────────────────────
   const playlistResources = resources.filter(resource => resource.subject_id === selSubject && resource.resource_type === 'video_ders' && playlistURL(resource.url))
 
-  const [todayKey] = useState(() => localDayKey(new Date()))
   const progress = totalSeconds > 0 ? ((totalSeconds - secondsLeft) / totalSeconds) * 100 : 0
 
   const isTimerActive = isRunning || !!startedAt || phase === 'break' || !!recovery
@@ -467,7 +476,7 @@ export default function Study({ mockExam = false }: { mockExam?: boolean }) {
       disabled: !item.subject_id || !subjectsById.has(item.subject_id) || ownerId !== userId,
     }
   }), [todayPlan, todayTotals, subjectsById, ownerId, userId])
-  const questionRows = useMemo<TaskRow[]>(() => questionPlans.map(task => ({ id: task.id, name: task.subjects?.name || 'Ders kaldırıldı', detail: `${task.note ? `${task.note} · ` : ''}${task.solved_questions} / ${task.target_questions} soru${task.period === 'week' ? ' · Haftalık' : task.date < todayKey ? ' · Bekleyen' : ''}${isPreviousQuestionWeek(task.date, todayKey) ? ` · ${new Date(`${task.date}T12:00:00`).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' })}` : ''}`, todayMinutes: Math.round(todayTotals.subjects.get(task.subject_id) || 0), kind: 'questions', previousWeek: isPreviousQuestionWeek(task.date, todayKey), done: task.target_questions != null && task.solved_questions >= task.target_questions, disabled: !task.subject_id || !task.subjects?.exam_id || ownerId !== userId || !!questionError })), [questionPlans, todayKey, todayTotals, ownerId, userId, questionError])
+  const questionRows = useMemo<TaskRow[]>(() => questionPlans.map(task => ({ id: task.id, name: task.subjects?.name || 'Ders kaldırıldı', detail: `${task.note ? `${task.note} · ` : ''}${task.solved_questions} / ${task.target_questions} soru${task.period === 'week' ? ' · Haftalık' : task.date < todayKey ? ' · Bekleyen' : ''}${isQuestionBacklog(task, todayKey) ? ` · ${new Date(`${task.date}T12:00:00`).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' })}` : ''}`, todayMinutes: Math.round(todayTotals.subjects.get(task.subject_id) || 0), kind: 'questions', backlog: isQuestionBacklog(task, todayKey), done: task.target_questions != null && task.solved_questions >= task.target_questions, disabled: !task.subject_id || !task.subjects?.exam_id || ownerId !== userId || !!questionError })), [questionPlans, todayKey, todayTotals, ownerId, userId, questionError])
   const activeQuestion = questionPlans.find(task => task.id === (questionPlanId || selectedTaskId))
   const timerDetail = mode === 'questions'
     ? activeQuestion ? `${activeQuestion.note ? `${activeQuestion.note} · ` : ''}${activeQuestion.solved_questions} / ${activeQuestion.target_questions} soru` : 'Ek soru çözümü'
@@ -487,7 +496,7 @@ export default function Study({ mockExam = false }: { mockExam?: boolean }) {
       {recovery && <div className="study-recovery-banner flex flex-wrap items-center justify-between gap-2" role="status"><span>Önceki oturumun onay bekliyor.</span><button type="button" className="study-utility" onClick={() => useTimerStore.setState({ recovery: { ...recovery } })}>Oturumu değerlendir</button></div>}
 
       <div className={`study-workspace ${(mockExam ? !!mockActive : isTimerActive) ? 'is-focus' : ''}`}>
-        <TaskSidebar tasks={taskRows} questions={questionRows} selectedId={questionPlanId || selectedTaskId} todayDuration={formatDuration(savedTodayMinutes)} busy={mockExam ? !!mockActive : isTimerActive} error={questionError}
+        <TaskSidebar key={`${userId}:${todayKey}`} tasks={taskRows} questions={questionRows} selectedId={questionPlanId || selectedTaskId} todayDuration={formatDuration(savedTodayMinutes)} busy={mockExam ? !!mockActive : isTimerActive} error={questionError}
           onSelectTask={id => { const item = todayPlan.find(task => task.id === id); if (item) { loadPlanItem(item); if (mockExam) navigate('/study') } }} onSelectQuestion={id => { selectQuestion(id); if (mockExam) navigate('/study') }} />
         <section className="study-focus-panel flex min-w-0 flex-col" aria-label={mockExam ? 'Deneme oturumu' : mode === 'questions' ? 'Soru çözümü' : 'Odak oturumu'}>
           {mockExam ? <TimedMockExam userId={userId} exams={exams} subjects={subjects} /> : <>

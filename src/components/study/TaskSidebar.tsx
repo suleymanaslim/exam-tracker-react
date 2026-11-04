@@ -29,8 +29,8 @@ function TaskButton({ task, selected, onClick }: { task: TaskRow; selected: bool
 
 export default function TaskSidebar({ tasks, questions, selectedId, todayDuration, busy, error, onSelectTask, onSelectQuestion }: Props) {
   const videos = tasks.filter(task => task.kind === 'video')
-  const currentQuestions = questions.filter(task => !task.previousWeek)
-  const previousQuestions = questions.filter(task => task.previousWeek)
+  const currentQuestions = questions.filter(task => !task.backlog)
+  const previousQuestions = questions.filter(task => task.backlog)
   const weekly = tasks.filter(task => task.kind === 'study')
   return <aside className="study-task-sidebar" aria-label="Bugünün planı" aria-hidden={busy} inert={busy}>
     <div className="study-sidebar-inner flex h-full min-h-0 flex-col">

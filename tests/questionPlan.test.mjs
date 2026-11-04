@@ -120,3 +120,25 @@ test('previous daily and weekly leftovers are separated at local Monday without 
   assert.equal(isPreviousQuestionWeek('2026-12-28', '2027-01-01'), false)
   assert.deepEqual(plans, before)
 })
+
+
+test('Study backlog includes unfinished earlier days in this week while current weekly goals stay visible', async () => {
+  const { isQuestionBacklog } = await import('../src/lib/questionPlan.ts')
+  const plans = [
+    { id: 'yesterday', date: '2026-10-21', target_questions: 30, solved_questions: 0 },
+    { id: 'monday-partial', date: '2026-10-19', target_questions: 30, solved_questions: 12 },
+    { id: 'old-week', period: 'week', date: '2026-10-12', target_questions: 50, solved_questions: 0 },
+    { id: 'current-week', period: 'week', date: '2026-10-19', target_questions: 50, solved_questions: 0 },
+    { id: 'today', date: '2026-10-22', target_questions: 30, solved_questions: 0 },
+    { id: 'done-yesterday', date: '2026-10-21', target_questions: 30, solved_questions: 30 },
+    { id: 'tomorrow', date: '2026-10-23', target_questions: 30, solved_questions: 0 },
+  ]
+  const before = structuredClone(plans)
+  const open = openQuestionPlans(plans, '2026-10-22')
+  assert.deepEqual(open.filter(plan => isQuestionBacklog(plan, '2026-10-22')).map(plan => plan.id), ['yesterday', 'monday-partial', 'old-week'])
+  assert.deepEqual(open.filter(plan => !isQuestionBacklog(plan, '2026-10-22')).map(plan => plan.id), ['current-week', 'today'])
+  assert.equal(isQuestionBacklog(plans[4], '2026-10-23'), true, 'today becomes backlog after local midnight')
+  assert.equal(isQuestionBacklog(plans[3], '2026-10-25'), false)
+  assert.equal(isQuestionBacklog(plans[3], '2026-10-26'), true, 'weekly goal becomes backlog on Monday')
+  assert.deepEqual(plans, before)
+})
