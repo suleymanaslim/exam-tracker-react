@@ -23,14 +23,16 @@ const today = '2026-11-24'
 const shots = process.env.ADHD_SCREENSHOTS
 let enabled = true
 let tasks = [
-  { id: 't1', user_id: uid, task_date: today, subject_id: subjects[0].id, note: '20 soru', sort_order: 0, studied_seconds: 0, completed_at: null, topic_kind: 'personal', topic_id: 'k1', topic_title: 'Osmanlı Kuruluş', topic_completed_at: null, subjects: { name: 'Tarih' } },
+  { id: 't1', user_id: uid, task_date: today, subject_id: subjects[0].id, note: '20 soru', sort_order: 0, studied_seconds: 0, completed_at: null, topic_kind: 'shared', topic_id: 'k1', topic_title: 'Osmanlı Kuruluş', topic_completed_at: null, subjects: { name: 'Tarih' } },
   { id: 't2', user_id: uid, task_date: today, subject_id: subjects[1].id, note: null, sort_order: 1, studied_seconds: 0, completed_at: null, topic_kind: null, topic_id: null, topic_title: null, topic_completed_at: null, subjects: { name: 'Sözel Yetenek' } },
 ]
-// Kişinin kendi konu listesi (kişi bu listeyi DEHB ekranında hiç görmez).
+// Ortak AGS konu listesi (kişi bu listeyi DEHB ekranında hiç görmez). Kişisel konular kullanılmaz.
+const sharedSubjects = [{ id: 'ss1', name: 'Tarih', sort_order: 0 }, { id: 'ss2', name: 'Sözel Yetenek', sort_order: 1 }]
 const topics = [
-  ...['Osmanlı Kuruluş', 'Osmanlı Yükselme', 'Duraklama', 'Gerileme', 'Dağılma'].map((title, i) => ({ id: `k${i + 1}`, user_id: uid, subject_id: subjects[0].id, title, is_completed: false, sort_order: i })),
-  ...['Paragraf', 'Sözcükte Anlam'].map((title, i) => ({ id: `s${i + 1}`, user_id: uid, subject_id: subjects[1].id, title, is_completed: false, sort_order: i })),
+  ...['Osmanlı Kuruluş', 'Osmanlı Yükselme', 'Duraklama', 'Gerileme', 'Dağılma'].map((title, i) => ({ id: `k${i + 1}`, subject_id: 'ss1', title, sort_order: i, archived_at: null, is_completed: false })),
+  ...['Paragraf', 'Sözcükte Anlam'].map((title, i) => ({ id: `s${i + 1}`, subject_id: 'ss2', title, sort_order: i, archived_at: null, is_completed: false })),
 ]
+const personalTopics = [{ id: 'p1', user_id: uid, subject_id: subjects[0].id, title: 'KİŞİSEL KONU', is_completed: false, sort_order: 0 }]
 const topicCalls = []
 const rpcCalls = [], inserts = [], errors = []
 let planSets = []
@@ -92,8 +94,11 @@ try {
         for (const other of tasks.filter(t => t.topic_id === task.topic_id)) other.topic_completed_at = body.p_done ? '2026-11-24T10:05:00Z' : null
         topics.find(topic => topic.id === task.topic_id).is_completed = body.p_done
         data = task
-      } else if (table === 'topics') data = topics.filter(topic => url.searchParams.get('user_id') === `eq.${topic.user_id}`)
-      else if (table === 'ags_topic_preferences') data = null
+      } else if (table === 'topics') data = personalTopics
+      else if (table === 'ags_topic_preferences') data = { source: 'personal' }
+      else if (table === 'ags_shared_subjects') data = sharedSubjects
+      else if (table === 'ags_shared_topics') data = topics.map(({ is_completed: _done, ...topic }) => topic)
+      else if (table === 'ags_topic_progress') data = topics.filter(topic => topic.is_completed).map(topic => ({ user_id: uid, topic_id: topic.id, is_completed: true }))
       else if (table === 'subjects') data = url.searchParams.get('user_id') === `eq.${adminId}` ? [{ id: 'a1', name: 'Tarih' }, { id: 'a2', name: 'Coğrafya' }] : subjects
       else if (table === 'dashboard_community_preferences') data = []
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(data) })
@@ -113,21 +118,26 @@ try {
   if (shots) await page.screenshot({ path: `${shots}/adhd-today.png`, fullPage: true })
 
   await page.getByRole('button', { name: 'Başla', exact: true }).click()
-  await page.getByRole('heading', { name: 'Tarih' }).waitFor()
+  await page.getByRole('heading', { name: 'Osmanlı Kuruluş', level: 1 }).waitFor()
+  assert.ok(await page.locator('.adhd-focus-topic-big').evaluate(el => parseFloat(getComputedStyle(el).fontSize)) >= 38, 'topic title is shown large')
   await page.clock.fastForward(30_000)
   await page.getByRole('button', { name: 'Bitir' }).click()
   await page.getByText('Henüz 1 dakika olmadı.').waitFor()
   assert.equal(rpcCalls.length, 0, 'under one minute nothing is saved without asking')
   await page.getByRole('button', { name: 'Devam et' }).click()
   await page.clock.fastForward(40_000)
-  await page.getByText('Bu ders yapıldı sayılacak').waitFor()
+  // Süre gösterilmez; yalnızca bitirmeyi hatırlatır.
+  await page.getByText('basmayı unutma', { exact: false }).waitFor()
+  assert.equal(await page.getByText(/\d\d:\d\d/).count(), 0, 'no running clock is shown')
+  assert.equal(await page.getByText('istediğin kadar devam et', { exact: false }).count(), 0)
   if (shots) await page.screenshot({ path: `${shots}/adhd-focus.png` })
   // Yenileme kronometreyi sıfırlamaz.
   await page.reload()
-  await page.getByRole('heading', { name: 'Tarih' }).waitFor()
+  await page.getByRole('heading', { name: 'Osmanlı Kuruluş', level: 1 }).waitFor()
   await page.getByRole('button', { name: 'Bitir' }).click()
   await page.getByText('1 / 2 ders yapıldı').waitFor()
   await page.getByText('Harika!').waitFor()
+  await page.getByText('1 dakika çalıştın.').waitFor()
   // Konu sorusu: kişi yalnızca bugünün konusunu görür ve bitirdiğini işaretler.
   const ask = page.getByRole('region', { name: 'Osmanlı Kuruluş' })
   await ask.getByText('Bu konuyu bitirdin mi?').waitFor()
@@ -163,13 +173,14 @@ try {
   assert.equal(await plan.getByRole('combobox', { name: 'Kişi' }).inputValue(), uid)
   await plan.getByRole('tab', { name: /^Sal/ }).getByText('2 ders').waitFor()
   const topicSelect = plan.getByRole('combobox', { name: 'Konu' })
-  await plan.waitForFunction(() => document.querySelector('select[aria-label="Konu"]')?.value === 'personal:k2')
+  await plan.waitForFunction(() => document.querySelector('select[aria-label="Konu"]')?.value === 'shared:k2')
   await plan.getByRole('textbox', { name: /Kısa not/ }).fill('Video + 10 soru')
   inserts.length = 0
   await plan.getByRole('button', { name: 'Ekle', exact: true }).click()
   await plan.getByRole('tabpanel').getByText('Konu: Osmanlı Yükselme').waitFor()
   await plan.locator('.plan-form select').first().selectOption(subjects[1].id)
-  assert.equal(await topicSelect.inputValue(), 'personal:s1')
+  assert.equal(await topicSelect.inputValue(), 'shared:s1')
+  assert.equal(await topicSelect.getByText('KİŞİSEL KONU').count(), 0, 'personal topics are never offered')
   await plan.getByRole('button', { name: 'Ekle', exact: true }).click()
   await plan.getByRole('tabpanel').getByText('Konu: Paragraf').waitFor()
   assert.deepEqual(inserts.map(row => [row.task_date, row.subject_id, row.topic_id, row.topic_title, row.note]), [
@@ -211,6 +222,11 @@ try {
   await plan.getByRole('button', { name: 'Gerileme konusunu bitti işaretle' }).click()
   await plan.getByText('“Gerileme” bitti olarak işaretlendi.').waitFor()
   assert.equal(topics[3].is_completed, true)
+  // Konu ilerlemesi: tamamlanan ortak konular tik ile görünür.
+  const tarihList = plan.getByRole('list', { name: 'Tarih konuları' })
+  assert.equal(await tarihList.getByLabel('Tamamlandı').count(), 2)
+  await plan.getByText('2 / 7 konu bitti').waitFor()
+  if (shots) { await plan.getByRole('heading', { name: 'Konu ilerlemesi' }).scrollIntoViewIfNeeded(); await plan.screenshot({ path: `${shots}/adhd-topic-progress.png` }) }
   if (shots) { await plan.getByRole('button', { name: 'Önceki hafta' }).click(); await plan.getByRole('tab', { name: /^Sal/ }).click(); await plan.waitForTimeout(300); await plan.screenshot({ path: `${shots}/adhd-week-plan.png`, fullPage: true }) }
 
   // "Hesaba Gir": admin kişinin DEHB ekranını görür, istersen tam görünüme geçer.

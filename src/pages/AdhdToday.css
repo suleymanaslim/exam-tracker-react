@@ -118,3 +118,16 @@
 .adhd-btn-done { background: var(--adhd-done); color: #fff; }
 .adhd-topic-error { margin: 0; color: var(--adhd-stop); font-size: 16px; }
 @media (prefers-color-scheme: dark) { .adhd .adhd-btn-done { color: #10161a; } }
+
+/* Odak ekranı: süre yok, sakin bir "çalışıyor" göstergesi ve hatırlatma */
+.adhd-focus-running { display: grid; place-items: center; width: 132px; height: 132px; margin: 22px auto 10px; border-radius: 50%; background: var(--adhd-accent-soft); }
+.adhd-focus-running span { width: 56px; height: 56px; border-radius: 50%; background: var(--adhd-accent); animation: adhd-breathe 4s ease-in-out infinite; }
+@keyframes adhd-breathe { 0%, 100% { transform: scale(.75); opacity: .75; } 50% { transform: scale(1); opacity: 1; } }
+.adhd-focus-reminder { color: var(--adhd-text); background: var(--adhd-card); border: 1px solid var(--adhd-line); }
+.adhd-focus-reminder svg { color: var(--adhd-accent); flex-shrink: 0; }
+.adhd-celebrate-time { display: block; font-weight: 600; }
+
+/* Başlatılınca konu adı kocaman */
+.adhd-focus-subject-small { margin: 0; font-size: 20px; font-weight: 600; color: var(--adhd-accent-strong); overflow-wrap: anywhere; }
+.adhd-focus-topic-big { margin: 4px 0 0; font-size: clamp(42px, 12vw, 72px); font-weight: 600; line-height: 1.1; letter-spacing: -.01em; overflow-wrap: anywhere; hyphens: auto; }
+.adhd-next-topic { font-size: 22px; }

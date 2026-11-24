@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { BookOpen, Check, LogOut, Play, Square, RotateCw, Sparkles } from 'lucide-react'
+import { BellRing, BookOpen, Check, LogOut, Play, Square, RotateCw, Sparkles } from 'lucide-react'
 import { localDayKey } from '../lib/statsPeriod'
 import {
-  ADHD_CHANGED_EVENT, ADHD_DONE_SECONDS, adhdError, formatClock, loadRunningTimer, minutesLabel,
+  ADHD_CHANGED_EVENT, ADHD_DONE_SECONDS, adhdError, loadRunningTimer, minutesLabel,
   readAdhdTasks, recordAdhdStudy, setAdhdTopicDone, storeRunningTimer,
 } from '../lib/adhdMode'
 import type { AdhdTask, RunningAdhdTimer } from '../lib/adhdMode'
@@ -10,6 +10,13 @@ import './AdhdToday.css'
 
 const dateLabel = (date: Date) => date.toLocaleDateString('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' })
 const subjectName = (task?: AdhdTask | null) => task?.subjects?.name || 'Ders'
+/** Bitince gösterilen süre: "25 dakika", "1 saat 10 dakika" */
+const studyTime = (seconds: number) => {
+  const minutes = Math.max(1, Math.round(seconds / 60))
+  if (minutes < 60) return `${minutes} dakika`
+  const rest = minutes % 60
+  return `${Math.floor(minutes / 60)} saat${rest ? ` ${rest} dakika` : ''}`
+}
 
 type Finish = { timer: RunningAdhdTimer; endedAt: Date; seconds: number; saving: boolean; error: string }
 
@@ -19,9 +26,8 @@ export default function AdhdToday({ userId, onLogout }: { userId: string; onLogo
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [running, setRunning] = useState<RunningAdhdTimer | null>(() => loadRunningTimer(userId))
-  const [now, setNow] = useState(() => Date.now())
   const [finish, setFinish] = useState<Finish | null>(null)
-  const [celebrate, setCelebrate] = useState<AdhdTask | null>(null)
+  const [celebrate, setCelebrate] = useState<{ task: AdhdTask; seconds: number } | null>(null)
   // Ders bitince sorulur: "Bu konuyu bitirdin mi?" Kişi tüm konu listesini hiç görmez.
   const [askTopic, setAskTopic] = useState<AdhdTask | null>(null)
   const [topicSaving, setTopicSaving] = useState(false)
@@ -49,11 +55,6 @@ export default function AdhdToday({ userId, onLogout }: { userId: string; onLogo
     return () => { window.clearInterval(interval); window.removeEventListener('focus', refresh); window.removeEventListener(ADHD_CHANGED_EVENT, refresh) }
   }, [load, userId])
 
-  useEffect(() => {
-    if (!running) return
-    const tick = window.setInterval(() => setNow(Date.now()), 1000)
-    return () => window.clearInterval(tick)
-  }, [running])
 
   const runningTask = running ? tasks.find(task => task.id === running.taskId) ?? null : null
   // Kronometredeki ders admin tarafından silinmişse sessizce kapat.
@@ -63,12 +64,11 @@ export default function AdhdToday({ userId, onLogout }: { userId: string; onLogo
 
   const done = tasks.filter(task => task.completed_at).length
   const next = useMemo(() => tasks.find(task => !task.completed_at) ?? null, [tasks])
-  const elapsed = running ? Math.max(0, Math.floor((now - Date.parse(running.startedAt)) / 1000)) : 0
 
   const start = (task: AdhdTask) => {
     if (running) return
     const timer = { taskId: task.id, sessionId: crypto.randomUUID(), startedAt: new Date().toISOString() }
-    storeRunningTimer(userId, timer); setRunning(timer); setNow(Date.now()); setCelebrate(null)
+    storeRunningTimer(userId, timer); setRunning(timer); setCelebrate(null)
   }
 
   const save = async (state: Finish) => {
@@ -78,7 +78,7 @@ export default function AdhdToday({ userId, onLogout }: { userId: string; onLogo
       storeRunningTimer(userId, null); setRunning(null); setFinish(null)
       setTasks(previous => previous.map(task => task.id === saved.id ? { ...task, ...saved, subjects: task.subjects } : task))
       const merged = { ...saved, subjects: runningTask?.subjects ?? tasks.find(task => task.id === saved.id)?.subjects }
-      if (saved.completed_at) setCelebrate(merged)
+      if (saved.completed_at) setCelebrate({ task: merged, seconds: state.seconds })
       setTopicDone(''); setTopicError('')
       setAskTopic(saved.completed_at && saved.topic_id && !saved.topic_completed_at ? merged : null)
     } catch (error) { setFinish({ ...state, saving: false, error: adhdError(error) }) }
@@ -110,18 +110,21 @@ export default function AdhdToday({ userId, onLogout }: { userId: string; onLogo
 
   // ── Odak ekranı: yalnızca tek ders ve kronometre ───────────────────────
   if (running && runningTask) {
-    const passed = elapsed >= ADHD_DONE_SECONDS || Boolean(runningTask.completed_at)
     const short = finish && finish.seconds < ADHD_DONE_SECONDS && !runningTask.completed_at
     return (
       <div className="adhd adhd-focus" role="main">
         <div className="adhd-focus-inner">
-          <p className="adhd-focus-kicker">Şu an çalıştığın ders</p>
-          <h1 className="adhd-focus-subject">{subjectName(runningTask)}</h1>
-          {runningTask.topic_title && <p className="adhd-focus-topic"><BookOpen size={20} aria-hidden="true" /> {runningTask.topic_title}</p>}
+          <p className="adhd-focus-kicker">{runningTask.topic_title ? 'Şu an çalıştığın konu' : 'Şu an çalıştığın ders'}</p>
+          {runningTask.topic_title ? <>
+            {/* Konu açıldığında en büyük yazı konu adıdır; ders adı üstte küçük durur. */}
+            <p className="adhd-focus-subject-small">{subjectName(runningTask)}</p>
+            <h1 className="adhd-focus-topic-big">{runningTask.topic_title}</h1>
+          </> : <h1 className="adhd-focus-subject">{subjectName(runningTask)}</h1>}
           {runningTask.note && <p className="adhd-focus-note">{runningTask.note}</p>}
-          <div className="adhd-clock" aria-live="off" aria-label={`Geçen süre ${formatClock(elapsed)}`}>{formatClock(elapsed)}</div>
-          <p className={`adhd-focus-status ${passed ? 'is-done' : ''}`} aria-live="polite">
-            {passed ? <><Check size={20} aria-hidden="true" /> Bu ders yapıldı sayılacak. İstediğin kadar devam et.</> : 'Bir dakika çalışman yeterli. Başladın bile!'}
+          {/* Süre bilerek gösterilmez; yalnızca bitince söylenir. */}
+          <div className="adhd-focus-running" aria-hidden="true"><span /></div>
+          <p className="adhd-focus-status adhd-focus-reminder" aria-live="polite">
+            <BellRing size={20} aria-hidden="true" /><span>Çalışman bitince <strong>Bitir</strong>’e basmayı unutma!</span>
           </p>
 
           {short ? (
@@ -167,7 +170,7 @@ export default function AdhdToday({ userId, onLogout }: { userId: string; onLogo
             <p><strong>{done}</strong> / {tasks.length} ders yapıldı</p>
           </section>
 
-          {celebrate && <div className="adhd-celebrate" role="status"><Sparkles size={24} aria-hidden="true" /><p><strong>Harika!</strong> {subjectName(celebrate)} yapıldı.</p></div>}
+          {celebrate && <div className="adhd-celebrate" role="status"><Sparkles size={24} aria-hidden="true" /><p><strong>Harika!</strong> {subjectName(celebrate.task)} yapıldı. <span className="adhd-celebrate-time">{studyTime(celebrate.seconds)} çalıştın.</span></p></div>}
 
           {askTopic && (
             <section className="adhd-card adhd-topic-ask" aria-labelledby="adhd-topic-ask-title">

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import Swal from 'sweetalert2'
 import {
-  ArrowDown, ArrowUp, Check, ChevronLeft, ChevronRight, ClipboardCopy, ClipboardPaste, Copy, Eraser,
+  ArrowDown, ArrowUp, Check, CheckCircle2, ChevronLeft, ChevronRight, ClipboardCopy, ClipboardPaste, Copy, Eraser,
   Layers, ListChecks, Plus, Save, Trash2, UserRound,
 } from 'lucide-react'
 import { supabase, getCurrentUser } from '../lib/supabase'
@@ -115,7 +115,7 @@ export default function AdhdWeekPlan() {
       setSubjects(rows)
       const preferred = rows.filter(row => row.ags)
       setSubjectId((preferred.length ? preferred : rows)[0]?.id || '')
-      void readTopicCatalog(userId, rows).then(next => { if (active) setCatalog(next) }, () => { if (active) setCatalogProblem('Konu listesi yüklenemedi; dersler konusuz eklenecek.') })
+      void readTopicCatalog(userId, rows).then(next => { if (active) setCatalog(next) }, () => { if (active) setCatalogProblem('Ortak AGS konuları yüklenemedi; dersler konusuz eklenecek.') })
     })
     return () => { active = false }
   }, [userId])
@@ -273,6 +273,10 @@ export default function AdhdWeekPlan() {
   })
 
   if (!isAdmin) return null
+  // Ortak AGS konularında kişinin ilerlemesi (tamamlananlar tik ile).
+  const progress = [...catalog.entries()].map(([id, list]) => ({ id, name: subjects.find(subject => subject.id === id)?.name || 'Ders', topics: list }))
+  const totalTopics = progress.reduce((sum, row) => sum + row.topics.length, 0)
+  const doneTopics = progress.reduce((sum, row) => sum + row.topics.filter(topic => topic.completed).length, 0)
   const agsSubjects = subjects.filter(subject => subject.ags)
   const subjectOptions = agsSubjects.length ? agsSubjects : subjects
 
@@ -395,6 +399,40 @@ export default function AdhdWeekPlan() {
           </section>
         </div>
       </div>
+
+      {progress.length > 0 && (
+        <section className="plan-card adhd-topic-progress" aria-labelledby="adhd-progress-title">
+          <div className="plan-card-head">
+            <div><p className="plan-eyebrow">ORTAK AGS KONULARI</p><h2 id="adhd-progress-title">Konu ilerlemesi</h2></div>
+            <span className="plan-total"><CheckCircle2 size={15} />{doneTopics} / {totalTopics} konu bitti</span>
+          </div>
+          <div className="adhd-topic-progress-body">
+            {progress.map(row => {
+              const done = row.topics.filter(topic => topic.completed).length
+              return (
+                <details key={row.id} open className="adhd-topic-subject">
+                  <summary>
+                    <strong>{row.name}</strong><span>{done} / {row.topics.length}</span>
+                    <span className="adhd-topic-bar" aria-hidden="true"><span style={{ width: `${row.topics.length ? Math.round(done / row.topics.length * 100) : 0}%` }} /></span>
+                  </summary>
+                  {!row.topics.length ? <p className="adhd-plan-hint">Bu derste ortak konu yok.</p> : (
+                    <ul aria-label={`${row.name} konuları`}>
+                      {row.topics.map(topic => {
+                        const key = topicKey(topic.kind, topic.id)
+                        return <li key={key} className={topic.completed ? 'is-done' : ''}>
+                          <span className="adhd-topic-tick" aria-label={topic.completed ? 'Tamamlandı' : 'Tamamlanmadı'}>{topic.completed && <Check size={13} />}</span>
+                          <span className="adhd-topic-name">{topic.title}</span>
+                          {!topic.completed && taken.has(key) && <small>planlandı</small>}
+                        </li>
+                      })}
+                    </ul>
+                  )}
+                </details>
+              )
+            })}
+          </div>
+        </section>
+      )}
     </div>
   )
 }

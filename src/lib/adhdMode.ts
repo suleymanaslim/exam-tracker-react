@@ -1,7 +1,6 @@
 import { supabase } from './supabase'
-import { readAgsTopicSource } from './agsTopicSource'
-import { fetchSharedTopics, readTopicPages } from './sharedTopicsData'
-import { normalizeSubjectName, topicKey } from './adhdPlan'
+import { fetchSharedTopics } from './sharedTopicsData'
+import { normalizeSubjectName, subjectIndex, topicKey } from './adhdPlan'
 import type { CatalogTopic, TaskRow, TopicCatalog, TopicKind } from './adhdPlan'
 
 export interface AdhdTask {
@@ -30,6 +29,7 @@ const TASK_FIELDS = 'id,user_id,task_date,subject_id,note,sort_order,studied_sec
 export function adhdError(error: unknown) {
   const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
   if (code === '42703' || code === 'PGRST204') return 'Konular için Supabase’de adhd_topics.sql dosyasını çalıştırın.'
+  if (code === 'AGS_SHARED_SETUP') return 'Ortak AGS konuları bulunamadı. Supabase’de shared_ags_topics_monthly.sql dosyasını çalıştırın.'
   if (['42P01', '42883', 'PGRST202', 'PGRST205'].includes(code)) return 'DEHB modu için Supabase’de adhd_mode.sql ve adhd_topics.sql dosyalarını çalıştırın.'
   if (code === '42501') return 'Bu işlem için iznin yok.'
   return 'Bağlantı kurulamadı. Tekrar dener misin?'
@@ -185,30 +185,20 @@ export async function readTakenTopics(userId: string, fromDay: string, excludeId
 }
 
 /**
- * Kişinin ders kimliği → sıralı konu listesi. AGS dersleri, kişi ortak listeyi seçtiyse
- * ortak AGS konularından (ders adına göre eşleştirilir), diğer durumlarda kişisel konulardan gelir.
+ * Kişinin ders kimliği → sıralı konu listesi. DEHB modunda konular HER ZAMAN ortak AGS
+ * listesinden gelir (kişinin AGS tercihinden bağımsız); ortak dersler kişinin dersleriyle
+ * ada göre eşleştirilir. Tamamlanma durumu kişinin ortak konu ilerlemesinden okunur.
  */
 export async function readTopicCatalog(userId: string, subjects: { id: string; name: string; ags?: boolean }[]): Promise<TopicCatalog> {
-  const [source, personal] = await Promise.all([
-    readAgsTopicSource(supabase, userId).catch(() => null),
-    readTopicPages(supabase, 'topics', { field: 'user_id', id: userId }, 'sort_order'),
-  ])
+  const shared = await fetchSharedTopics(supabase, userId)
+  const done = new Set(shared.progress.filter(row => row.is_completed).map(row => row.topic_id))
+  const index = subjectIndex(subjects)
   const catalog: TopicCatalog = new Map()
-  for (const row of personal as { id: string; subject_id: string; title: string; is_completed: boolean }[]) {
-    const list = catalog.get(row.subject_id) || []
-    list.push({ kind: 'personal', id: row.id, title: row.title, completed: row.is_completed === true })
-    catalog.set(row.subject_id, list)
-  }
-  if (source === 'shared') {
-    const shared = await fetchSharedTopics(supabase, userId)
-    const done = new Set(shared.progress.filter(row => row.is_completed).map(row => row.topic_id))
-    const bySharedName = new Map(shared.subjects.map(subject => [normalizeSubjectName(subject.name), subject.id]))
-    for (const subject of subjects.filter(subject => subject.ags)) {
-      const sharedId = bySharedName.get(normalizeSubjectName(subject.name))
-      if (!sharedId) continue
-      catalog.set(subject.id, shared.topics.filter(topic => topic.subject_id === sharedId && !topic.archived_at)
-        .map((topic): CatalogTopic => ({ kind: 'shared', id: topic.id, title: topic.title, completed: done.has(topic.id) })))
-    }
+  for (const sharedSubject of shared.subjects) {
+    const subjectId = index.get(normalizeSubjectName(sharedSubject.name))
+    if (!subjectId || catalog.has(subjectId)) continue
+    catalog.set(subjectId, shared.topics.filter(topic => topic.subject_id === sharedSubject.id && !topic.archived_at)
+      .map((topic): CatalogTopic => ({ kind: 'shared', id: topic.id, title: topic.title, completed: done.has(topic.id) })))
   }
   return catalog
 }
