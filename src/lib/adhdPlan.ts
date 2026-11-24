@@ -1,9 +1,24 @@
 // DEHB haftalık planı için saf yardımcılar (veritabanına dokunmaz).
 // Ders kimlikleri kişiye özel olduğundan kopyalar ve setler ders ADIYLA taşınır.
 
-export interface TemplateItem { day: number; subject_name: string; note: string | null }
+/** topic_title: kopyalanan dersin konusu. Setlerde boş kalır; konu uygulanırken sıradakinden seçilir. */
+export interface TemplateItem { day: number; subject_name: string; note: string | null; topic_title?: string | null }
 export interface NamedSubject { id: string; name: string; ags?: boolean }
-export interface TaskRow { user_id: string; task_date: string; subject_id: string; note: string | null; sort_order: number }
+export type TopicKind = 'personal' | 'shared'
+export interface CatalogTopic { kind: TopicKind; id: string; title: string; completed: boolean }
+/** Kişinin ders kimliği → sıralı konu listesi */
+export type TopicCatalog = Map<string, CatalogTopic[]>
+export interface TaskRow {
+  user_id: string; task_date: string; subject_id: string; note: string | null; sort_order: number
+  topic_kind: TopicKind | null; topic_id: string | null; topic_title: string | null
+}
+
+export const topicKey = (kind: string, id: string) => `${kind}:${id}`
+
+/** Sıradaki konu: bitmemiş ve henüz (bugünden sonrası için) planlanmamış ilk konu. */
+export function nextTopic(topics: CatalogTopic[] | undefined, taken: Set<string>) {
+  return topics?.find(topic => !topic.completed && !taken.has(topicKey(topic.kind, topic.id))) ?? null
+}
 
 export const normalizeSubjectName = (name: string) => name.trim().replace(/\s+/g, ' ').toLocaleLowerCase('tr-TR')
 
@@ -27,11 +42,11 @@ export function weekDayKeys(monday: string) {
 }
 
 /** Mevcut görevleri ders adıyla şablona çevirir. */
-export function tasksToTemplate(tasks: { task_date: string; note: string | null; subjects?: { name: string } | null }[], dayKeys: string[]): TemplateItem[] {
+export function tasksToTemplate(tasks: { task_date: string; note: string | null; topic_title?: string | null; subjects?: { name: string } | null }[], dayKeys: string[], keepTopics = true): TemplateItem[] {
   return tasks.flatMap(task => {
     const day = dayKeys.indexOf(task.task_date) + 1
     const name = task.subjects?.name
-    return day > 0 && name ? [{ day, subject_name: name, note: task.note }] : []
+    return day > 0 && name ? [{ day, subject_name: name, note: task.note, ...(keepTopics && task.topic_title ? { topic_title: task.topic_title } : {}) }] : []
   })
 }
 
@@ -51,18 +66,33 @@ export function planItemsToTemplate(items: { day_of_week: number; subject_id: st
  * Şablonu kişinin görev satırlarına çevirir.
  * targetDay verilirse (gün yapıştırma) tüm maddeler o güne konur.
  * existing: tarih → o gündeki mevcut görev sayısı (yeni maddeler sona eklenir).
+ * Konular: şablonda konu adı varsa ve kişide bitmemiş aynı adlı konu varsa o kullanılır;
+ * yoksa dersin sıradaki konusu atanır. taken: zaten planlanmış konular (güncellenir).
  */
-export function templateToRows(items: TemplateItem[], options: { userId: string; dayKeys: string[]; subjects: Map<string, string>; existing?: Record<string, number>; targetDay?: number }) {
+export function templateToRows(items: TemplateItem[], options: {
+  userId: string; dayKeys: string[]; subjects: Map<string, string>; existing?: Record<string, number>; targetDay?: number
+  catalog?: TopicCatalog; taken?: Set<string>
+}) {
   const counts: Record<string, number> = { ...(options.existing || {}) }
+  const taken = options.taken ?? new Set<string>()
   const rows: TaskRow[] = []
   const missing = new Set<string>()
-  for (const item of items) {
+  // Konular takvim sırasıyla ilerlesin diye günlere göre sıralanır (aynı gün içinde sıra korunur).
+  const ordered = items.map((item, index) => ({ item, index })).sort((a, b) => (options.targetDay ?? a.item.day) - (options.targetDay ?? b.item.day) || a.index - b.index)
+  for (const { item } of ordered) {
     const day = options.targetDay ?? item.day
     const date = options.dayKeys[day - 1]
     const subjectId = options.subjects.get(normalizeSubjectName(item.subject_name))
     if (!date) continue
     if (!subjectId) { missing.add(item.subject_name); continue }
-    rows.push({ user_id: options.userId, task_date: date, subject_id: subjectId, note: item.note, sort_order: counts[date] ?? 0 })
+    const topics = options.catalog?.get(subjectId)
+    const wanted = item.topic_title ? normalizeSubjectName(item.topic_title) : ''
+    const topic = (wanted && topics?.find(candidate => !candidate.completed && normalizeSubjectName(candidate.title) === wanted)) || nextTopic(topics, taken)
+    if (topic) taken.add(topicKey(topic.kind, topic.id))
+    rows.push({
+      user_id: options.userId, task_date: date, subject_id: subjectId, note: item.note, sort_order: counts[date] ?? 0,
+      topic_kind: topic?.kind ?? null, topic_id: topic?.id ?? null, topic_title: topic?.title ?? null,
+    })
     counts[date] = (counts[date] ?? 0) + 1
   }
   return { rows, missing: [...missing] }

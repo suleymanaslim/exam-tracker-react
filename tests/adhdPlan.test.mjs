@@ -35,3 +35,34 @@ test('görevler ve kendi haftalık plan maddeleri şablona çevrilir', () => {
   assert.deepEqual(items, [{ day: 1, subject_name: 'Tarih', note: null }, { day: 2, subject_name: 'Sözel Yetenek', note: 'Video ders' }])
   assert.equal(skipped, 1)
 })
+
+test('konular sırayla ilerler: bitmiş ve planlanmış konular atlanır, setler konu tutmaz', async () => {
+  const { nextTopic, topicKey } = await import('../src/lib/adhdPlan.ts')
+  const topics = [
+    { kind: 'personal', id: 'k1', title: 'İlk Türk Devletleri', completed: true },
+    { kind: 'personal', id: 'k2', title: 'İslamiyet Öncesi', completed: false },
+    { kind: 'personal', id: 'k3', title: 'Osmanlı Kuruluş', completed: false },
+    { kind: 'personal', id: 'k4', title: 'Osmanlı Yükselme', completed: false },
+  ]
+  const catalog = new Map([['tarih', topics]])
+  const taken = new Set([topicKey('personal', 'k3')])
+  assert.equal(nextTopic(topics, taken).id, 'k2')
+  const set = tasksToTemplate([
+    { task_date: '2026-11-25', note: null, topic_title: 'Eski konu', subjects: { name: 'Tarih' } },
+    { task_date: '2026-11-23', note: null, topic_title: 'Eski konu', subjects: { name: 'Tarih' } },
+    { task_date: '2026-11-24', note: 'tekrar', subjects: { name: 'Tarih' } },
+  ], keys, false)
+  assert.ok(set.every(item => !('topic_title' in item)))
+  const { rows } = templateToRows(set, { userId: 'u', dayKeys: keys, subjects: subjectIndex([{ id: 'tarih', name: 'Tarih' }]), catalog, taken })
+  // Takvim sırasıyla: Pzt k2, Sal k4 (k3 zaten planlı), Çar konu kalmadı.
+  assert.deepEqual(rows.map(row => [row.task_date, row.topic_id, row.topic_title]), [
+    ['2026-11-23', 'k2', 'İslamiyet Öncesi'], ['2026-11-24', 'k4', 'Osmanlı Yükselme'], ['2026-11-25', null, null],
+  ])
+})
+
+test('kopyalanan konu, kişide bitmemiş aynı adlı konu varsa korunur', () => {
+  const catalog = new Map([['t', [{ kind: 'shared', id: 's1', title: 'A', completed: false }, { kind: 'shared', id: 's2', title: 'B', completed: false }]]])
+  const { rows } = templateToRows([{ day: 2, subject_name: 'Tarih', note: null, topic_title: 'b' }, { day: 3, subject_name: 'Tarih', note: null, topic_title: 'Yok' }],
+    { userId: 'u', dayKeys: keys, subjects: subjectIndex([{ id: 't', name: 'Tarih' }]), catalog })
+  assert.deepEqual(rows.map(row => [row.topic_kind, row.topic_id]), [['shared', 's2'], ['shared', 's1']])
+})

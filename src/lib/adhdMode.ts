@@ -1,4 +1,8 @@
 import { supabase } from './supabase'
+import { readAgsTopicSource } from './agsTopicSource'
+import { fetchSharedTopics, readTopicPages } from './sharedTopicsData'
+import { normalizeSubjectName, topicKey } from './adhdPlan'
+import type { CatalogTopic, TaskRow, TopicCatalog, TopicKind } from './adhdPlan'
 
 export interface AdhdTask {
   id: string
@@ -9,6 +13,10 @@ export interface AdhdTask {
   sort_order: number
   studied_seconds: number
   completed_at: string | null
+  topic_kind: TopicKind | null
+  topic_id: string | null
+  topic_title: string | null
+  topic_completed_at: string | null
   subjects?: { name: string } | null
 }
 
@@ -17,11 +25,12 @@ export interface RunningAdhdTimer { taskId: string; sessionId: string; startedAt
 export const ADHD_CHANGED_EVENT = 'adhd-mode-changed'
 /** Bir dersin "yapıldı" sayılması için gereken süre. */
 export const ADHD_DONE_SECONDS = 60
-const TASK_FIELDS = 'id,user_id,task_date,subject_id,note,sort_order,studied_seconds,completed_at,subjects(name)'
+const TASK_FIELDS = 'id,user_id,task_date,subject_id,note,sort_order,studied_seconds,completed_at,topic_kind,topic_id,topic_title,topic_completed_at,subjects(name)'
 
 export function adhdError(error: unknown) {
   const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
-  if (['42P01', '42883', 'PGRST202', 'PGRST205'].includes(code)) return 'DEHB modu için Supabase’de adhd_mode.sql dosyasını çalıştırın.'
+  if (code === '42703' || code === 'PGRST204') return 'Konular için Supabase’de adhd_topics.sql dosyasını çalıştırın.'
+  if (['42P01', '42883', 'PGRST202', 'PGRST205'].includes(code)) return 'DEHB modu için Supabase’de adhd_mode.sql ve adhd_topics.sql dosyalarını çalıştırın.'
   if (code === '42501') return 'Bu işlem için iznin yok.'
   return 'Bağlantı kurulamadı. Tekrar dener misin?'
 }
@@ -55,12 +64,6 @@ export async function readAdhdTasks(userId: string, day: string): Promise<AdhdTa
   return (data || []) as unknown as AdhdTask[]
 }
 
-export async function addAdhdTask(userId: string, day: string, subjectId: string, note: string, sortOrder: number) {
-  const { error } = await supabase.from('adhd_daily_tasks').insert({ user_id: userId, task_date: day, subject_id: subjectId, note: note.trim() || null, sort_order: sortOrder })
-  if (error) throw error
-  notifyAdhdChanged()
-}
-
 export async function deleteAdhdTask(id: string) {
   const { error } = await supabase.from('adhd_daily_tasks').delete().eq('id', id)
   if (error) throw error
@@ -76,17 +79,6 @@ export async function moveAdhdTask(tasks: AdhdTask[], index: number, direction: 
   const failed = results.find(result => result.error)
   if (failed?.error) throw failed.error
   notifyAdhdChanged()
-}
-
-export async function copyAdhdTasks(userId: string, fromDay: string, toDay: string) {
-  const [source, existing] = await Promise.all([readAdhdTasks(userId, fromDay), readAdhdTasks(userId, toDay)])
-  if (!source.length) return 0
-  const { error } = await supabase.from('adhd_daily_tasks').insert(source.map((task, index) => ({
-    user_id: userId, task_date: toDay, subject_id: task.subject_id, note: task.note, sort_order: existing.length + index,
-  })))
-  if (error) throw error
-  notifyAdhdChanged()
-  return source.length
 }
 
 export async function recordAdhdStudy(timer: RunningAdhdTimer, endedAt: Date) {
@@ -145,7 +137,7 @@ export async function readAdhdWeek(userId: string, monday: string, sunday: strin
   return (data || []) as unknown as AdhdTask[]
 }
 
-export async function insertAdhdTasks(rows: { user_id: string; task_date: string; subject_id: string; note: string | null; sort_order: number }[]) {
+export async function insertAdhdTasks(rows: TaskRow[]) {
   if (!rows.length) return
   const { error } = await supabase.from('adhd_daily_tasks').insert(rows)
   if (error) throw error
@@ -173,4 +165,50 @@ export async function saveAdhdSet(name: string, items: AdhdTemplateItem[]) {
 export async function deleteAdhdSet(id: string) {
   const { error } = await supabase.from('adhd_plan_sets').delete().eq('id', id)
   if (error) throw error
+}
+
+// ── Konular ────────────────────────────────────────────────────────────────
+export async function setAdhdTopicDone(taskId: string, done: boolean) {
+  const { data, error } = await supabase.rpc('set_adhd_task_topic_done', { p_task_id: taskId, p_done: done })
+  if (error) throw error
+  notifyAdhdChanged()
+  window.dispatchEvent(new Event('question-data-changed'))
+  return data as AdhdTask
+}
+
+/** Bugünden itibaren planlanmış (ve ileride tekrar önerilmemesi gereken) konular. */
+export async function readTakenTopics(userId: string, fromDay: string, excludeIds: string[] = []) {
+  const { data, error } = await supabase.from('adhd_daily_tasks').select('id,topic_kind,topic_id')
+    .eq('user_id', userId).gte('task_date', fromDay).not('topic_id', 'is', null)
+  if (error) throw error
+  return new Set((data || []).filter(row => !excludeIds.includes(row.id)).map(row => topicKey(row.topic_kind, row.topic_id)))
+}
+
+/**
+ * Kişinin ders kimliği → sıralı konu listesi. AGS dersleri, kişi ortak listeyi seçtiyse
+ * ortak AGS konularından (ders adına göre eşleştirilir), diğer durumlarda kişisel konulardan gelir.
+ */
+export async function readTopicCatalog(userId: string, subjects: { id: string; name: string; ags?: boolean }[]): Promise<TopicCatalog> {
+  const [source, personal] = await Promise.all([
+    readAgsTopicSource(supabase, userId).catch(() => null),
+    readTopicPages(supabase, 'topics', { field: 'user_id', id: userId }, 'sort_order'),
+  ])
+  const catalog: TopicCatalog = new Map()
+  for (const row of personal as { id: string; subject_id: string; title: string; is_completed: boolean }[]) {
+    const list = catalog.get(row.subject_id) || []
+    list.push({ kind: 'personal', id: row.id, title: row.title, completed: row.is_completed === true })
+    catalog.set(row.subject_id, list)
+  }
+  if (source === 'shared') {
+    const shared = await fetchSharedTopics(supabase, userId)
+    const done = new Set(shared.progress.filter(row => row.is_completed).map(row => row.topic_id))
+    const bySharedName = new Map(shared.subjects.map(subject => [normalizeSubjectName(subject.name), subject.id]))
+    for (const subject of subjects.filter(subject => subject.ags)) {
+      const sharedId = bySharedName.get(normalizeSubjectName(subject.name))
+      if (!sharedId) continue
+      catalog.set(subject.id, shared.topics.filter(topic => topic.subject_id === sharedId && !topic.archived_at)
+        .map((topic): CatalogTopic => ({ kind: 'shared', id: topic.id, title: topic.title, completed: done.has(topic.id) })))
+    }
+  }
+  return catalog
 }

@@ -105,3 +105,16 @@
 .adhd-admin-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 10px 16px; background: #eef2ff; border-bottom: 1px solid #c7d2fe; color: #312e81; font-family: 'Source Sans 3', Arial, sans-serif; font-size: 14px; }
 .adhd-admin-banner-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .adhd-admin-banner button { min-height: 36px; padding: 6px 12px; border-radius: 8px; border: 1px solid #c7d2fe; background: #fff; color: #4338ca; font-weight: 600; cursor: pointer; }
+
+/* Konu */
+.adhd-next-topic, .adhd-focus-topic { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 20px; font-weight: 600; color: var(--adhd-accent-strong); overflow-wrap: anywhere; }
+.adhd-focus-topic { justify-content: center; }
+.adhd-next-topic svg, .adhd-focus-topic svg { flex-shrink: 0; }
+.adhd-item-topic { color: var(--adhd-accent-strong) !important; font-weight: 600; }
+.adhd-item-topic.is-done { color: var(--adhd-done) !important; }
+.adhd-topic-ask { display: flex; flex-direction: column; gap: 10px; border: 2px solid var(--adhd-done); }
+.adhd-topic-ask-title { margin: 0; font-size: 24px; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
+.adhd-topic-ask-question { margin: 0; font-size: 19px; }
+.adhd-btn-done { background: var(--adhd-done); color: #fff; }
+.adhd-topic-error { margin: 0; color: var(--adhd-stop); font-size: 16px; }
+@media (prefers-color-scheme: dark) { .adhd .adhd-btn-done { color: #10161a; } }

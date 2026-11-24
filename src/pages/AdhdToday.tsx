@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, LogOut, Play, Square, RotateCw, Sparkles } from 'lucide-react'
+import { BookOpen, Check, LogOut, Play, Square, RotateCw, Sparkles } from 'lucide-react'
 import { localDayKey } from '../lib/statsPeriod'
 import {
   ADHD_CHANGED_EVENT, ADHD_DONE_SECONDS, adhdError, formatClock, loadRunningTimer, minutesLabel,
-  readAdhdTasks, recordAdhdStudy, storeRunningTimer,
+  readAdhdTasks, recordAdhdStudy, setAdhdTopicDone, storeRunningTimer,
 } from '../lib/adhdMode'
 import type { AdhdTask, RunningAdhdTimer } from '../lib/adhdMode'
 import './AdhdToday.css'
@@ -22,6 +22,11 @@ export default function AdhdToday({ userId, onLogout }: { userId: string; onLogo
   const [now, setNow] = useState(() => Date.now())
   const [finish, setFinish] = useState<Finish | null>(null)
   const [celebrate, setCelebrate] = useState<AdhdTask | null>(null)
+  // Ders bitince sorulur: "Bu konuyu bitirdin mi?" Kişi tüm konu listesini hiç görmez.
+  const [askTopic, setAskTopic] = useState<AdhdTask | null>(null)
+  const [topicSaving, setTopicSaving] = useState(false)
+  const [topicError, setTopicError] = useState('')
+  const [topicDone, setTopicDone] = useState('')
   const request = useRef(0)
 
   const load = useCallback(async () => {
@@ -72,7 +77,10 @@ export default function AdhdToday({ userId, onLogout }: { userId: string; onLogo
       const saved = await recordAdhdStudy(state.timer, state.endedAt)
       storeRunningTimer(userId, null); setRunning(null); setFinish(null)
       setTasks(previous => previous.map(task => task.id === saved.id ? { ...task, ...saved, subjects: task.subjects } : task))
-      if (saved.completed_at) setCelebrate({ ...saved, subjects: runningTask?.subjects ?? tasks.find(task => task.id === saved.id)?.subjects })
+      const merged = { ...saved, subjects: runningTask?.subjects ?? tasks.find(task => task.id === saved.id)?.subjects }
+      if (saved.completed_at) setCelebrate(merged)
+      setTopicDone(''); setTopicError('')
+      setAskTopic(saved.completed_at && saved.topic_id && !saved.topic_completed_at ? merged : null)
     } catch (error) { setFinish({ ...state, saving: false, error: adhdError(error) }) }
   }
 
@@ -86,6 +94,18 @@ export default function AdhdToday({ userId, onLogout }: { userId: string; onLogo
     void save(state)
   }
 
+  const answerTopic = async (finished: boolean) => {
+    if (!askTopic) return
+    if (!finished) { setAskTopic(null); return }
+    setTopicSaving(true); setTopicError('')
+    try {
+      const saved = await setAdhdTopicDone(askTopic.id, true)
+      setTasks(previous => previous.map(task => task.topic_kind === saved.topic_kind && task.topic_id === saved.topic_id ? { ...task, topic_completed_at: saved.topic_completed_at } : task))
+      setTopicDone(askTopic.topic_title || ''); setAskTopic(null)
+    } catch (error) { setTopicError(adhdError(error)) }
+    finally { setTopicSaving(false) }
+  }
+
   const discard = () => { storeRunningTimer(userId, null); setRunning(null); setFinish(null) }
 
   // ── Odak ekranı: yalnızca tek ders ve kronometre ───────────────────────
@@ -97,6 +117,7 @@ export default function AdhdToday({ userId, onLogout }: { userId: string; onLogo
         <div className="adhd-focus-inner">
           <p className="adhd-focus-kicker">Şu an çalıştığın ders</p>
           <h1 className="adhd-focus-subject">{subjectName(runningTask)}</h1>
+          {runningTask.topic_title && <p className="adhd-focus-topic"><BookOpen size={20} aria-hidden="true" /> {runningTask.topic_title}</p>}
           {runningTask.note && <p className="adhd-focus-note">{runningTask.note}</p>}
           <div className="adhd-clock" aria-live="off" aria-label={`Geçen süre ${formatClock(elapsed)}`}>{formatClock(elapsed)}</div>
           <p className={`adhd-focus-status ${passed ? 'is-done' : ''}`} aria-live="polite">
@@ -148,10 +169,25 @@ export default function AdhdToday({ userId, onLogout }: { userId: string; onLogo
 
           {celebrate && <div className="adhd-celebrate" role="status"><Sparkles size={24} aria-hidden="true" /><p><strong>Harika!</strong> {subjectName(celebrate)} yapıldı.</p></div>}
 
+          {askTopic && (
+            <section className="adhd-card adhd-topic-ask" aria-labelledby="adhd-topic-ask-title">
+              <p className="adhd-kicker">Konu</p>
+              <h2 id="adhd-topic-ask-title" className="adhd-topic-ask-title">{askTopic.topic_title}</h2>
+              <p className="adhd-topic-ask-question">Bu konuyu bitirdin mi?</p>
+              <div className="adhd-row">
+                <button type="button" className="adhd-btn adhd-btn-done" onClick={() => void answerTopic(true)} disabled={topicSaving} autoFocus><Check size={22} aria-hidden="true" /> {topicSaving ? 'Kaydediliyor…' : 'Evet, bitti'}</button>
+                <button type="button" className="adhd-btn adhd-btn-ghost" onClick={() => void answerTopic(false)} disabled={topicSaving}>Henüz bitmedi</button>
+              </div>
+              {topicError && <p className="adhd-topic-error" role="alert">{topicError}</p>}
+            </section>
+          )}
+          {topicDone && !askTopic && <div className="adhd-celebrate" role="status"><Check size={24} aria-hidden="true" /><p><strong>Konu bitti:</strong> {topicDone}</p></div>}
+
           {next ? (
             <section className="adhd-card adhd-next" aria-labelledby="adhd-next-title">
               <p className="adhd-kicker">Sıradaki</p>
               <h2 id="adhd-next-title" className="adhd-next-subject">{subjectName(next)}</h2>
+              {next.topic_title && <p className="adhd-next-topic"><BookOpen size={20} aria-hidden="true" /> {next.topic_title}</p>}
               {next.note && <p className="adhd-next-note">{next.note}</p>}
               {next.studied_seconds > 0 && <p className="adhd-muted">{minutesLabel(next.studied_seconds)}</p>}
               <button type="button" className="adhd-btn adhd-btn-primary adhd-btn-xl" onClick={() => start(next)}><Play size={26} aria-hidden="true" /> Başla</button>
@@ -168,8 +204,10 @@ export default function AdhdToday({ userId, onLogout }: { userId: string; onLogo
                   <span className="adhd-check" aria-hidden="true">{task.completed_at && <Check size={20} />}</span>
                   <span className="adhd-item-text">
                     <strong>{subjectName(task)}</strong>
+                    {task.topic_title && <small className={`adhd-item-topic ${task.topic_completed_at ? 'is-done' : ''}`}>{task.topic_title}{task.topic_completed_at ? ' · konu bitti ✓' : ''}</small>}
                     <small>{task.completed_at ? `Yapıldı · ${minutesLabel(task.studied_seconds)}` : task.note || (task.studied_seconds ? minutesLabel(task.studied_seconds) : 'Bekliyor')}</small>
                   </span>
+                  {task.completed_at && task.topic_id && !task.topic_completed_at && askTopic?.id !== task.id && <button type="button" className="adhd-btn adhd-btn-small" onClick={() => { setTopicDone(''); setTopicError(''); setAskTopic(task) }}>Konu bitti mi?</button>}
                   {!isNext && <button type="button" className="adhd-btn adhd-btn-small" onClick={() => start(task)} aria-label={`${subjectName(task)} için kronometreyi başlat`}><Play size={18} aria-hidden="true" />{task.completed_at ? 'Yine çalış' : 'Başla'}</button>}
                 </li>
               )
