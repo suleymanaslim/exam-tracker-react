@@ -307,7 +307,7 @@ export default function Admin() {
                     </div>
                     <div className="admin-user-actions">
                     <button type="button" disabled={!visibilityReady} onClick={event => openVisibilityDialog(p, event.currentTarget)} className="admin-password-button" aria-label={`${profileNameLabel(p.display_name, p.email)} için görünürlük ayarları`}><Eye size={15} /> Görünürlük</button>
-                    {p.role === 'user' && <button type="button" onClick={event => adhdDialog.current?.open(p, adhdSettings[p.id] === true, event.currentTarget)} className="admin-password-button" aria-label={`${profileNameLabel(p.display_name, p.email)} için DEHB modu ve günlük plan`}><ListChecks size={15} /> DEHB planı</button>}
+                    {p.role !== 'admin' && <button type="button" onClick={event => adhdDialog.current?.open(p, adhdSettings[p.id] === true, event.currentTarget)} className="admin-password-button" aria-label={`${profileNameLabel(p.display_name, p.email)} için DEHB modu ve günlük plan`}><ListChecks size={15} /> DEHB planı</button>}
                     {p.role === 'user' && <button onClick={event => openPasswordDialog(p, event.currentTarget)} className="admin-password-button" aria-label={`${p.display_name || p.email || 'Kullanıcı'} için şifre değiştir`}><KeyRound size={15} /> Şifre değiştir</button>}
                     {p.role !== 'admin' && !isImpersonating && (
                       <button onClick={() => handleImpersonate(p.id)} className="h-8 px-3 rounded-lg bg-[#f1f5f9] text-[#0f172a] text-[11px] font-bold hover:bg-[#e2e8f0] flex items-center gap-1.5 transition-all">
