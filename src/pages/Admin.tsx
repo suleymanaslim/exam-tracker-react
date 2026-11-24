@@ -3,13 +3,15 @@ import { supabase } from '../lib/supabase'
 import { useAdminStore } from '../lib/adminStore'
 import { createClient, FunctionsHttpError } from '@supabase/supabase-js'
 import Swal from 'sweetalert2'
-import { Users, UserPlus, LogIn, XCircle, ShieldCheck, KeyRound, Eye, X, CalendarDays } from 'lucide-react'
+import { Users, UserPlus, LogIn, XCircle, ShieldCheck, KeyRound, Eye, X, CalendarDays, ListChecks } from 'lucide-react'
 import './Admin.css'
 import { profileNameLabel } from '../lib/profileName'
 import { useNavigate } from 'react-router-dom'
 import { communityPreferences, communitySettingsError } from '../lib/communityVisibility'
 import type { CommunityPreferences } from '../lib/communityVisibility'
 import MonthlyPlanSharing from '../components/MonthlyPlanSharing'
+import AdhdPlanDialog, { type AdhdPlanDialogHandle } from '../components/AdhdPlanDialog'
+import { readAdhdSettings } from '../lib/adhdMode'
 
 // Yeni kullanıcı oluşturmak için session bozmayan secondary client
 // Bu client sadece create işlemi için kullanılır.
@@ -46,6 +48,8 @@ export default function Admin() {
   const [shareStatistics, setShareStatistics] = useState(true)
   const [visibilityError, setVisibilityError] = useState('')
   const [savingVisibility, setSavingVisibility] = useState(false)
+  const adhdDialog = useRef<AdhdPlanDialogHandle>(null)
+  const [adhdSettings, setAdhdSettings] = useState<Record<string, boolean>>({})
 
   // New user form
   const [newEmail, setNewEmail] = useState('')
@@ -64,6 +68,8 @@ export default function Admin() {
   async function loadProfiles() {
     setLoading(true)
     setVisibilityReady(false); setVisibilityLoadError('')
+    // DEHB ayarları ayrı yüklenir; tablo henüz kurulmadıysa panelin geri kalanı çalışmaya devam eder.
+    void readAdhdSettings().then(setAdhdSettings, () => setAdhdSettings({}))
     try {
       const [profileResult, preferences] = await Promise.all([
         supabase.from('profiles').select('id,display_name,email,role').order('role', { ascending: false }).order('display_name'),
@@ -297,10 +303,11 @@ export default function Admin() {
                         {isImpersonating && <span className="bg-red-100 text-red-600 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase">Şu anki</span>}
                       </div>
                       <p className="text-[11px] text-[#64748b]">{p.email}</p>
-                      {visibilityReady && <p className="admin-visibility-summary">{visibilityPreferences[p.id]?.show_widget === false ? 'Bölüm gizli' : 'Bölüm açık'} · {visibilityPreferences[p.id]?.share_statistics === false ? 'Sıralamada gizli' : 'Sıralamada görünüyor'}</p>}
+                      {visibilityReady && <p className="admin-visibility-summary">{visibilityPreferences[p.id]?.show_widget === false ? 'Bölüm gizli' : 'Bölüm açık'} · {visibilityPreferences[p.id]?.share_statistics === false ? 'Sıralamada gizli' : 'Sıralamada görünüyor'}{adhdSettings[p.id] && <span className="admin-adhd-badge">DEHB modu</span>}</p>}
                     </div>
                     <div className="admin-user-actions">
                     <button type="button" disabled={!visibilityReady} onClick={event => openVisibilityDialog(p, event.currentTarget)} className="admin-password-button" aria-label={`${profileNameLabel(p.display_name, p.email)} için görünürlük ayarları`}><Eye size={15} /> Görünürlük</button>
+                    {p.role === 'user' && <button type="button" onClick={event => adhdDialog.current?.open(p, adhdSettings[p.id] === true, event.currentTarget)} className="admin-password-button" aria-label={`${profileNameLabel(p.display_name, p.email)} için DEHB modu ve günlük plan`}><ListChecks size={15} /> DEHB planı</button>}
                     {p.role === 'user' && <button onClick={event => openPasswordDialog(p, event.currentTarget)} className="admin-password-button" aria-label={`${p.display_name || p.email || 'Kullanıcı'} için şifre değiştir`}><KeyRound size={15} /> Şifre değiştir</button>}
                     {p.role !== 'admin' && !isImpersonating && (
                       <button onClick={() => handleImpersonate(p.id)} className="h-8 px-3 rounded-lg bg-[#f1f5f9] text-[#0f172a] text-[11px] font-bold hover:bg-[#e2e8f0] flex items-center gap-1.5 transition-all">
@@ -315,6 +322,7 @@ export default function Admin() {
           </div>
         </div>
       </div>
+      <AdhdPlanDialog ref={adhdDialog} onEnabledChange={(userId, enabled) => setAdhdSettings(previous => ({ ...previous, [userId]: enabled }))} />
       <dialog ref={visibilityDialog} className="admin-password-dialog admin-visibility-dialog" aria-labelledby="admin-visibility-title" onCancel={event => { event.preventDefault(); closeVisibilityDialog() }} onClick={event => { if (event.target === event.currentTarget) closeVisibilityDialog() }}>
         <div className="admin-password-heading"><div><h2 id="admin-visibility-title">Birlikte ilerliyoruz</h2><p>{profileNameLabel(visibilityUser?.display_name, visibilityUser?.email)}</p></div><button type="button" onClick={closeVisibilityDialog} disabled={savingVisibility} aria-label="Kapat"><X size={19} /></button></div>
         <form onSubmit={saveVisibility} aria-busy={savingVisibility}>

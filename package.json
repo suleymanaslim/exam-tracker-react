@@ -13,7 +13,8 @@
     "test:browser": "node tests/browser/performance.mjs",
     "test:plans": "node tests/browser/plan-flows.mjs",
     "test:question-notes": "node tests/browser/question-note-flows.mjs",
-    "test:pomodoro-presets": "node tests/browser/pomodoro-presets.mjs"
+    "test:pomodoro-presets": "node tests/browser/pomodoro-presets.mjs",
+    "test:adhd": "node tests/browser/adhd-mode.mjs"
   },
   "dependencies": {
     "@fontsource/source-sans-3": "^5.3.0",

@@ -4,7 +4,7 @@ import '@fontsource/source-sans-3/latin-ext-600.css'
 import '@fontsource/source-sans-3/latin-400.css'
 import '@fontsource/source-sans-3/latin-600.css'
 import { Link, Outlet, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
-import { Suspense, useState, useEffect, useRef } from 'react'
+import { Suspense, lazy, useState, useEffect, useRef } from 'react'
 import {
   LayoutDashboard, Calendar, CalendarDays, Timer, History,
   BarChart3, Settings, LogOut,
@@ -20,6 +20,13 @@ import { useMonthlyPlanAccess } from '../lib/useMonthlyPlanAccess'
 import { useMockExamRuntime } from '../lib/useMockExamRuntime'
 import { useMockExamStore } from '../lib/mockExamStore'
 import { formatMockDuration, mockExamTime } from '../lib/mockExamSession'
+import { ADHD_CHANGED_EVENT, readAdhdEnabled } from '../lib/adhdMode'
+
+const AdhdToday = lazy(() => import('../pages/AdhdToday'))
+const adhdCacheKey = (userId: string) => `adhd-mode:${userId}`
+function cachedAdhd(userId: string) {
+  try { const value = localStorage.getItem(adhdCacheKey(userId)); return value === null ? null : value === '1' } catch { return null }
+}
 
 const navItems = [
   { href: '/',          label: 'Dashboard',    icon: LayoutDashboard },
@@ -106,11 +113,32 @@ export default function AppLayout({ userId }: { userId: string }) {
     return () => { cancelled = true }
   }, [userId, requestedImpersonation, setIsAdmin, setImpersonatedUserId])
 
+  // DEHB modu: son bilinen değer anında kullanılır, arkada sunucudan doğrulanır.
+  const [adhd, setAdhd] = useState<{ owner: string; enabled: boolean | null }>(() => ({ owner: userId, enabled: cachedAdhd(userId) }))
+  useEffect(() => {
+    let active = true
+    const check = () => readAdhdEnabled(userId).then(enabled => {
+      if (!active) return
+      setAdhd({ owner: userId, enabled })
+      try { localStorage.setItem(adhdCacheKey(userId), enabled ? '1' : '0') } catch { /* optional cache */ }
+    }, () => { if (active) setAdhd(previous => previous.owner === userId && previous.enabled !== null ? previous : { owner: userId, enabled: false }) })
+    void check()
+    window.addEventListener('focus', check); window.addEventListener(ADHD_CHANGED_EVENT, check)
+    return () => { active = false; window.removeEventListener('focus', check); window.removeEventListener(ADHD_CHANGED_EVENT, check) }
+  }, [userId])
+  const adhdEnabled = adhd.owner === userId ? adhd.enabled : null
+
   const handleLogout = async () => {
     await supabase.auth.signOut()
     setIsAdmin(false)
     setImpersonatedUserId(null)
     navigate('/login')
+  }
+
+  // Admin her zaman tam paneli görür; DEHB modu yalnızca kullanıcının kendi oturumunda açılır.
+  if (adhdEnabled === null && !storedIsAdmin) return <div className="flex h-dvh items-center justify-center text-slate-500" role="status">Yükleniyor…</div>
+  if (adhdEnabled && !storedIsAdmin) {
+    return <div className="adhd-shell"><Suspense fallback={<div className="route-loading" role="status">Hazırlanıyor…</div>}><AdhdToday userId={userId} onLogout={handleLogout} /></Suspense></div>
   }
 
   return (

@@ -10,6 +10,7 @@ Sınav hazırlığını tek çalışma alanında yönetmek için geliştirilen w
 - **Gelişim takibi:** Süreli ve süresiz soru çözümlerini birlikte gösteren çalışma geçmişi, ders dağılımı, deneme sonuçları, net değişimleri ve soru istatistikleri.
 - **Konu yönetimi:** Kişisel listeler ve hesap bazında seçilen ortak AGS konuları.
 - **Yönetim:** Kullanıcı yönetimi, izinlerle kontrol edilen aylık plan paylaşımı ve topluluk görünürlüğü.
+- **DEHB modu:** Admin panelinde kullanıcı satırındaki “DEHB planı” ile açılır. Açık olan kullanıcı menüleri, Pomodoro'yu ve diğer sayfaları görmez; yalnızca o günün AGS derslerini, sıradaki dersi ve büyük bir kronometreyi görür. Bir derste 1 dakika çalışmak dersi “yapıldı” sayar ve süre çalışma geçmişine yazılır. Admin gün seçerek ders + kısa not ekler, sıralar, siler veya önceki günü kopyalar. Kurulum için Supabase SQL Editor'de `supabase/migrations/adhd_mode.sql` dosyasını bir kez çalıştırın.
 - **Parçalı video izleme:** Tek videolu görevlerde 2, 3 veya 4 parçalı ilerleme; solda devam listesi ve tamamlanınca izlenen haftanın pazartesisine sabit 1 video kaydı.
 - **Dışa aktarma:** Çalışma raporları ve yazdırılabilir video planları.
 
