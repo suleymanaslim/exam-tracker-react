@@ -1,0 +1,32 @@
+.adhd-plan-person{display:flex;flex-wrap:wrap;align-items:stretch;gap:12px;padding:14px 16px;background:#fff;border:1px solid #e3e9f0;border-radius:14px}
+.adhd-plan-person>label{display:flex;flex-direction:column;gap:6px;flex:1 1 260px;min-width:0;font-size:13px;font-weight:600;color:#52647b}
+.adhd-plan-person select{min-height:44px;border:1px solid #e1e7ee;border-radius:9px;padding:8px 10px;font-size:15px;font-weight:400;color:#24354a;background:#fff;min-width:0;width:100%}
+.adhd-plan-person .adhd-admin-switch{flex:1 1 280px;width:auto}
+.adhd-plan-toolbar{display:flex;flex-wrap:wrap;gap:8px}
+.adhd-plan-toolbar button{display:flex;align-items:center;gap:7px;min-height:40px;padding:8px 12px;border:1px solid #e1e7ee;border-radius:10px;background:#fff;color:#526a87;font-size:13px}
+.adhd-plan-toolbar button:hover:not(:disabled){background:#f7f9fc}
+.adhd-plan-toolbar button.is-danger{color:#a34c59}
+.adhd-plan-clipboard{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border:1px dashed #9db1cf;border-radius:12px;background:#f4f7fc;font-size:14px;color:#365c96}
+.adhd-plan-clipboard>span:first-child{display:flex;align-items:center;gap:6px;min-width:0;overflow-wrap:anywhere}
+.adhd-plan-clipboard-actions{display:flex;gap:6px;flex-wrap:wrap}
+.adhd-plan-clipboard button,.adhd-plan-sets li button{min-height:36px;padding:6px 12px;border-radius:9px;background:#fff;border:1px solid #dce5f0;color:#4269a8;font-size:13px;font-weight:600}
+.adhd-plan-page button.is-primary{background:#4269a8;border-color:#4269a8;color:#fff}
+.adhd-plan-message{margin:0;padding:10px 14px;border-radius:10px;font-size:14px;line-height:1.5}
+.adhd-plan-message.is-ok{background:#eef7f0;color:#2f6b3b}
+.adhd-plan-message.is-error{background:#fcf2f3;color:#b6454e}
+.adhd-plan-side{display:flex;flex-direction:column;gap:24px;min-width:0}
+.adhd-plan-done{opacity:.75}
+.adhd-plan-done .plan-row-index{color:#3f8a4f}
+.adhd-plan-page .adhd-admin-actions{display:flex;gap:4px;flex-shrink:0}
+.adhd-plan-sets-body{padding:18px 24px 22px;display:flex;flex-direction:column;gap:14px}
+.adhd-plan-set-form{display:flex;flex-wrap:wrap;gap:8px}
+.adhd-plan-set-form input{flex:1 1 180px;min-width:0;min-height:42px;border:1px solid #e1e7ee;border-radius:9px;padding:8px 11px;font-size:14px}
+.adhd-plan-set-form button{display:flex;align-items:center;gap:6px;min-height:42px;padding:8px 12px;border-radius:9px;background:#4269a8;color:#fff;font-size:13px;font-weight:600}
+.adhd-plan-hint{margin:0;font-size:13px;color:#62748b}
+.adhd-plan-sets ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.adhd-plan-sets li{display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px solid #e3e9f0;border-radius:10px}
+.adhd-plan-sets li>span{display:flex;flex-direction:column;flex:1;min-width:0}
+.adhd-plan-sets li strong{font-size:14px;font-weight:600;overflow-wrap:anywhere}
+.adhd-plan-sets li small{font-size:12px;color:#62748b}
+.adhd-plan-sets li button.is-danger{display:grid;place-items:center;width:36px;padding:0;color:#b6454e;background:#fcf2f3;border-color:#f3dadd}
+@media(max-width:767px){.adhd-plan-toolbar button{flex:1 1 calc(50% - 8px);justify-content:center}.adhd-plan-sets-body{padding:16px}}

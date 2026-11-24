@@ -8,7 +8,7 @@ import { Suspense, lazy, useState, useEffect, useRef } from 'react'
 import {
   LayoutDashboard, Calendar, CalendarDays, Timer, History,
   BarChart3, Settings, LogOut,
-  BookMarked, Award, PlayCircle, BookOpenCheck
+  BookMarked, Award, PlayCircle, BookOpenCheck, ListChecks
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { preloadRoute } from '../lib/routes'
@@ -95,7 +95,7 @@ export default function AppLayout({ userId }: { userId: string }) {
   const [roleAccount, setRoleAccount] = useState<string | null>(null)
   const isAdmin = roleAccount === userId && storedIsAdmin
   // Only impersonation/admin routes need a role check before mounting their contents.
-  const contextReady = roleAccount === userId || (!impersonatedUserId && !requestedImpersonation && location.pathname !== '/admin')
+  const contextReady = roleAccount === userId || (!impersonatedUserId && !requestedImpersonation && location.pathname !== '/admin' && location.pathname !== '/adhd-plan')
   const navPath = location.pathname === '/timed-mock-exam' ? '/study' : location.pathname
   const { plans: monthlyPlans } = useMonthlyPlanAccess()
   const canViewMonthlyPlan = isAdmin || monthlyPlans.length > 0
@@ -128,6 +128,21 @@ export default function AppLayout({ userId }: { userId: string }) {
   }, [userId])
   const adhdEnabled = adhd.owner === userId ? adhd.enabled : null
 
+  // Admin "Hesaba Gir" ile DEHB modundaki bir kişiye girdiğinde o kişinin DEHB ekranını görür.
+  const viewedUserId = isAdmin ? impersonatedUserId : null
+  const [viewedAdhd, setViewedAdhd] = useState<{ owner: string | null; enabled: boolean | null }>({ owner: null, enabled: null })
+  const [fullViewFor, setFullViewFor] = useState<string | null>(null)
+  useEffect(() => {
+    if (!viewedUserId) return
+    let active = true
+    const check = () => readAdhdEnabled(viewedUserId).then(enabled => { if (active) setViewedAdhd({ owner: viewedUserId, enabled }) }, () => { if (active) setViewedAdhd({ owner: viewedUserId, enabled: false }) })
+    void check()
+    window.addEventListener(ADHD_CHANGED_EVENT, check)
+    return () => { active = false; window.removeEventListener(ADHD_CHANGED_EVENT, check) }
+  }, [viewedUserId])
+  const viewedIsAdhd = Boolean(viewedUserId) && viewedAdhd.owner === viewedUserId && viewedAdhd.enabled === true
+  const showViewedAdhd = viewedIsAdhd && fullViewFor !== viewedUserId
+
   const handleLogout = async () => {
     await supabase.auth.signOut()
     setIsAdmin(false)
@@ -139,6 +154,20 @@ export default function AppLayout({ userId }: { userId: string }) {
   if (adhdEnabled === null && !storedIsAdmin) return <div className="flex h-dvh items-center justify-center text-slate-500" role="status">Yükleniyor…</div>
   if (adhdEnabled && !storedIsAdmin) {
     return <div className="adhd-shell"><Suspense fallback={<div className="route-loading" role="status">Hazırlanıyor…</div>}><AdhdToday userId={userId} onLogout={handleLogout} /></Suspense></div>
+  }
+  if (viewedUserId && viewedAdhd.owner !== viewedUserId) return <div className="flex h-dvh items-center justify-center text-slate-500" role="status">Hesap yükleniyor…</div>
+  if (viewedUserId && showViewedAdhd) {
+    return <div className="adhd-shell">
+      <div className="adhd-admin-banner" role="region" aria-label="Admin görünümü">
+        <span><strong>Admin görünümü</strong> · Kişinin gördüğü DEHB ekranı</span>
+        <span className="adhd-admin-banner-actions">
+          <button type="button" onClick={() => { setImpersonatedUserId(null); navigate(`/adhd-plan?user=${viewedUserId}`) }}>Planı düzenle</button>
+          <button type="button" onClick={() => setFullViewFor(viewedUserId)}>Tam görünüm</button>
+          <button type="button" onClick={() => { setImpersonatedUserId(null); navigate('/admin') }}>Kendi hesabıma dön</button>
+        </span>
+      </div>
+      <Suspense fallback={<div className="route-loading" role="status">Hazırlanıyor…</div>}><AdhdToday key={viewedUserId} userId={viewedUserId} /></Suspense>
+    </div>
   }
 
   return (
@@ -152,6 +181,7 @@ export default function AppLayout({ userId }: { userId: string }) {
           <p className="app-nav-caption app-nav-label">ÇALIŞMA ALANI</p>
           {navItems.map(item => <Link key={item.href} to={item.href} onMouseEnter={() => preloadRoute(item.href)} onFocus={() => preloadRoute(item.href)} title={item.label} aria-label={item.label} aria-current={navPath === item.href ? 'page' : undefined} className={`app-nav-link ${navPath === item.href ? 'is-active' : ''}`}><item.icon size={19} /><span className="app-nav-label">{item.label}</span></Link>)}
           {canViewMonthlyPlan && <Link to="/monthly-plan" title="Aylık Plan" aria-label="Aylık Plan" aria-current={location.pathname === '/monthly-plan' ? 'page' : undefined} className={`app-nav-link ${location.pathname === '/monthly-plan' ? 'is-active' : ''}`}><CalendarDays size={19} /><span className="app-nav-label">Aylık Plan</span></Link>}
+          {isAdmin && <Link to="/adhd-plan" title="DEHB Haftalık Plan" aria-label="DEHB Haftalık Plan" aria-current={location.pathname === '/adhd-plan' ? 'page' : undefined} className={`app-nav-link ${location.pathname === '/adhd-plan' ? 'is-active' : ''}`}><ListChecks size={19} /><span className="app-nav-label">DEHB Planı</span></Link>}
           {isAdmin && <Link to="/admin" title="Admin Paneli" aria-label="Admin Paneli" aria-current={location.pathname === '/admin' ? 'page' : undefined} className={`app-nav-link app-admin-link ${location.pathname === '/admin' ? 'is-active' : ''}`}><ShieldAlert size={19} /><span className="app-nav-label">Admin Paneli</span></Link>}
         </nav>
         <div className="app-sidebar-footer"><button onClick={handleLogout} title="Çıkış Yap" aria-label="Çıkış Yap" className="app-nav-link app-logout"><LogOut size={19} /><span className="app-nav-label">Çıkış Yap</span></button></div>
@@ -176,6 +206,7 @@ export default function AppLayout({ userId }: { userId: string }) {
           <div className="shrink-0 border-b border-indigo-200 bg-indigo-50 px-4 py-3">
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
               <span className="font-semibold text-indigo-900">Kullanıcı hesabını görüntülüyorsun</span>
+              {viewedIsAdhd && <button className="min-h-9 rounded-lg border border-indigo-200 bg-white px-3 font-semibold text-indigo-700" onClick={() => setFullViewFor(null)}>DEHB görünümüne dön</button>}
               <button className="min-h-9 rounded-lg border border-indigo-200 bg-white px-3 font-semibold text-indigo-700" onClick={() => { setImpersonatedUserId(null); navigate('/admin') }}>Kendi hesabıma dön</button>
             </div>
             <nav aria-label="Kullanıcı hesabı sayfaları" className="mt-2 flex flex-wrap gap-1">

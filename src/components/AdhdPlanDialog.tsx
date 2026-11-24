@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom'
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type FormEvent } from 'react'
 import { ArrowDown, ArrowUp, Check, ChevronLeft, ChevronRight, Copy, Plus, Trash2, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
@@ -38,6 +39,7 @@ const AdhdPlanDialog = forwardRef<AdhdPlanDialogHandle, { onEnabledChange: (user
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const request = useRef(0)
+  const navigate = useNavigate()
 
   useImperativeHandle(ref, () => ({
     open(next, isEnabled, from) {
@@ -113,6 +115,8 @@ const AdhdPlanDialog = forwardRef<AdhdPlanDialogHandle, { onEnabledChange: (user
         <span className="adhd-admin-switch-track" aria-hidden="true"><span /></span>
         <span><strong>{enabled ? 'DEHB modu açık' : 'DEHB modu kapalı'}</strong><small>Açıkken kullanıcı yalnızca o günün derslerini ve kronometreyi görür. 1 dakika çalışılan ders yapıldı sayılır.</small></span>
       </button>
+
+      <button type="button" className="adhd-admin-weeklink" onClick={() => { if (!profile || busy) return; const id = profile.id; dialog.current?.close(); setProfile(null); navigate(`/adhd-plan?user=${id}`) }}>Haftalık plan, kopyala-yapıştır ve setler →</button>
 
       <div className="adhd-admin-day">
         <button type="button" onClick={() => setDay(shiftDay(day, -1))} aria-label="Önceki gün"><ChevronLeft size={18} /></button>

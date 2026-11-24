@@ -238,7 +238,10 @@ export default function Admin() {
           </h1>
           <p className="text-[13px] text-[#64748b] mt-1">Kullanıcıları yönet, hesaplarına geçiş yap (impersonate).</p>
         </div>
+        <div className="flex flex-wrap gap-2">
+        <button type="button" onClick={() => navigate('/adhd-plan')} className="inline-flex items-center gap-2 rounded-xl border border-[#dce5ef] bg-white px-4 py-2 text-sm font-semibold text-[#2f6f6a]"><ListChecks size={17} /> DEHB Haftalık Plan</button>
         <button type="button" onClick={() => navigate('/monthly-plan')} className="inline-flex items-center gap-2 rounded-xl border border-[#dce5ef] bg-white px-4 py-2 text-sm font-semibold text-[#4269a8]"><CalendarDays size={17} /> Aylık Plan</button>
+        </div>
         {impersonatedUserId && (
           <button onClick={stopImpersonating} className="flex items-center gap-2 bg-red-100 text-red-600 px-4 py-2 rounded-xl font-bold text-sm hover:bg-red-200 transition-all self-start md:self-auto">
             <XCircle className="h-4 w-4" /> Kendi Hesabıma Dön

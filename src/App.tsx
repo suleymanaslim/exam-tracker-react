@@ -3,7 +3,7 @@ import { Suspense, useEffect, useState } from 'react'
 import { supabase } from './lib/supabase'
 import type { Session } from '@supabase/supabase-js'
 
-import { Login, Dashboard, Plan, Study, History, Stats, Settings, Topics, MonthlyPlan, Admin, Results, VideoPlan, QuestionPlan } from './lib/routes'
+import { Login, Dashboard, Plan, Study, History, Stats, Settings, Topics, MonthlyPlan, Admin, Results, VideoPlan, QuestionPlan, AdhdWeekPlan } from './lib/routes'
 import AppLayout from './components/AppLayout'
 import RouteBoundary from './components/RouteBoundary'
 
@@ -76,6 +76,7 @@ function App() {
           <Route path="monthly-plan" element={<MonthlyPlan />} />
           <Route path="settings"  element={<Settings />} />
           <Route path="admin"     element={<Admin />} />
+          <Route path="adhd-plan" element={<AdhdWeekPlan />} />
         </Route>
       </Routes>
       </Suspense></RouteBoundary>

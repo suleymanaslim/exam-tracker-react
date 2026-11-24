@@ -27,6 +27,7 @@ let tasks = [
   { id: 't2', user_id: uid, task_date: today, subject_id: subjects[1].id, note: null, sort_order: 1, studied_seconds: 0, completed_at: null, subjects: { name: 'Sözel Yetenek' } },
 ]
 const rpcCalls = [], inserts = [], errors = []
+let planSets = []
 const deadline = setTimeout(() => { console.error('ADHD browser test timed out'); process.exit(1) }, 90000); deadline.unref()
 let browser
 try {
@@ -44,19 +45,42 @@ try {
       if (table === 'profiles') data = url.searchParams.get('id') ? { id: who.id, role: isAdmin ? 'admin' : 'user', display_name: who.user_metadata.display_name, email: who.email } : [{ id: adminId, role: 'admin', display_name: 'Admin', email: 'admin@example.com' }, { id: uid, role: 'user', display_name: 'Ayşe', email: 'ayse@example.com' }]
       else if (table === 'adhd_mode_settings') {
         if (request.method() === 'POST') { enabled = request.postDataJSON().enabled; data = [] }
-        else data = url.searchParams.get('user_id') ? (who.id === uid ? { enabled } : null) : [{ user_id: uid, enabled }]
+        else data = url.searchParams.get('user_id') ? (url.searchParams.get('user_id') === `eq.${uid}` ? { enabled } : null) : [{ user_id: uid, enabled }]
       } else if (table === 'adhd_daily_tasks') {
         if (request.method() === 'POST') {
-          const row = request.postDataJSON(); inserts.push(row)
-          tasks.push({ id: `t${tasks.length + 1}`, studied_seconds: 0, completed_at: null, ...row, subjects: { name: subjects.find(s => s.id === row.subject_id).name } })
-        } else data = tasks.filter(task => task.task_date === url.searchParams.get('task_date')?.replace('eq.', ''))
-      } else if (table === 'record_adhd_task_study') {
+          const body = request.postDataJSON()
+          for (const row of Array.isArray(body) ? body : [body]) {
+            inserts.push(row)
+            tasks.push({ id: `t${tasks.length + 1}-${Math.random().toString(36).slice(2)}`, studied_seconds: 0, completed_at: null, ...row, subjects: { name: subjects.find(s => s.id === row.subject_id).name } })
+          }
+        } else if (request.method() === 'DELETE') {
+          const filter = url.searchParams.get('id') || ''
+          const ids = filter.startsWith('in.(') ? filter.slice(4, -1).split(',').map(id => id.replace(/"/g, '')) : [filter.replace('eq.', '')]
+          tasks = tasks.filter(task => !ids.includes(task.id))
+        } else if (request.method() === 'PATCH') {
+          const task = tasks.find(t => t.id === url.searchParams.get('id').replace('eq.', '')); Object.assign(task, request.postDataJSON())
+        } else {
+          const filters = url.searchParams.getAll('task_date')
+          const test = date => filters.every(f => f.startsWith('eq.') ? date === f.slice(3) : f.startsWith('gte.') ? date >= f.slice(4) : f.startsWith('lte.') ? date <= f.slice(4) : true)
+          data = tasks.filter(task => test(task.task_date)).sort((a, b) => a.task_date.localeCompare(b.task_date) || a.sort_order - b.sort_order)
+        }
+      } else if (table === 'adhd_plan_sets') {
+        if (request.method() === 'POST') { const row = request.postDataJSON(); planSets.push({ id: `set${planSets.length + 1}`, created_at: '2026-11-24T10:00:00Z', ...row }) }
+        else if (request.method() === 'DELETE') planSets = planSets.filter(set => `eq.${set.id}` !== url.searchParams.get('id'))
+        else data = planSets
+      } else if (table === 'weekly_plans') data = [{ id: 'wp1', week_start_date: '2026-11-23' }]
+      else if (table === 'plan_items') data = [
+        { day_of_week: 3, subject_id: 'a1', title: 'Video ders', sort_order: 0 },
+        { day_of_week: 3, subject_id: 'a2', title: null, sort_order: 1 },
+        { day_of_week: 4, subject_id: null, title: 'Genel tekrar', sort_order: 0 },
+      ]
+      else if (table === 'record_adhd_task_study') {
         const body = request.postDataJSON(); rpcCalls.push(body)
         const task = tasks.find(t => t.id === body.p_task_id)
         task.studied_seconds += Math.floor((Date.parse(body.p_ended_at) - Date.parse(body.p_started_at)) / 1000)
         if (task.studied_seconds >= 60) task.completed_at ??= body.p_ended_at
         data = task
-      } else if (table === 'subjects') data = subjects
+      } else if (table === 'subjects') data = url.searchParams.get('user_id') === `eq.${adminId}` ? [{ id: 'a1', name: 'Tarih' }, { id: 'a2', name: 'Coğrafya' }] : subjects
       else if (table === 'dashboard_community_preferences') data = []
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(data) })
     })
@@ -66,7 +90,7 @@ try {
   }
 
   // Kullanıcı: yalnızca bugünün dersleri görünür, menü yoktur.
-  const { context, page } = await open(account(uid, 'Ayşe'), { width: 390, height: 844 })
+  const { page } = await open(account(uid, 'Ayşe'), { width: 390, height: 844 })
   await page.goto(origin + '/stats')
   await page.getByRole('heading', { name: 'Bugün yapacakların' }).waitFor()
   assert.equal(await page.locator('.app-sidebar, .app-mobile-nav').count(), 0, 'normal navigation is hidden')
@@ -110,6 +134,52 @@ try {
   await dialog.getByText('DEHB modu kapalı').waitFor()
   assert.equal(enabled, false)
   assert.ok(await adminView.page.locator('.app-sidebar').count() > 0, 'admin keeps the full layout')
+  await dialog.getByRole('switch').click()
+  await dialog.getByText('DEHB modu açık').waitFor()
+
+  // Ayrı haftalık sayfa: kendi planından kopyala-yapıştır, set kaydet ve başka haftaya uygula.
+  await dialog.getByRole('button', { name: /Haftalık plan, kopyala-yapıştır/ }).click()
+  const plan = adminView.page
+  await plan.getByRole('heading', { name: 'DEHB Haftalık Plan' }).waitFor()
+  assert.equal(await plan.getByRole('combobox', { name: 'Kişi' }).inputValue(), uid)
+  await plan.getByRole('tab', { name: /^Sal/ }).getByText('3 ders').waitFor()
+  await plan.getByRole('button', { name: 'Kendi planımdan: bu hafta' }).click()
+  await plan.getByText('Kendi planından 2 ders kopyalandı. Dersi seçilmemiş 1 madde atlandı.', { exact: false }).waitFor()
+  inserts.length = 0
+  await plan.getByRole('button', { name: 'Bu haftaya yapıştır' }).click()
+  await plan.getByRole('button', { name: 'Yanına ekle' }).click()
+  await plan.getByText('Bu kişide olmadığı için atlananlar: Coğrafya', { exact: false }).waitFor()
+  assert.deepEqual(inserts.map(row => [row.task_date, row.subject_id, row.note]), [['2026-11-25', subjects[0].id, 'Video ders']])
+  await plan.getByRole('tab', { name: /^Çar/ }).click()
+  await plan.getByRole('tabpanel').getByText('Video ders').waitFor()
+  // Gün kopyala → başka güne yapıştır
+  await plan.getByRole('button', { name: 'Günü kopyala' }).click()
+  await plan.getByRole('tab', { name: /^Cum/ }).click()
+  await plan.getByRole('button', { name: 'Cuma gününe yapıştır' }).click()
+  await plan.getByRole('tabpanel').getByText('Video ders').waitFor()
+  // Set kaydet ve gelecek haftaya uygula
+  await plan.getByLabel('Set adı').fill('Normal hafta')
+  await plan.getByRole('button', { name: 'Bu haftayı set yap' }).click()
+  await plan.getByText('“Normal hafta” seti kaydedildi (5 ders).').waitFor()
+  assert.deepEqual(planSets[0].items.map(item => item.day), [2, 2, 2, 3, 5])
+  await plan.getByRole('button', { name: 'Sonraki hafta' }).click()
+  await plan.getByRole('tab', { name: /^Sal/ }).getByText('Plan yok').waitFor()
+  await plan.getByRole('button', { name: 'Bu haftaya uygula' }).click()
+  await plan.getByText('“Normal hafta” uygulandı: 5 ders eklendi.').waitFor()
+  await plan.getByRole('tab', { name: /^Sal/ }).getByText('3 ders').waitFor()
+  assert.equal(tasks.filter(task => task.task_date === '2026-12-01').length, 3)
+  if (shots) { await plan.getByRole('button', { name: 'Önceki hafta' }).click(); await plan.getByRole('tab', { name: /^Sal/ }).click(); await plan.waitForTimeout(300); await plan.screenshot({ path: `${shots}/adhd-week-plan.png`, fullPage: true }) }
+
+  // "Hesaba Gir": admin kişinin DEHB ekranını görür, istersen tam görünüme geçer.
+  await plan.goto(origin + `/?impersonate=${uid}`)
+  await plan.getByText('Admin görünümü').waitFor()
+  await plan.getByRole('heading', { name: 'Bugün yapacakların' }).waitFor()
+  assert.equal(await plan.getByRole('button', { name: 'Çıkış yap' }).count(), 0)
+  if (shots) await plan.screenshot({ path: `${shots}/adhd-impersonate.png` })
+  await plan.getByRole('button', { name: 'Tam görünüm' }).click()
+  await plan.getByText('Kullanıcı hesabını görüntülüyorsun').waitFor()
+  await plan.getByRole('button', { name: 'DEHB görünümüne dön' }).click()
+  await plan.getByText('Admin görünümü').waitFor()
   assert.deepEqual(errors, [])
-  console.log('PASS today-only view, stopwatch with 1-minute completion, reload recovery, admin daily plan and toggle')
+  console.log('PASS today-only view, stopwatch with 1-minute completion, reload recovery, admin daily plan, weekly copy/paste from own plan, sets and impersonated ADHD view')
 } finally { clearTimeout(deadline); await browser?.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)) }

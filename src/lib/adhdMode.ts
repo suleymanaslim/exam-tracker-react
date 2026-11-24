@@ -126,3 +126,51 @@ export function minutesLabel(seconds: number, verb = 'çalıştın') {
   if (minutes < 60) return `${minutes} dk ${verb}`
   return `${Math.floor(minutes / 60)} sa ${minutes % 60} dk ${verb}`
 }
+
+// ── Haftalık plan, kopyala/yapıştır ve setler ─────────────────────────────
+/** Ders adıyla tutulur; böylece başka kullanıcıya veya başka haftaya uygulanabilir. day: 1=Pzt … 7=Paz */
+export interface AdhdTemplateItem { day: number; subject_name: string; note: string | null }
+export interface AdhdPlanSet { id: string; name: string; items: AdhdTemplateItem[]; created_at: string }
+
+export function setsError(error: unknown) {
+  const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
+  if (['42P01', 'PGRST205'].includes(code)) return 'Setler için Supabase’de adhd_plan_sets.sql dosyasını çalıştırın.'
+  return adhdError(error)
+}
+
+export async function readAdhdWeek(userId: string, monday: string, sunday: string): Promise<AdhdTask[]> {
+  const { data, error } = await supabase.from('adhd_daily_tasks').select(TASK_FIELDS)
+    .eq('user_id', userId).gte('task_date', monday).lte('task_date', sunday).order('task_date').order('sort_order').order('created_at')
+  if (error) throw error
+  return (data || []) as unknown as AdhdTask[]
+}
+
+export async function insertAdhdTasks(rows: { user_id: string; task_date: string; subject_id: string; note: string | null; sort_order: number }[]) {
+  if (!rows.length) return
+  const { error } = await supabase.from('adhd_daily_tasks').insert(rows)
+  if (error) throw error
+  notifyAdhdChanged()
+}
+
+export async function deleteAdhdTasks(ids: string[]) {
+  if (!ids.length) return
+  const { error } = await supabase.from('adhd_daily_tasks').delete().in('id', ids)
+  if (error) throw error
+  notifyAdhdChanged()
+}
+
+export async function readAdhdSets(): Promise<AdhdPlanSet[]> {
+  const { data, error } = await supabase.from('adhd_plan_sets').select('id,name,items,created_at').order('created_at')
+  if (error) throw error
+  return (data || []) as AdhdPlanSet[]
+}
+
+export async function saveAdhdSet(name: string, items: AdhdTemplateItem[]) {
+  const { error } = await supabase.from('adhd_plan_sets').insert({ name: name.trim(), items })
+  if (error) throw error
+}
+
+export async function deleteAdhdSet(id: string) {
+  const { error } = await supabase.from('adhd_plan_sets').delete().eq('id', id)
+  if (error) throw error
+}

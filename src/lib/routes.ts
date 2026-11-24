@@ -30,6 +30,7 @@ const loaders = {
   '/results': () => import('../pages/Results'),
   '/videos': () => import('../pages/VideoPlan'),
   '/questions': () => import('../pages/QuestionPlan'),
+  '/adhd-plan': () => import('../pages/AdhdWeekPlan'),
 }
 export const Dashboard = page(loaders['/'])
 export const Login = page(loaders['/login'])
@@ -44,6 +45,7 @@ export const Admin = page(loaders['/admin'])
 export const Results = page(loaders['/results'])
 export const VideoPlan = page(loaders['/videos'])
 export const QuestionPlan = page(loaders['/questions'])
+export const AdhdWeekPlan = page(loaders['/adhd-plan'])
 
 // Load code on navigation intent, without fetching any account data or mounting a page.
 export function preloadRoute(path: string) {

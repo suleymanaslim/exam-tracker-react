@@ -13,7 +13,7 @@ const subjectName = (task?: AdhdTask | null) => task?.subjects?.name || 'Ders'
 
 type Finish = { timer: RunningAdhdTimer; endedAt: Date; seconds: number; saving: boolean; error: string }
 
-export default function AdhdToday({ userId, onLogout }: { userId: string; onLogout: () => void }) {
+export default function AdhdToday({ userId, onLogout }: { userId: string; onLogout?: () => void }) {
   const [today, setToday] = useState(() => localDayKey(new Date()))
   const [tasks, setTasks] = useState<AdhdTask[]>([])
   const [loading, setLoading] = useState(true)
@@ -134,7 +134,7 @@ export default function AdhdToday({ userId, onLogout }: { userId: string; onLogo
           <p className="adhd-date">{dateLabel(new Date(`${today}T12:00:00`))}</p>
           <h1 className="adhd-title">Bugün yapacakların</h1>
         </div>
-        <button type="button" className="adhd-logout" onClick={onLogout} aria-label="Çıkış yap"><LogOut size={20} aria-hidden="true" /></button>
+        {onLogout && <button type="button" className="adhd-logout" onClick={onLogout} aria-label="Çıkış yap"><LogOut size={20} aria-hidden="true" /></button>}
       </header>
 
       {loading ? <p className="adhd-muted" role="status">Yükleniyor…</p>

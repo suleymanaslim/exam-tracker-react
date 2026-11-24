@@ -100,3 +100,8 @@
 .adhd-row .adhd-btn { flex: 1 1 180px; }
 
 @media (prefers-reduced-motion: reduce) { .adhd * { transition: none !important; animation: none !important; } }
+
+/* Admin, kişinin hesabına girdiğinde üstte görünen ince şerit */
+.adhd-admin-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 10px 16px; background: #eef2ff; border-bottom: 1px solid #c7d2fe; color: #312e81; font-family: 'Source Sans 3', Arial, sans-serif; font-size: 14px; }
+.adhd-admin-banner-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.adhd-admin-banner button { min-height: 36px; padding: 6px 12px; border-radius: 8px; border: 1px solid #c7d2fe; background: #fff; color: #4338ca; font-weight: 600; cursor: pointer; }

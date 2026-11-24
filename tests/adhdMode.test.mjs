@@ -28,6 +28,8 @@ test('DEHB modu: yalnızca admin plan yazar, 1 dakika çalışılan ders yapıld
       INSERT INTO public.subjects VALUES ('${subject}','${alice}','Tarih');`)
     const sql = await readFile(new URL('../supabase/migrations/adhd_mode.sql', import.meta.url), 'utf8')
     await db.exec(sql); await db.exec(sql)
+    const sets = await readFile(new URL('../supabase/migrations/adhd_plan_sets.sql', import.meta.url), 'utf8')
+    await db.exec(sets); await db.exec(sets)
 
     await as(alice)
     await assert.rejects(db.query(`INSERT INTO public.adhd_mode_settings VALUES ('${alice}', true)`), /row-level security/)
@@ -54,6 +56,16 @@ test('DEHB modu: yalnızca admin plan yazar, 1 dakika çalışılan ders yapıld
     const sessions = (await db.query('SELECT user_id, subject_id, duration_minutes::float AS m FROM public.study_sessions')).rows
     assert.deepEqual(sessions, [{ user_id: alice, subject_id: subject, m: 1 }])
     await assert.rejects(db.query(`UPDATE public.adhd_daily_tasks SET completed_at = now()`).then(r => { if (r.affectedRows === 0) throw new Error('row-level security') }), /row-level security/)
+
+    // Setler: yalnızca admin, yalnızca kendi setleri
+    await assert.rejects(db.query(`INSERT INTO public.adhd_plan_sets(name, items) VALUES ('Benim', '[]')`), /row-level security/)
+    await as(admin)
+    await db.query(`INSERT INTO public.adhd_plan_sets(name, items) VALUES ('Normal hafta', '[{"day":1,"subject_name":"Tarih","note":null}]')`)
+    await assert.rejects(db.query(`INSERT INTO public.adhd_plan_sets(name, items) VALUES ('   ', '[]')`), /check constraint/)
+    await assert.rejects(db.query(`INSERT INTO public.adhd_plan_sets(owner_id, name) VALUES ('${alice}', 'Sahte')`), /row-level security/)
+    assert.equal((await db.query('SELECT owner_id FROM public.adhd_plan_sets')).rows[0].owner_id, admin)
+    await as(alice)
+    assert.equal((await db.query('SELECT * FROM public.adhd_plan_sets')).rows.length, 0)
 
     await as(null)
     await assert.rejects(record(task.id, id(24), '2026-11-24T10:00:00Z', '2026-11-24T10:05:00Z'), /permission denied/)
