@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, BellRing, BookOpen, Check, LogOut, Play, Plus, Square, RotateCw, Sparkles } from 'lucide-react'
 import { localDayKey } from '../lib/statsPeriod'
 import {
-  ADHD_CHANGED_EVENT, ADHD_DONE_SECONDS, addAdhdExtra, adhdError, changeAdhdTaskTopic, loadRunningTimer, minutesLabel,
+  ADHD_CHANGED_EVENT, ADHD_DONE_SECONDS, addAdhdExtra, advanceAdhdTopics, pullAdhdTaskForward, readNextDayTasks, adhdError, changeAdhdTaskTopic, loadRunningTimer, minutesLabel,
   readAdhdSubjects, readAdhdTasks, readTopicCatalog, recordAdhdStudy, setAdhdTopicDone, storeRunningTimer,
 } from '../lib/adhdMode'
 import { isAgsExam } from '../lib/agsTopicSource'
@@ -11,7 +11,7 @@ import type { AdhdTask, RunningAdhdTimer } from '../lib/adhdMode'
 import './AdhdToday.css'
 
 const dateLabel = (date: Date) => date.toLocaleDateString('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' })
-const subjectName = (task?: AdhdTask | null) => task?.subjects?.name || 'Ders'
+const subjectName = (task?: AdhdTask | null) => task?.subjects?.name || task?.title || 'Ders'
 /** Bitince gösterilen süre: "25 dakika", "1 saat 10 dakika" */
 const studyTime = (seconds: number) => {
   const minutes = Math.max(1, Math.round(seconds / 60))
@@ -39,17 +39,20 @@ export default function AdhdToday({ userId, onLogout }: { userId: string; onLogo
   const [topicChoices, setTopicChoices] = useState<CatalogTopic[] | null>(null)
   // Ekstra çalışma: kişi istediği dersi seçer
   const [extraSubjects, setExtraSubjects] = useState<{ id: string; name: string }[] | null>(null)
+  const [upcoming, setUpcoming] = useState<AdhdTask[]>([])
   const [extraBusy, setExtraBusy] = useState(false)
   const [extraError, setExtraError] = useState('')
   const request = useRef(0)
   const extraPanel = useRef<HTMLElement>(null)
   const extraOpen = extraSubjects !== null
   // Seçim kutusu sayfanın altında açılır; görünür olsun.
-  useEffect(() => { if (extraOpen) extraPanel.current?.scrollIntoView({ block: 'center', behavior: 'smooth' }) }, [extraOpen])
+  useEffect(() => { if (extraOpen) extraPanel.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }) }, [extraOpen])
 
   const load = useCallback(async () => {
     const id = ++request.current
     try {
+      // Konular kendiliğinden ilerler (kronometre açıkken çalışılan dersin konusu değişmesin).
+      if (!loadRunningTimer(userId)) await advanceAdhdTopics(userId)
       const rows = await readAdhdTasks(userId, today)
       if (id !== request.current) return
       setTasks(rows); setLoadError('')
@@ -109,11 +112,12 @@ export default function AdhdToday({ userId, onLogout }: { userId: string; onLogo
   }
 
   const openTopicChoices = async () => {
-    if (!askTopic) return
+    if (!askTopic?.subject_id) return
+    const subjectId = askTopic.subject_id
     setTopicSaving(true); setTopicError('')
     try {
-      const catalog = await readTopicCatalog(userId, [{ id: askTopic.subject_id, name: subjectName(askTopic), ags: true }])
-      const list = (catalog.get(askTopic.subject_id) || []).filter(topic => !topic.completed && topic.id !== askTopic.topic_id)
+      const catalog = await readTopicCatalog(userId, [{ id: subjectId, name: subjectName(askTopic), ags: true }])
+      const list = (catalog.get(subjectId) || []).filter(topic => !topic.completed && topic.id !== askTopic.topic_id)
       if (!list.length) setTopicError('Bu derste seçilebilecek başka konu yok.')
       else setTopicChoices(list)
     } catch (error) { setTopicError(adhdError(error)) }
@@ -131,13 +135,16 @@ export default function AdhdToday({ userId, onLogout }: { userId: string; onLogo
       // Yeni konu için soru tekrar sorulur.
       setAskTopic(saved.topic_completed_at ? null : merged)
       if (saved.topic_completed_at) setTopicDone(saved.topic_title || '')
+      void advanceAdhdTopics(userId).then(changed => { if (changed) void load() })
     } catch (error) { setTopicError(adhdError(error)) }
     finally { setTopicSaving(false) }
   }
 
   const openExtra = async () => {
     setExtraError(''); setCelebrate(null)
-    setExtraSubjects([])
+    setExtraSubjects([]); setUpcoming([])
+    // Önce yarının (bir sonraki planlı günün) dersleri önerilir.
+    void readNextDayTasks(userId, today).then(setUpcoming, () => setUpcoming([]))
     try {
       const rows = await readAdhdSubjects(userId)
       const ags = rows.filter(row => isAgsExam(row.exams || undefined))
@@ -145,6 +152,19 @@ export default function AdhdToday({ userId, onLogout }: { userId: string; onLogo
       if (!list.length) setExtraError('Ders bulunamadı.')
       setExtraSubjects(list)
     } catch (error) { setExtraError(adhdError(error)) }
+  }
+
+  const pullForward = async (task: AdhdTask) => {
+    if (extraBusy || running) return
+    setExtraBusy(true); setExtraError('')
+    try {
+      const saved = await pullAdhdTaskForward(task.id, today)
+      const moved = { ...task, ...saved, subjects: task.subjects }
+      setTasks(previous => [...previous, moved])
+      setExtraSubjects(null); setUpcoming([])
+      start(moved)
+    } catch (error) { setExtraError(adhdError(error)) }
+    finally { setExtraBusy(false) }
   }
 
   const startExtra = async (subject: { id: string; name: string }) => {
@@ -168,6 +188,8 @@ export default function AdhdToday({ userId, onLogout }: { userId: string; onLogo
       const saved = await setAdhdTopicDone(askTopic.id, true)
       setTasks(previous => previous.map(task => task.topic_kind === saved.topic_kind && task.topic_id === saved.topic_id ? { ...task, topic_completed_at: saved.topic_completed_at } : task))
       setTopicDone(askTopic.topic_title || ''); setAskTopic(null)
+      // Konu bitti: sonraki dersler bir sonraki konuya kayar.
+      void advanceAdhdTopics(userId).then(changed => { if (changed) void load() })
     } catch (error) { setTopicError(adhdError(error)) }
     finally { setTopicSaving(false) }
   }
@@ -180,7 +202,7 @@ export default function AdhdToday({ userId, onLogout }: { userId: string; onLogo
     return (
       <div className="adhd adhd-focus" role="main">
         <div className="adhd-focus-inner">
-          <p className="adhd-focus-kicker">{runningTask.topic_title ? 'Şu an çalıştığın konu' : 'Şu an çalıştığın ders'}</p>
+          <p className="adhd-focus-kicker">{runningTask.is_questions ? 'Soru çözümü' : runningTask.topic_title ? 'Şu an çalıştığın konu' : 'Şu an çalıştığın ders'}</p>
           {runningTask.topic_title ? <>
             {/* Konu açıldığında en büyük yazı konu adıdır; ders adı üstte küçük durur. */}
             <p className="adhd-focus-subject-small">{subjectName(runningTask)}</p>
@@ -284,7 +306,16 @@ export default function AdhdToday({ userId, onLogout }: { userId: string; onLogo
 
           {extraSubjects ? (
             <section ref={extraPanel} className="adhd-card adhd-extra" aria-labelledby="adhd-extra-title">
-              <h2 id="adhd-extra-title" className="adhd-topic-ask-title">Hangi derse ekstra çalışmak istersin?</h2>
+              {upcoming.length > 0 && <>
+                <h2 className="adhd-topic-ask-title">Yarının derslerinden öne al</h2>
+                <p className="adhd-muted">Şimdi çalışırsan o gün daha hafif olur.</p>
+                <div className="adhd-extra-grid adhd-upcoming" role="group" aria-label="Sonraki günün dersleri">
+                  {upcoming.map(task => <button key={task.id} type="button" className="adhd-btn adhd-btn-choice adhd-btn-upcoming" onClick={() => void pullForward(task)} disabled={extraBusy}>
+                    <span><strong>{subjectName(task)}</strong>{task.topic_title && <small>{task.topic_title}</small>}</span>
+                  </button>)}
+                </div>
+              </>}
+              <h2 id="adhd-extra-title" className="adhd-topic-ask-title">{upcoming.length ? 'Ya da istediğin derse çalış' : 'Hangi derse ekstra çalışmak istersin?'}</h2>
               <div className="adhd-extra-grid">
                 {extraSubjects.map(subject => <button key={subject.id} type="button" className="adhd-btn adhd-btn-choice" onClick={() => void startExtra(subject)} disabled={extraBusy}>{subject.name}</button>)}
               </div>

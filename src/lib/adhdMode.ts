@@ -7,7 +7,8 @@ export interface AdhdTask {
   id: string
   user_id: string
   task_date: string
-  subject_id: string
+  /** Soru çözümü maddesi bir derse bağlı değilse boştur; o zaman title gösterilir. */
+  subject_id: string | null
   note: string | null
   sort_order: number
   studied_seconds: number
@@ -18,6 +19,9 @@ export interface AdhdTask {
   topic_completed_at: string | null
   /** Kişinin kendi seçtiği ekstra çalışma (plan dışı) */
   is_extra?: boolean
+  /** Hazır setteki soru çözümü maddesi (konusuz) */
+  is_questions?: boolean
+  title?: string | null
   subjects?: { name: string } | null
 }
 
@@ -26,11 +30,11 @@ export interface RunningAdhdTimer { taskId: string; sessionId: string; startedAt
 export const ADHD_CHANGED_EVENT = 'adhd-mode-changed'
 /** Bir dersin "yapıldı" sayılması için gereken süre. */
 export const ADHD_DONE_SECONDS = 60
-const TASK_FIELDS = 'id,user_id,task_date,subject_id,note,sort_order,studied_seconds,completed_at,topic_kind,topic_id,topic_title,topic_completed_at,is_extra,subjects(name)'
+const TASK_FIELDS = 'id,user_id,task_date,subject_id,note,sort_order,studied_seconds,completed_at,topic_kind,topic_id,topic_title,topic_completed_at,is_extra,is_questions,title,subjects(name)'
 
 export function adhdError(error: unknown) {
   const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
-  if (code === '42703' || code === 'PGRST204') return 'Supabase’de adhd_topics.sql ve adhd_extras.sql dosyalarını çalıştırın.'
+  if (code === '42703' || code === 'PGRST204') return 'Supabase’de adhd_topics.sql, adhd_extras.sql ve adhd_autoplan.sql dosyalarını çalıştırın.'
   if (code === 'AGS_SHARED_SETUP') return 'Ortak AGS konuları bulunamadı. Supabase’de shared_ags_topics_monthly.sql dosyasını çalıştırın.'
   if (['42P01', '42883', 'PGRST202', 'PGRST205'].includes(code)) return 'DEHB modu için Supabase’de adhd_mode.sql, adhd_topics.sql ve adhd_extras.sql dosyalarını çalıştırın.'
   if (code === '42501') return 'Bu işlem için iznin yok.'
@@ -225,4 +229,58 @@ export async function readAdhdSubjects(userId: string) {
   const { data, error } = await supabase.from('subjects').select('id,name,exams(name,base_template_key,exam_date)').eq('user_id', userId).order('name')
   if (error) throw error
   return (data || []) as unknown as { id: string; name: string; exams?: { name?: string; base_template_key?: string | null; exam_date?: string | null } | null }[]
+}
+
+// ── Hazır setin soru çözümü maddeleri (admin) ──────────────────────────────
+export interface AdhdQuestionItem { id: string; label: string; days: number[]; sort_order: number }
+
+export function questionItemsError(error: unknown) {
+  const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
+  if (['42P01', 'PGRST205', '42703', 'PGRST204'].includes(code)) return 'Soru çözümü için Supabase’de adhd_autoplan.sql dosyasını çalıştırın.'
+  return adhdError(error)
+}
+
+export async function readQuestionItems(): Promise<AdhdQuestionItem[]> {
+  const { data, error } = await supabase.from('adhd_question_items').select('id,label,days,sort_order').order('sort_order').order('created_at')
+  if (error) throw error
+  return (data || []) as AdhdQuestionItem[]
+}
+
+export async function addQuestionItem(label: string, days: number[], sortOrder: number) {
+  const { error } = await supabase.from('adhd_question_items').insert({ label: label.trim(), days: [...new Set(days)].sort((a, b) => a - b), sort_order: sortOrder })
+  if (error) throw error
+}
+
+export async function deleteQuestionItem(id: string) {
+  const { error } = await supabase.from('adhd_question_items').delete().eq('id', id)
+  if (error) throw error
+}
+
+// ── Otomatik konu ilerlemesi ve yarının dersini öne alma ───────────────────
+/** Başlanmamış planlı derslerin konularını sırayla yeniden dağıtır; eski veritabanında sessizce atlanır. */
+export async function advanceAdhdTopics(userId: string) {
+  const { data, error } = await supabase.rpc('advance_adhd_topics', { p_user_id: userId })
+  if (error) return 0
+  if (data) notifyAdhdChanged()
+  return Number(data) || 0
+}
+
+/** Bugünden sonraki ilk planlı günün bitmemiş dersleri (ekstra çalışma önerisi). */
+export async function readNextDayTasks(userId: string, today: string): Promise<AdhdTask[]> {
+  const [y, m, d] = today.split('-').map(Number)
+  const end = new Date(y, m - 1, d + 7, 12)
+  const until = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`
+  const { data, error } = await supabase.from('adhd_daily_tasks').select(TASK_FIELDS)
+    .eq('user_id', userId).gt('task_date', today).lte('task_date', until).is('completed_at', null)
+    .order('task_date').order('sort_order')
+  if (error) throw error
+  const rows = ((data || []) as unknown as AdhdTask[]).filter(task => !task.is_extra)
+  return rows.filter(task => task.task_date === rows[0]?.task_date)
+}
+
+export async function pullAdhdTaskForward(taskId: string, day: string) {
+  const { data, error } = await supabase.rpc('pull_adhd_task_forward', { p_task_id: taskId, p_day: day })
+  if (error) throw error
+  notifyAdhdChanged()
+  return data as AdhdTask
 }

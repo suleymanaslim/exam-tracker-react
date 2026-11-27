@@ -39,6 +39,8 @@ test('DEHB modu: yalnızca admin plan yazar, 1 dakika çalışılan ders yapıld
     await db.exec(topicsSql); await db.exec(topicsSql)
     const extrasSql = await readFile(new URL('../supabase/migrations/adhd_extras.sql', import.meta.url), 'utf8')
     await db.exec(extrasSql); await db.exec(extrasSql)
+    const questionsSql = await readFile(new URL('../supabase/migrations/adhd_autoplan.sql', import.meta.url), 'utf8')
+    await db.exec(questionsSql); await db.exec(questionsSql)
 
     await as(alice)
     await assert.rejects(db.query(`INSERT INTO public.adhd_mode_settings VALUES ('${alice}', true)`), /row-level security/)
@@ -131,6 +133,54 @@ test('DEHB modu: yalnızca admin plan yazar, 1 dakika çalışılan ders yapıld
     await assert.rejects(change(e1.id, id(45)), /another subject/)
     const back = await change(e1.id, id(42))
     assert.equal(back.topic_completed_at, null)
+
+    // Soru çözümü: derse bağlı olmayan madde adıyla eklenir; süresi tutulur ama çalışma geçmişine oturum yazılmaz.
+    await as(alice)
+    await assert.rejects(db.query(`INSERT INTO public.adhd_question_items(label, days) VALUES ('YDS', '{1}')`), /row-level security/)
+    await as(admin)
+    await db.query(`INSERT INTO public.adhd_question_items(label, days) VALUES ('YDS', '{1,3}')`)
+    await assert.rejects(db.query(`INSERT INTO public.adhd_question_items(label, days) VALUES ('YDS', '{8}')`), /check constraint/)
+    await assert.rejects(db.query(`INSERT INTO public.adhd_daily_tasks(user_id,task_date) VALUES ('${alice}','2026-11-24')`), /adhd_daily_tasks_title_check/)
+    const { rows: [q] } = await db.query(`INSERT INTO public.adhd_daily_tasks(user_id,task_date,title,note,is_questions) VALUES ('${alice}','2026-11-24','Sözel Yetenek Deneme','Soru çözümü',true) RETURNING id`)
+    await as(alice)
+    assert.equal((await db.query('SELECT * FROM public.adhd_question_items')).rows.length, 0)
+    const before = (await db.query('SELECT count(*)::int AS n FROM public.study_sessions')).rows[0].n
+    const qDone = await record(q.id, id(60), '2026-11-24T12:00:00Z', '2026-11-24T12:30:00Z')
+    assert.equal(qDone.studied_seconds, 1800); assert.notEqual(qDone.completed_at, null)
+    assert.equal((await db.query('SELECT count(*)::int AS n FROM public.study_sessions')).rows[0].n, before)
+
+    // Konular kendiliğinden ilerler (tarihten bağımsız olsun diye Bob'un dersleriyle).
+    await db.exec('RESET ROLE')
+    await db.query(`INSERT INTO public.ags_shared_topics VALUES ('${id(46)}','${id(40)}','Gerileme',3,NULL), ('${id(47)}','${id(40)}','Dağılma',4,NULL)`)
+    const bobTask = async (key, offset, extraCols = '', extraVals = '') => (await db.query(
+      `INSERT INTO public.adhd_daily_tasks(user_id,task_date,subject_id,sort_order${extraCols}) VALUES ($1, $2::date + $3::int, $4, $5${extraVals}) RETURNING id`,
+      [bob, localToday, offset, id(6), key])).rows[0].id
+    const b0 = await bobTask(0, 0, ',studied_seconds,completed_at,topic_kind,topic_id,topic_title', `,120,now(),'shared','${id(42)}','Yükselme'`)
+    const b1 = await bobTask(1, 0), b2 = await bobTask(0, 1), b3 = await bobTask(0, 2, ',topic_kind,topic_id,topic_title', `,'shared','${id(47)}','Dağılma'`)
+    const bx = await bobTask(1, 1, ',is_extra,topic_kind,topic_id,topic_title', `,true,'shared','${id(46)}','Gerileme'`)
+    await db.query(`INSERT INTO public.adhd_daily_tasks(user_id,task_date,title,is_questions) VALUES ($1, $2::date + 1, 'YDS', true)`, [bob, localToday])
+    const topicsOf = async () => Object.fromEntries((await db.query(`SELECT id, topic_id FROM public.adhd_daily_tasks WHERE user_id = $1`, [bob])).rows.map(row => [row.id, row.topic_id]))
+    const advance = uid => db.query('SELECT public.advance_adhd_topics($1) AS n', [uid]).then(r => r.rows[0].n)
+    await as(alice)
+    await assert.rejects(advance(bob), /Access denied/)
+    await as(admin)
+    assert.equal(await advance(bob), 3)
+    let now = await topicsOf()
+    assert.deepEqual([now[b0], now[b1], now[b2], now[b3], now[bx]], [id(42), id(41), id(42), id(46), id(46)], 'started/extra tasks keep topics; open ones get topics in order')
+    await db.exec(`RESET ROLE; INSERT INTO public.ags_topic_progress VALUES ('${bob}','${id(41)}',true,now())`)
+    await as(bob)
+    assert.equal(await advance(bob), 3)
+    now = await topicsOf()
+    assert.deepEqual([now[b1], now[b2], now[b3]], [id(42), id(46), id(47)], 'finished topic moves the plan forward')
+    assert.equal(await advance(bob), 0, 'idempotent')
+
+    // Yarının dersini bugüne al.
+    const pull = (taskId, day = localToday) => db.query('SELECT * FROM public.pull_adhd_task_forward($1,$2::date)', [taskId, day]).then(r => r.rows[0])
+    const pulled = await pull(b2)
+    assert.equal(pulled.is_extra, true); assert.equal(pulled.topic_id, id(46))
+    await assert.rejects(pull(b0), /cannot be moved/)
+    await as(alice)
+    await assert.rejects(pull(b3), /Task not found/)
 
     await as(null)
     await assert.rejects(extra(subject), /permission denied/)

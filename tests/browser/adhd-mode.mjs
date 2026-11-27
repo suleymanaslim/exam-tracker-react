@@ -33,9 +33,9 @@ const topics = [
   ...['Paragraf', 'Sözcükte Anlam'].map((title, i) => ({ id: `s${i + 1}`, subject_id: 'ss2', title, sort_order: i, archived_at: null, is_completed: false })),
 ]
 const personalTopics = [{ id: 'p1', user_id: uid, subject_id: subjects[0].id, title: 'KİŞİSEL KONU', is_completed: false, sort_order: 0 }]
-const topicCalls = [], extraCalls = [], changeCalls = []
+const topicCalls = [], extraCalls = [], changeCalls = [], advanceCalls = [], pullCalls = []
 const rpcCalls = [], inserts = [], errors = []
-let planSets = []
+let planSets = [], questionItems = []
 const deadline = setTimeout(() => { console.error('ADHD browser test timed out'); process.exit(1) }, 90000); deadline.unref()
 let browser
 try {
@@ -59,7 +59,7 @@ try {
           const body = request.postDataJSON()
           for (const row of Array.isArray(body) ? body : [body]) {
             inserts.push(row)
-            tasks.push({ id: `t${tasks.length + 1}-${Math.random().toString(36).slice(2)}`, studied_seconds: 0, completed_at: null, topic_completed_at: null, ...row, subjects: { name: subjects.find(s => s.id === row.subject_id).name } })
+            tasks.push({ id: `t${tasks.length + 1}-${Math.random().toString(36).slice(2)}`, studied_seconds: 0, completed_at: null, topic_completed_at: null, ...row, subjects: row.subject_id ? { name: subjects.find(s => s.id === row.subject_id).name } : null })
           }
         } else if (request.method() === 'DELETE') {
           const filter = url.searchParams.get('id') || ''
@@ -69,9 +69,13 @@ try {
           const task = tasks.find(t => t.id === url.searchParams.get('id').replace('eq.', '')); Object.assign(task, request.postDataJSON())
         } else {
           const filters = url.searchParams.getAll('task_date'), withTopic = url.searchParams.get('topic_id') === 'not.is.null'
-          const test = date => filters.every(f => f.startsWith('eq.') ? date === f.slice(3) : f.startsWith('gte.') ? date >= f.slice(4) : f.startsWith('lte.') ? date <= f.slice(4) : true)
-          data = tasks.filter(task => test(task.task_date) && (!withTopic || task.topic_id)).sort((a, b) => a.task_date.localeCompare(b.task_date) || a.sort_order - b.sort_order)
+          const test = date => filters.every(f => f.startsWith('eq.') ? date === f.slice(3) : f.startsWith('gte.') ? date >= f.slice(4) : f.startsWith('lte.') ? date <= f.slice(4) : f.startsWith('gt.') ? date > f.slice(3) : true)
+          data = tasks.filter(task => test(task.task_date) && (!withTopic || task.topic_id) && (url.searchParams.get('completed_at') !== 'is.null' || !task.completed_at)).sort((a, b) => a.task_date.localeCompare(b.task_date) || a.sort_order - b.sort_order)
         }
+      } else if (table === 'adhd_question_items') {
+        if (request.method() === 'POST') questionItems.push({ id: `q${questionItems.length + 1}`, ...request.postDataJSON() })
+        else if (request.method() === 'DELETE') questionItems = questionItems.filter(item => `eq.${item.id}` !== url.searchParams.get('id'))
+        else data = questionItems
       } else if (table === 'adhd_plan_sets') {
         if (request.method() === 'POST') { const row = request.postDataJSON(); planSets.push({ id: `set${planSets.length + 1}`, created_at: '2026-11-24T10:00:00Z', ...row }) }
         else if (request.method() === 'DELETE') planSets = planSets.filter(set => `eq.${set.id}` !== url.searchParams.get('id'))
@@ -88,6 +92,10 @@ try {
         task.studied_seconds += Math.floor((Date.parse(body.p_ended_at) - Date.parse(body.p_started_at)) / 1000)
         if (task.studied_seconds >= 60) task.completed_at ??= body.p_ended_at
         data = task
+      } else if (table === 'advance_adhd_topics') { advanceCalls.push(request.postDataJSON()); data = 0
+      } else if (table === 'pull_adhd_task_forward') {
+        const body = request.postDataJSON(), task = tasks.find(t => t.id === body.p_task_id)
+        Object.assign(task, { task_date: body.p_day, is_extra: true }); pullCalls.push(body); data = task
       } else if (table === 'add_adhd_extra_task') {
         // Sunucu mantığı veritabanı testinde; burada bitmemiş ilk ortak konu verilir.
         const body = request.postDataJSON()
@@ -184,15 +192,16 @@ try {
   await plan.getByRole('heading', { name: 'DEHB Haftalık Plan' }).waitFor()
   assert.equal(await plan.getByRole('combobox', { name: 'Kişi' }).inputValue(), uid)
   await plan.getByRole('tab', { name: /^Sal/ }).getByText('2 ders').waitFor()
-  const topicSelect = plan.getByRole('combobox', { name: 'Konu' })
-  await plan.waitForFunction(() => document.querySelector('select[aria-label="Konu"]')?.value === 'shared:k2')
+  // Konu seçilmez; sistem sıradaki ortak konuyu kendisi atar.
+  const autoTopic = plan.locator('.adhd-plan-autotopic strong')
+  await plan.waitForFunction(() => document.querySelector('.adhd-plan-autotopic strong')?.textContent === 'Osmanlı Yükselme')
   await plan.getByRole('textbox', { name: /Kısa not/ }).fill('Video + 10 soru')
   inserts.length = 0
   await plan.getByRole('button', { name: 'Ekle', exact: true }).click()
   await plan.getByRole('tabpanel').getByText('Konu: Osmanlı Yükselme').waitFor()
   await plan.locator('.plan-form select').first().selectOption(subjects[1].id)
-  assert.equal(await topicSelect.inputValue(), 'shared:s1')
-  assert.equal(await topicSelect.getByText('KİŞİSEL KONU').count(), 0, 'personal topics are never offered')
+  assert.equal(await autoTopic.textContent(), 'Paragraf')
+  assert.equal(await plan.getByText('KİŞİSEL KONU').count(), 0, 'personal topics are never used')
   await plan.getByRole('button', { name: 'Ekle', exact: true }).click()
   await plan.getByRole('tabpanel').getByText('Konu: Paragraf').waitFor()
   assert.deepEqual(inserts.map(row => [row.task_date, row.subject_id, row.topic_id, row.topic_title, row.note]), [
@@ -239,14 +248,29 @@ try {
   await plan.getByRole('button', { name: 'Sonraki hafta' }).click()
   await plan.getByRole('tab', { name: /^Sal/ }).getByText('Plan yok').waitFor()
   await plan.getByText('Sınava 8 hafta var; son hafta tekrar için boş bırakıldı.', { exact: false }).waitFor()
-  if (shots) { await plan.locator('.adhd-ideal').scrollIntoViewIfNeeded(); await plan.screenshot({ path: `${shots}/adhd-ideal.png` }) }
   await plan.getByText('haftada', { exact: false }).first().waitFor()
   inserts.length = 0
+  // Hazır sete soru çözümü ekle: YDS (Pzt, Çar).
+  await plan.getByLabel('Soru çözümü adı').fill('YDS')
+  await plan.getByRole('group', { name: 'Soru çözümü günleri' }).getByRole('button', { name: 'Pzt' }).click()
+  await plan.getByRole('group', { name: 'Soru çözümü günleri' }).getByRole('button', { name: 'Çar' }).click()
+  await plan.getByRole('button', { name: 'Soru çözümü ekle' }).click()
+  await plan.getByText('“YDS” hazır sete soru çözümü olarak eklendi.').waitFor()
+  assert.deepEqual(questionItems.map(item => [item.label, item.days]), [['YDS', [1, 3]]])
+  if (shots) { await plan.locator('.adhd-ideal').scrollIntoViewIfNeeded(); await plan.screenshot({ path: `${shots}/adhd-ideal.png` }) }
   await plan.getByRole('button', { name: 'İdeal haftayı bu haftaya uygula' }).click()
   // Kalan konuların hepsi ileriki günlere planlı olduğu için dersler konusuz eklenir (konu iki kez verilmez).
-  await plan.getByText('“İdeal hafta” uygulandı: 2 ders eklendi.').waitFor()
-  assert.deepEqual(inserts.map(row => [row.subject_id, row.topic_id, row.note]).sort(), [[subjects[0].id, null, 'Konuyu çalış + 10 soru çöz'], [subjects[1].id, null, 'Konuyu çalış + 10 soru çöz']])
-  assert.equal(new Set(inserts.map(row => row.task_date)).size, 2, 'ideal week spreads lessons over different days')
+  // Her gün en az 2 ders (6 gün × 2) + 2 soru çözümü.
+  await plan.getByText('“İdeal hafta” uygulandı: 14 ders eklendi.').waitFor()
+  const lessons = inserts.filter(row => !row.is_questions), questionRows = inserts.filter(row => row.is_questions)
+  assert.equal(lessons.length, 12)
+  for (const date of ['2026-12-07', '2026-12-08', '2026-12-09', '2026-12-10', '2026-12-11', '2026-12-12']) {
+    const day = lessons.filter(row => row.task_date === date)
+    assert.ok(day.length >= 2, `${date} en az 2 ders`); assert.equal(new Set(day.map(row => row.subject_id)).size, day.length)
+  }
+  assert.deepEqual(questionRows.map(row => [row.task_date, row.subject_id, row.title, row.topic_id, row.note]), [['2026-12-07', null, 'YDS', null, 'Soru çözümü'], ['2026-12-09', null, 'YDS', null, 'Soru çözümü']])
+  await plan.getByRole('tab', { name: /^Pzt/ }).click()
+  await plan.getByRole('tabpanel').getByText('Soru çözümü', { exact: true }).first().waitFor()
   await plan.getByRole('button', { name: 'Önceki hafta' }).click()
   await plan.getByRole('button', { name: 'Önceki hafta' }).click()
   // Konu ilerlemesi: tamamlanan ortak konular tik ile görünür.
@@ -272,7 +296,10 @@ try {
   await me.goto(origin + '/')
   await me.getByRole('heading', { name: 'Bugün yapacakların' }).waitFor()
   await me.getByRole('button', { name: 'Ekstra çalışma' }).click()
-  await me.getByRole('heading', { name: 'Hangi derse ekstra çalışmak istersin?' }).waitFor()
+  // Önce bir sonraki planlı günün (yarın) dersleri önerilir.
+  const upcoming = me.getByRole('group', { name: 'Sonraki günün dersleri' })
+  await upcoming.getByText('Duraklama').waitFor()
+  await me.getByRole('heading', { name: 'Ya da istediğin derse çalış' }).waitFor()
   if (shots) { await me.waitForTimeout(600); await me.screenshot({ path: `${shots}/adhd-extra.png` }) }
   await me.getByRole('button', { name: 'Tarih', exact: true }).click()
   await me.getByRole('heading', { name: 'Osmanlı Yükselme', level: 1 }).waitFor()
@@ -296,6 +323,14 @@ try {
   assert.equal(topics[2].is_completed, true)
   await me.getByRole('list', { name: 'Ekstra çalışmalar' }).getByText('Duraklama', { exact: false }).waitFor()
   await me.getByText('/ 4 ders yapıldı', { exact: false }).waitFor()
+  assert.ok(advanceCalls.some(call => call.p_user_id === uid), 'topics advance automatically for the person')
+
+  // Yarının dersini bugüne al: kronometre hemen başlar.
+  await me.getByRole('button', { name: 'Ekstra çalışma' }).click()
+  await me.getByRole('group', { name: 'Sonraki günün dersleri' }).getByRole('button').first().click()
+  await me.getByRole('button', { name: 'Bitir' }).waitFor()
+  assert.equal(pullCalls.length, 1); assert.equal(pullCalls[0].p_day, today)
+  assert.equal(tasks.find(task => task.id === pullCalls[0].p_task_id).task_date, today)
 
   assert.deepEqual(errors, [])
   console.log('PASS today-only view, stopwatch with 1-minute completion, topic completion, reload recovery, weekly plan with next-topic progression, copy/paste, sets, ideal week, extra study, other-topic choice and impersonated ADHD view')

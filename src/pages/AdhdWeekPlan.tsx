@@ -13,10 +13,11 @@ import { isAgsExam } from '../lib/agsTopicSource'
 import { profileNameLabel } from '../lib/profileName'
 import {
   adhdError, deleteAdhdSet, deleteAdhdTask, deleteAdhdTasks, insertAdhdTasks, minutesLabel, moveAdhdTask,
+  addQuestionItem, advanceAdhdTopics, deleteQuestionItem, questionItemsError, readQuestionItems,
   readAdhdSets, readAdhdSettings, readAdhdWeek, readTakenTopics, readTopicCatalog, saveAdhdSet, setAdhdEnabled, setAdhdTopicDone, setsError,
 } from '../lib/adhdMode'
-import type { AdhdPlanSet, AdhdTask } from '../lib/adhdMode'
-import { buildIdealWeek, nextTopic, planItemsToTemplate, subjectIndex, tasksToTemplate, templateToRows, topicKey, weekDayKeys } from '../lib/adhdPlan'
+import type { AdhdPlanSet, AdhdQuestionItem, AdhdTask } from '../lib/adhdMode'
+import { buildIdealWeek, nextTopic, planItemsToTemplate, questionItemsToTemplate, subjectIndex, tasksToTemplate, templateToRows, topicKey, weekDayKeys } from '../lib/adhdPlan'
 import type { NamedSubject, TemplateItem, TopicCatalog } from '../lib/adhdPlan'
 import './Plan.css'
 import './Admin.css'
@@ -66,10 +67,12 @@ export default function AdhdWeekPlan() {
   const [subjectId, setSubjectId] = useState('')
   const [catalog, setCatalog] = useState<TopicCatalog>(new Map())
   const [examDate, setExamDate] = useState<string | null>(null)
+  const [questionItems, setQuestionItems] = useState<AdhdQuestionItem[]>([])
+  const [questionsProblem, setQuestionsProblem] = useState('')
+  const [questionLabel, setQuestionLabel] = useState('')
+  const [questionDays, setQuestionDays] = useState<number[]>([])
   const [catalogProblem, setCatalogProblem] = useState('')
   const [taken, setTaken] = useState<Set<string>>(new Set())
-  /** 'auto' = sıradaki konu; 'none' = konusuz; diğer = kind:id */
-  const [topicChoice, setTopicChoice] = useState('auto')
   const [note, setNote] = useState('')
   const [setName, setSetName] = useState('')
   const [busy, setBusy] = useState(false)
@@ -85,7 +88,6 @@ export default function AdhdWeekPlan() {
   const takenFrom = [localDayKey(new Date()), dayKeys[0]].sort()[0]
   const subjectTopics = catalog.get(subjectId) || []
   const suggested = nextTopic(subjectTopics, taken)
-  const topicValue = topicChoice === 'auto' ? (suggested ? topicKey(suggested.kind, suggested.id) : 'none') : topicChoice
 
   useEffect(() => { if (!isAdmin) navigate('/') }, [isAdmin, navigate])
   useEffect(() => { try { sessionStorage.setItem(CLIPBOARD_KEY, JSON.stringify(clipboard)) } catch { /* optional */ } }, [clipboard])
@@ -109,7 +111,7 @@ export default function AdhdWeekPlan() {
   useEffect(() => {
     if (!userId) return
     let active = true
-    setSubjects([]); setSubjectId(''); setCatalog(new Map()); setCatalogProblem(''); setTopicChoice('auto')
+    setSubjects([]); setSubjectId(''); setCatalog(new Map()); setCatalogProblem('')
     void supabase.from('subjects').select('id,name,exams(name,base_template_key,exam_date)').eq('user_id', userId).order('name').then(({ data }) => {
       if (!active) return
       const raw = (data || []) as unknown as { id: string; name: string; exams?: { name?: string; base_template_key?: string | null; exam_date?: string | null } | null }[]
@@ -127,6 +129,8 @@ export default function AdhdWeekPlan() {
     if (!userId) return
     setLoading(true)
     try {
+      // Sistem konuları kendisi planlar: bitenler düşer, başlanmamış dersler sıradaki konulara kayar.
+      await advanceAdhdTopics(userId)
       const [week, planned] = await Promise.all([readAdhdWeek(userId, dayKeys[0], dayKeys[6]), readTakenTopics(userId, takenFrom)])
       setTasks(week); setTaken(planned)
     }
@@ -144,6 +148,11 @@ export default function AdhdWeekPlan() {
     try { setSets(await readAdhdSets()); setSetsProblem('') } catch (error) { setSetsProblem(setsError(error)) }
   }, [])
   useEffect(() => { if (isAdmin) void loadSets() }, [isAdmin, loadSets])
+
+  const loadQuestions = useCallback(async () => {
+    try { setQuestionItems(await readQuestionItems()); setQuestionsProblem('') } catch (error) { setQuestionsProblem(questionItemsError(error)) }
+  }, [])
+  useEffect(() => { if (isAdmin) void loadQuestions() }, [isAdmin, loadQuestions])
 
   const run = async (action: () => Promise<string | void>) => {
     if (busy) return
@@ -179,12 +188,12 @@ export default function AdhdWeekPlan() {
     event.preventDefault()
     if (!subjectId) return
     void run(async () => {
-      const topic = topicValue === 'none' ? null : subjectTopics.find(candidate => topicKey(candidate.kind, candidate.id) === topicValue) ?? null
+      const topic = suggested
       await insertAdhdTasks([{
         user_id: userId, task_date: selectedKey, subject_id: subjectId, note: note.trim() || null, sort_order: dayTasks.length,
         topic_kind: topic?.kind ?? null, topic_id: topic?.id ?? null, topic_title: topic?.title ?? null,
       }])
-      setNote(''); setTopicChoice('auto')
+      setNote('')
     })
   }
 
@@ -257,6 +266,22 @@ export default function AdhdWeekPlan() {
     })
   }
 
+  const addQuestion = (event: FormEvent) => {
+    event.preventDefault()
+    const label = questionLabel.trim()
+    if (!label || !questionDays.length) return
+    void run(async () => {
+      try { await addQuestionItem(label, questionDays, questionItems.length) } catch (error) { throw Object.assign(new Error(questionItemsError(error)), { friendly: true }) }
+      setQuestionLabel(''); setQuestionDays([]); await loadQuestions()
+      return `“${label}” hazır sete soru çözümü olarak eklendi.`
+    })
+  }
+  const removeQuestion = (id: string) => run(async () => {
+    try { await deleteQuestionItem(id) } catch (error) { throw Object.assign(new Error(questionItemsError(error)), { friendly: true }) }
+    await loadQuestions()
+    return 'Soru çözümü hazır setten çıkarıldı.'
+  })
+
   const removeSet = async (set: AdhdPlanSet) => {
     const result = await Swal.fire({ title: 'Seti sil', text: `“${set.name}” seti silinsin mi? Daha önce uygulanmış planlar etkilenmez.`, icon: 'warning', showCancelButton: true, confirmButtonText: 'Sil', cancelButtonText: 'İptal', confirmButtonColor: '#b6454e', cancelButtonColor: '#94a3b8' })
     if (result.isConfirmed) void run(async () => { await deleteAdhdSet(set.id); await loadSets(); return 'Set silindi.' })
@@ -278,7 +303,9 @@ export default function AdhdWeekPlan() {
   if (!isAdmin) return null
   // Ortak AGS konularında kişinin ilerlemesi (tamamlananlar tik ile).
   // Hazır ideal set: sınava kalan haftaya ve bitmemiş ortak konulara göre her seferinde yeniden hesaplanır.
-  const ideal = buildIdealWeek([...catalog.entries()].map(([id, list]) => ({ name: subjects.find(subject => subject.id === id)?.name || '', remaining: list.filter(topic => !topic.completed).length })).filter(row => row.name), dayKeys[0], examDate)
+  const idealLessons = buildIdealWeek([...catalog.entries()].map(([id, list]) => ({ name: subjects.find(subject => subject.id === id)?.name || '', remaining: list.filter(topic => !topic.completed).length })).filter(row => row.name), dayKeys[0], examDate)
+  const ideal = idealLessons
+  const idealItems = [...ideal.items, ...questionItemsToTemplate(questionItems)]
   const progress = [...catalog.entries()].map(([id, list]) => ({ id, name: subjects.find(subject => subject.id === id)?.name || 'Ders', topics: list }))
   const totalTopics = progress.reduce((sum, row) => sum + row.topics.length, 0)
   const doneTopics = progress.reduce((sum, row) => sum + row.topics.filter(topic => topic.completed).length, 0)
@@ -346,7 +373,7 @@ export default function AdhdWeekPlan() {
               : dayTasks.map((task, i) => (
                 <div key={task.id} className={`plan-row ${task.completed_at ? 'adhd-plan-done' : ''}`}>
                   <span className="plan-row-index">{task.completed_at ? <Check size={14} /> : String(i + 1).padStart(2, '0')}</span>
-                  <div className="plan-row-copy"><strong>{task.subjects?.name || 'Ders'}{task.is_extra && <em className="adhd-plan-extra">Ekstra</em>}</strong>{task.topic_title && <span className={`adhd-plan-topic ${task.topic_completed_at ? 'is-done' : ''}`}>Konu: {task.topic_title}{task.topic_completed_at ? ' · bitti ✓' : ''}</span>}<span>{[task.note, task.completed_at ? `Yapıldı · ${minutesLabel(task.studied_seconds, 'çalışıldı')}` : task.studied_seconds ? minutesLabel(task.studied_seconds, 'çalışıldı') : ''].filter(Boolean).join(' · ') || 'Bekliyor'}</span></div>
+                  <div className="plan-row-copy"><strong>{task.subjects?.name || task.title || 'Ders'}{task.is_extra && <em className="adhd-plan-extra">Ekstra</em>}{task.is_questions && <em className="adhd-plan-extra adhd-plan-q">Soru çözümü</em>}</strong>{task.topic_title && <span className={`adhd-plan-topic ${task.topic_completed_at ? 'is-done' : ''}`}>Konu: {task.topic_title}{task.topic_completed_at ? ' · bitti ✓' : ''}</span>}<span>{[task.note, task.completed_at ? `Yapıldı · ${minutesLabel(task.studied_seconds, 'çalışıldı')}` : task.studied_seconds ? minutesLabel(task.studied_seconds, 'çalışıldı') : ''].filter(Boolean).join(' · ') || 'Bekliyor'}</span></div>
                   <span className="adhd-admin-actions">
                     {task.topic_id && <button type="button" onClick={() => void toggleTopic(task)} disabled={busy} className={`adhd-plan-topic-toggle ${task.topic_completed_at ? 'is-done' : ''}`} aria-label={task.topic_completed_at ? `${task.topic_title} konusunu tekrar aç` : `${task.topic_title} konusunu bitti işaretle`} title={task.topic_completed_at ? 'Konuyu tekrar aç' : 'Konu bitti'}><Check size={15} /></button>}
                     <button type="button" onClick={() => void run(() => moveAdhdTask(dayTasks, i, -1))} disabled={busy || i === 0} aria-label="Yukarı taşı"><ArrowUp size={15} /></button>
@@ -363,19 +390,15 @@ export default function AdhdWeekPlan() {
           <section className="plan-card">
             <div className="plan-card-head"><div><p className="plan-eyebrow">{dayNames[selectedDay - 1].toUpperCase()} GÜNÜNE EKLE</p><h2>Yeni ders</h2></div><Plus size={20} /></div>
             <form className="plan-form" onSubmit={add}>
-              <label>Ders<select value={subjectId} onChange={event => { setSubjectId(event.target.value); setTopicChoice('auto') }} disabled={!subjectOptions.length || busy}>
+              <label>Ders<select value={subjectId} onChange={event => { setSubjectId(event.target.value) }} disabled={!subjectOptions.length || busy}>
                 {!subjectOptions.length && <option value="">Bu kişinin dersi yok</option>}
                 {subjectOptions.map(subject => <option key={subject.id} value={subject.id}>{subject.name}</option>)}
               </select></label>
-              <label>Konu <span>{suggested ? 'sıradaki konu seçili' : subjectTopics.length ? 'tüm konular bitti veya planlandı' : 'bu derste konu yok'}</span>
-                <select aria-label="Konu" value={topicValue} onChange={event => setTopicChoice(event.target.value)} disabled={busy || !subjectId}>
-                  <option value="none">Konu yok</option>
-                  {subjectTopics.map(topic => {
-                    const key = topicKey(topic.kind, topic.id)
-                    return <option key={key} value={key}>{topic.completed ? '✓ ' : ''}{topic.title}{topic.completed ? ' (bitti)' : taken.has(key) ? ' (planlandı)' : ''}</option>
-                  })}
-                </select>
-              </label>
+              <div className="adhd-plan-autotopic" aria-live="polite">
+                <span>Konu</span>
+                <strong>{suggested ? suggested.title : subjectTopics.length ? 'Tüm konular bitti veya planlandı' : 'Bu derste ortak konu yok'}</strong>
+                <small>Sistem konuları sırayla kendisi atar; konu bitince sonraki dersler kendiliğinden ilerler.</small>
+              </div>
               {catalogProblem && <p className="adhd-plan-hint">{catalogProblem}</p>}
               <label>Kısa not <span>isteğe bağlı</span><input value={note} onChange={event => setNote(event.target.value)} maxLength={200} placeholder="Örn. 20 soru çöz" disabled={busy} /></label>
               <button className="plan-submit" disabled={!subjectId || busy}><Plus size={16} />Ekle</button>
@@ -389,16 +412,40 @@ export default function AdhdWeekPlan() {
                 <div className="adhd-ideal" aria-labelledby="adhd-ideal-title">
                   <div className="adhd-ideal-head">
                     <span><Sparkles size={16} aria-hidden="true" /> <strong id="adhd-ideal-title">Hazır set · İdeal hafta</strong></span>
-                    <button type="button" className="is-primary" aria-label="İdeal haftayı bu haftaya uygula" onClick={() => void applyTemplate(ideal.items, '“İdeal hafta” uygulandı')} disabled={busy || !userId || !ideal.items.length}>Bu haftaya uygula</button>
+                    <button type="button" className="is-primary" aria-label="İdeal haftayı bu haftaya uygula" onClick={() => void applyTemplate(idealItems, '“İdeal hafta” uygulandı')} disabled={busy || !userId || !idealItems.length}>Bu haftaya uygula</button>
                   </div>
                   {ideal.items.length ? <>
                     <p className="adhd-ideal-summary">
                       {ideal.examKnown ? `Sınava ${ideal.weeksLeft} hafta var${ideal.weeksLeft >= 4 ? '; son hafta tekrar için boş bırakıldı' : ''}.` : 'Sınav tarihi girilmemiş; 12 haftada bitecek şekilde hesaplandı.'}
-                      {' '}{ideal.remaining} konu kaldı → haftada <b>{ideal.perWeek} ders</b>, günde en fazla {Math.ceil(ideal.perWeek / 6)} ders (Pzt–Cmt), Pazar dinlenme.
+                      {' '}{ideal.remaining} konu kaldı → haftada <b>{ideal.perWeek} ders</b>, her gün en az 2 ders (Pzt–Cmt), Pazar dinlenme.
                     </p>
                     {!ideal.fits && <p className="adhd-plan-message is-error">Konuların yetişmesi için haftada {ideal.needed} ders gerekiyor; DEHB'ye uygun en fazla {ideal.perWeek} ders önerildi. Ekstra çalışmalar açığı kapatır.</p>}
-                    <ol className="adhd-ideal-days">{dayShort.slice(0, 6).map((short, i) => <li key={short}><b>{short}</b>{ideal.items.filter(item => item.day === i + 1).map(item => item.subject_name).join(' · ') || '—'}</li>)}</ol>
                   </> : <p className="adhd-plan-hint">Tüm ortak konular bitmiş görünüyor. 🎉</p>}
+                  {idealItems.length > 0 && <ol className="adhd-ideal-days">{dayShort.map((short, i) => {
+                    const dayItems = idealItems.filter(item => item.day === i + 1)
+                    if (i === 6 && !dayItems.length) return null
+                    return <li key={short}><b>{short}</b><span>{dayItems.map((item, n) => <span key={n} className={item.questions ? 'adhd-ideal-q' : ''}>{n ? ' · ' : ''}{item.questions ? '📝 ' : ''}{item.subject_name}</span>)}{!dayItems.length && '—'}</span></li>
+                  })}</ol>}
+
+                  <div className="adhd-ideal-questions" aria-labelledby="adhd-questions-title">
+                    <strong id="adhd-questions-title">📝 Soru çözümü</strong>
+                    <p className="adhd-plan-hint">Deneme veya soru çözümü yaz, günlerini seç; ideal hafta her uygulandığında konusuz olarak eklenir.</p>
+                    {questionsProblem ? <p className="adhd-plan-message is-error" role="alert">{questionsProblem}</p> : <>
+                      {questionItems.length > 0 && <ul className="adhd-question-list">{questionItems.map(item => (
+                        <li key={item.id}>
+                          <span><strong>{item.label}</strong><small>{item.days.map(day => dayShort[day - 1]).join(', ')}</small></span>
+                          <button type="button" onClick={() => void removeQuestion(item.id)} disabled={busy} className="is-danger" aria-label={`${item.label} soru çözümünü sil`}><Trash2 size={15} /></button>
+                        </li>
+                      ))}</ul>}
+                      <form className="adhd-question-form" onSubmit={addQuestion}>
+                        <input value={questionLabel} onChange={event => setQuestionLabel(event.target.value)} maxLength={120} placeholder="Ör. YDS veya Sözel Yetenek Deneme" aria-label="Soru çözümü adı" disabled={busy} />
+                        <div className="adhd-question-days" role="group" aria-label="Soru çözümü günleri">
+                          {dayShort.map((short, i) => <button key={short} type="button" aria-pressed={questionDays.includes(i + 1)} className={questionDays.includes(i + 1) ? 'is-on' : ''} onClick={() => setQuestionDays(previous => previous.includes(i + 1) ? previous.filter(day => day !== i + 1) : [...previous, i + 1])} disabled={busy}>{short}</button>)}
+                        </div>
+                        <button type="submit" disabled={busy || !questionLabel.trim() || !questionDays.length}><Plus size={15} /> Soru çözümü ekle</button>
+                      </form>
+                    </>}
+                  </div>
                 </div>
               )}
               {setsProblem ? <p className="adhd-plan-message is-error" role="alert">{setsProblem}</p> : <>

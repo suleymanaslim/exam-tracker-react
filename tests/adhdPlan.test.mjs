@@ -93,5 +93,32 @@ test('hazır ideal hafta: konular sınava yetişir, günde en fazla 3-4 ders, Pa
   const tight = buildIdealWeek([{ name: 'A', remaining: 200 }, { name: 'B', remaining: 200 }], '2026-11-23', '2026-12-07')
   assert.equal(tight.fits, false); assert.equal(tight.perWeek, 24)
   const noDate = buildIdealWeek([{ name: 'A', remaining: 24 }], '2026-11-23', null)
-  assert.equal(noDate.examKnown, false); assert.equal(noDate.studyWeeks, 11); assert.equal(noDate.perWeek, 3)
+  assert.equal(noDate.examKnown, false); assert.equal(noDate.studyWeeks, 11); assert.equal(noDate.perWeek, 12, 'en az 2 ders × 6 gün')
+})
+
+test('hazır set her çalışma gününe en az 2 ders koyar; konusu kalan tek dersin yanına biten ders tekrar olarak gelir', async () => {
+  const { buildIdealWeek } = await import('../src/lib/adhdPlan.ts')
+  const few = buildIdealWeek([{ name: 'Tarih', remaining: 3 }, { name: 'Sözel', remaining: 2 }, { name: 'Biten', remaining: 0 }], '2026-12-07', '2027-02-01')
+  for (let day = 1; day <= 6; day++) {
+    const list = few.items.filter(item => item.day === day).map(item => item.subject_name)
+    assert.ok(list.length >= 2, `gün ${day} en az 2 ders`)
+    assert.equal(new Set(list).size, list.length)
+  }
+  const single = buildIdealWeek([{ name: 'Tarih', remaining: 1 }, { name: 'Biten', remaining: 0 }], '2026-12-07', '2027-02-01')
+  for (let day = 1; day <= 6; day++) assert.deepEqual(single.items.filter(item => item.day === day).map(item => item.subject_name).sort(), ['Biten', 'Tarih'])
+  assert.equal(buildIdealWeek([], '2026-12-07', '2027-02-01').items.length, 0)
+})
+
+test('soru çözümü maddeleri konusuz eklenir; kişide aynı adlı ders varsa ona bağlanır, yoksa adıyla', async () => {
+  const { questionItemsToTemplate } = await import('../src/lib/adhdPlan.ts')
+  const template = questionItemsToTemplate([{ label: ' YDS ', days: [3, 1, 3] }, { label: 'Sözel Yetenek Deneme', days: [6] }])
+  assert.deepEqual(template.map(item => [item.day, item.subject_name, item.note, item.questions]), [[1, 'YDS', 'Soru çözümü', true], [3, 'YDS', 'Soru çözümü', true], [6, 'Sözel Yetenek Deneme', 'Soru çözümü', true]])
+  const catalog = new Map([['yds', [{ kind: 'shared', id: 'x', title: 'Konu', completed: false }]]])
+  const { rows, missing } = templateToRows(template, { userId: 'u', dayKeys: keys, subjects: subjectIndex([{ id: 'yds', name: 'YDS' }]), catalog, existing: { '2026-11-23': 2 } })
+  assert.deepEqual(missing, [])
+  assert.deepEqual(rows.map(row => [row.task_date, row.subject_id, row.title, row.topic_id, row.is_questions, row.sort_order]), [
+    ['2026-11-23', 'yds', null, null, true, 2], ['2026-11-25', 'yds', null, null, true, 0], ['2026-11-28', null, 'Sözel Yetenek Deneme', null, true, 0],
+  ])
+  // Kopyalanınca soru çözümü olarak kalır.
+  assert.deepEqual(tasksToTemplate([{ task_date: '2026-11-28', note: 'Soru çözümü', title: 'Sözel Yetenek Deneme', is_questions: true, subjects: null }], keys), [{ day: 6, subject_name: 'Sözel Yetenek Deneme', note: 'Soru çözümü', questions: true }])
 })

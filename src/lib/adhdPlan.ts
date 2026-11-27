@@ -2,15 +2,17 @@
 // Ders kimlikleri kişiye özel olduğundan kopyalar ve setler ders ADIYLA taşınır.
 
 /** topic_title: kopyalanan dersin konusu. Setlerde boş kalır; konu uygulanırken sıradakinden seçilir. */
-export interface TemplateItem { day: number; subject_name: string; note: string | null; topic_title?: string | null }
+/** questions: soru çözümü maddesi (konusuz; kişide bu adda ders yoksa adıyla eklenir) */
+export interface TemplateItem { day: number; subject_name: string; note: string | null; topic_title?: string | null; questions?: boolean }
 export interface NamedSubject { id: string; name: string; ags?: boolean }
 export type TopicKind = 'personal' | 'shared'
 export interface CatalogTopic { kind: TopicKind; id: string; title: string; completed: boolean }
 /** Kişinin ders kimliği → sıralı konu listesi */
 export type TopicCatalog = Map<string, CatalogTopic[]>
 export interface TaskRow {
-  user_id: string; task_date: string; subject_id: string; note: string | null; sort_order: number
+  user_id: string; task_date: string; subject_id: string | null; note: string | null; sort_order: number
   topic_kind: TopicKind | null; topic_id: string | null; topic_title: string | null
+  title?: string | null; is_questions?: boolean
 }
 
 export const topicKey = (kind: string, id: string) => `${kind}:${id}`
@@ -42,12 +44,21 @@ export function weekDayKeys(monday: string) {
 }
 
 /** Mevcut görevleri ders adıyla şablona çevirir. */
-export function tasksToTemplate(tasks: { task_date: string; note: string | null; topic_title?: string | null; subjects?: { name: string } | null }[], dayKeys: string[], keepTopics = true): TemplateItem[] {
-  return tasks.flatMap(task => {
+export function tasksToTemplate(tasks: { task_date: string; note: string | null; topic_title?: string | null; title?: string | null; is_questions?: boolean; subjects?: { name: string } | null }[], dayKeys: string[], keepTopics = true): TemplateItem[] {
+  return tasks.flatMap((task): TemplateItem[] => {
     const day = dayKeys.indexOf(task.task_date) + 1
-    const name = task.subjects?.name
-    return day > 0 && name ? [{ day, subject_name: name, note: task.note, ...(keepTopics && task.topic_title ? { topic_title: task.topic_title } : {}) }] : []
+    const name = task.subjects?.name || task.title
+    if (day <= 0 || !name) return [] as TemplateItem[]
+    if (task.is_questions) return [{ day, subject_name: name, note: task.note, questions: true }]
+    return [{ day, subject_name: name, note: task.note, ...(keepTopics && task.topic_title ? { topic_title: task.topic_title } : {}) }]
   })
+}
+
+/** Hazır sete eklenen soru çözümü maddeleri → şablon (her seçili gün için bir madde). */
+export const QUESTIONS_NOTE = 'Soru çözümü'
+export function questionItemsToTemplate(items: { label: string; days: number[] }[]): TemplateItem[] {
+  return items.flatMap(item => [...new Set(item.days)].filter(day => day >= 1 && day <= 7).sort((a, b) => a - b)
+    .map(day => ({ day, subject_name: item.label.trim(), note: QUESTIONS_NOTE, questions: true })))
 }
 
 /** Normal haftalık plan maddelerini (plan_items) şablona çevirir; dersi olmayanlar atlanır. */
@@ -84,6 +95,13 @@ export function templateToRows(items: TemplateItem[], options: {
     const date = options.dayKeys[day - 1]
     const subjectId = options.subjects.get(normalizeSubjectName(item.subject_name))
     if (!date) continue
+    if (item.questions) {
+      // Soru çözümü konusuzdur; kişide bu adda ders yoksa yalnızca adıyla eklenir.
+      rows.push({ user_id: options.userId, task_date: date, subject_id: subjectId ?? null, note: item.note, sort_order: counts[date] ?? 0,
+        topic_kind: null, topic_id: null, topic_title: null, title: subjectId ? null : item.subject_name, is_questions: true })
+      counts[date] = (counts[date] ?? 0) + 1
+      continue
+    }
     if (!subjectId) { missing.add(item.subject_name); continue }
     const topics = options.catalog?.get(subjectId)
     const wanted = item.topic_title ? normalizeSubjectName(item.topic_title) : ''
@@ -121,8 +139,8 @@ export interface IdealWeek {
  * - Pzt–Cmt'ye dağıtılır, Pazar dinlenme. DEHB'ye uygun olarak günde 3, gerekirse en fazla 4 ders.
  * - Aynı gün aynı ders tekrarlanmasın diye dersler sırayla karıştırılır.
  */
-export function buildIdealWeek(subjects: { name: string; remaining: number }[], monday: string, examDate?: string | null, options: { days?: number; maxPerDay?: number } = {}): IdealWeek {
-  const days = options.days ?? 6, maxPerDay = options.maxPerDay ?? 4
+export function buildIdealWeek(subjects: { name: string; remaining: number }[], monday: string, examDate?: string | null, options: { days?: number; maxPerDay?: number; minPerDay?: number } = {}): IdealWeek {
+  const days = options.days ?? 6, maxPerDay = options.maxPerDay ?? 4, minPerDay = options.minPerDay ?? 2
   const examKnown = Boolean(examDate) && examDate! > monday
   const weeksLeft = examKnown ? Math.floor((Date.parse(`${examDate}T12:00:00`) - Date.parse(`${monday}T12:00:00`)) / (7 * 864e5)) : DEFAULT_WEEKS
   const studyWeeks = Math.max(1, weeksLeft >= 4 ? weeksLeft - 1 : weeksLeft)
@@ -136,6 +154,24 @@ export function buildIdealWeek(subjects: { name: string; remaining: number }[], 
   while (excess > 0) {
     const biggest = [...quotas].sort((a, b) => b.count - a.count)[0]
     biggest.count--; excess--
+  }
+  // Her çalışma gününde en az 2 ders olsun: eksikse konusu en çok kalan derslerden sırayla ekle.
+  // Konusu kalan ders 2'den azsa, konusu biten dersler tekrar dersi olarak havuza girer.
+  const pool = [...quotas]
+  if (pool.length < minPerDay) {
+    for (const subject of [...subjects].filter(subject => subject.remaining <= 0)) {
+      if (pool.length >= minPerDay) break
+      if (!pool.some(quota => quota.name === subject.name)) { const quota = { name: subject.name, count: 0 }; pool.push(quota); quotas.push(quota) }
+    }
+  }
+  const remainingOf = (name: string) => subjects.find(subject => subject.name === name)?.remaining ?? 0
+  let total = quotas.reduce((sum, quota) => sum + quota.count, 0)
+  while (pool.length && total < days * minPerDay) {
+    // Aynı gün tekrarı olmasın diye bir ders haftada en fazla `days` kez alınır (mümkünse).
+    const open = pool.filter(quota => quota.count < days)
+    const candidates = open.length ? open : pool
+    const pick = [...candidates].sort((a, b) => (remainingOf(b.name) + 1) / (b.count + 1) - (remainingOf(a.name) + 1) / (a.count + 1))[0]
+    pick.count++; total++
   }
   // Günlere yerleştir: her ders en az yüklü ve birbirinden uzak günlere gider (aynı gün tekrar etmez).
   const load = Array.from({ length: days }, () => 0)

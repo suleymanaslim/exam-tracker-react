@@ -144,3 +144,7 @@
 .adhd-link:disabled { opacity: .6; cursor: wait; }
 .adhd-link:focus-visible { outline: 3px solid var(--adhd-accent); outline-offset: 3px; border-radius: 6px; }
 .adhd-section-title { margin: 6px 0 -6px; font-size: 18px; font-weight: 600; color: var(--adhd-muted); }
+
+.adhd-btn-upcoming { background: var(--adhd-card); border: 2px solid var(--adhd-accent); }
+.adhd-btn-upcoming span { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
+.adhd-btn-upcoming small { font-size: 15px; font-weight: 600; color: var(--adhd-accent-strong); overflow-wrap: anywhere; }
