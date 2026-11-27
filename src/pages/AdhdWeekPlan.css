@@ -51,3 +51,13 @@
 .adhd-topic-name{flex:1;min-width:0;overflow-wrap:anywhere}
 .adhd-topic-subject li small{flex-shrink:0;font-size:11px;color:#4269a8;background:#edf2f8;border-radius:5px;padding:1px 6px}
 @media(max-width:767px){.adhd-topic-progress-body{padding:14px 16px;grid-template-columns:1fr}}
+.adhd-plan-extra{margin-left:8px;padding:1px 7px;border-radius:6px;background:#fff4e5;color:#9a5b13;font-size:11px;font-style:normal;font-weight:600;vertical-align:middle}
+.adhd-ideal{display:flex;flex-direction:column;gap:10px;padding:14px;border:1px solid #cfe4e1;border-radius:12px;background:#f3faf8}
+.adhd-ideal-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px}
+.adhd-ideal-head>span{display:flex;align-items:center;gap:6px;color:#245955;font-size:14px}
+.adhd-ideal-head button{min-height:36px;padding:6px 12px;border-radius:9px;font-size:13px;font-weight:600;border:1px solid #4269a8}
+.adhd-ideal-summary{margin:0;font-size:13px;color:#52647b;line-height:1.55}
+.adhd-ideal-days{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px;font-size:12px;color:#24354a}
+.adhd-ideal-days li{display:flex;gap:8px;overflow-wrap:anywhere}
+.adhd-ideal-days b{flex-shrink:0;width:30px;color:#245955}
+.adhd-plan-sets .adhd-ideal-days li{padding:0;border:0;border-radius:0;align-items:baseline}

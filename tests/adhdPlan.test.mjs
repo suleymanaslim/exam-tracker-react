@@ -66,3 +66,32 @@ test('kopyalanan konu, kişide bitmemiş aynı adlı konu varsa korunur', () => 
     { userId: 'u', dayKeys: keys, subjects: subjectIndex([{ id: 't', name: 'Tarih' }]), catalog })
   assert.deepEqual(rows.map(row => [row.topic_kind, row.topic_id]), [['shared', 's2'], ['shared', 's1']])
 })
+
+test('hazır ideal hafta: konular sınava yetişir, günde en fazla 3-4 ders, Pazar boş, aynı gün aynı ders yok', async () => {
+  const { buildIdealWeek } = await import('../src/lib/adhdPlan.ts')
+  const subjects = [
+    { name: 'Eğitim Bilimleri', remaining: 40 }, { name: 'Mevzuat', remaining: 12 }, { name: 'Tarih', remaining: 20 },
+    { name: 'Coğrafya', remaining: 16 }, { name: 'Sayısal', remaining: 24 }, { name: 'Sözel', remaining: 10 }, { name: 'Biten', remaining: 0 },
+  ]
+  // 2026-11-23 → 2027-02-01: 10 hafta kaldı, 9 haftada bitmeli (son hafta tekrar).
+  const week = buildIdealWeek(subjects, '2026-11-23', '2027-02-01')
+  assert.equal(week.weeksLeft, 10); assert.equal(week.studyWeeks, 9)
+  const count = name => week.items.filter(item => item.subject_name === name).length
+  assert.deepEqual(['Eğitim Bilimleri', 'Mevzuat', 'Tarih', 'Coğrafya', 'Sayısal', 'Sözel'].map(count), [5, 2, 3, 2, 3, 2])
+  assert.equal(count('Biten'), 0)
+  assert.ok(week.fits); assert.equal(week.perWeek, 17)
+  for (const name of ['Eğitim Bilimleri', 'Tarih', 'Sayısal']) assert.ok(count(name) * week.studyWeeks >= subjects.find(s => s.name === name).remaining, `${name} yetişir`)
+  for (let day = 1; day <= 7; day++) {
+    const list = week.items.filter(item => item.day === day).map(item => item.subject_name)
+    assert.ok(list.length <= 3, `gün ${day} en fazla 3 ders`)
+    assert.equal(new Set(list).size, list.length, `gün ${day} aynı ders tekrar etmez`)
+  }
+  assert.equal(week.items.filter(item => item.day === 7).length, 0, 'Pazar dinlenme')
+  assert.ok(week.items.every(item => item.note && !item.topic_title))
+
+  // Sığmıyorsa günde 4'e çıkar ve uyarır; sınav tarihi yoksa 12 hafta varsayılır.
+  const tight = buildIdealWeek([{ name: 'A', remaining: 200 }, { name: 'B', remaining: 200 }], '2026-11-23', '2026-12-07')
+  assert.equal(tight.fits, false); assert.equal(tight.perWeek, 24)
+  const noDate = buildIdealWeek([{ name: 'A', remaining: 24 }], '2026-11-23', null)
+  assert.equal(noDate.examKnown, false); assert.equal(noDate.studyWeeks, 11); assert.equal(noDate.perWeek, 3)
+})

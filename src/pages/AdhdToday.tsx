@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { BellRing, BookOpen, Check, LogOut, Play, Square, RotateCw, Sparkles } from 'lucide-react'
+import { ArrowLeft, BellRing, BookOpen, Check, LogOut, Play, Plus, Square, RotateCw, Sparkles } from 'lucide-react'
 import { localDayKey } from '../lib/statsPeriod'
 import {
-  ADHD_CHANGED_EVENT, ADHD_DONE_SECONDS, adhdError, loadRunningTimer, minutesLabel,
-  readAdhdTasks, recordAdhdStudy, setAdhdTopicDone, storeRunningTimer,
+  ADHD_CHANGED_EVENT, ADHD_DONE_SECONDS, addAdhdExtra, adhdError, changeAdhdTaskTopic, loadRunningTimer, minutesLabel,
+  readAdhdSubjects, readAdhdTasks, readTopicCatalog, recordAdhdStudy, setAdhdTopicDone, storeRunningTimer,
 } from '../lib/adhdMode'
+import { isAgsExam } from '../lib/agsTopicSource'
+import type { CatalogTopic } from '../lib/adhdPlan'
 import type { AdhdTask, RunningAdhdTimer } from '../lib/adhdMode'
 import './AdhdToday.css'
 
@@ -33,7 +35,17 @@ export default function AdhdToday({ userId, onLogout }: { userId: string; onLogo
   const [topicSaving, setTopicSaving] = useState(false)
   const [topicError, setTopicError] = useState('')
   const [topicDone, setTopicDone] = useState('')
+  // "Başka bir konu çalıştım": o dersin bitmemiş konularından seçim
+  const [topicChoices, setTopicChoices] = useState<CatalogTopic[] | null>(null)
+  // Ekstra çalışma: kişi istediği dersi seçer
+  const [extraSubjects, setExtraSubjects] = useState<{ id: string; name: string }[] | null>(null)
+  const [extraBusy, setExtraBusy] = useState(false)
+  const [extraError, setExtraError] = useState('')
   const request = useRef(0)
+  const extraPanel = useRef<HTMLElement>(null)
+  const extraOpen = extraSubjects !== null
+  // Seçim kutusu sayfanın altında açılır; görünür olsun.
+  useEffect(() => { if (extraOpen) extraPanel.current?.scrollIntoView({ block: 'center', behavior: 'smooth' }) }, [extraOpen])
 
   const load = useCallback(async () => {
     const id = ++request.current
@@ -62,8 +74,10 @@ export default function AdhdToday({ userId, onLogout }: { userId: string; onLogo
     if (running && !loading && !loadError && !runningTask) { storeRunningTimer(userId, null); setRunning(null) }
   }, [running, runningTask, loading, loadError, userId])
 
-  const done = tasks.filter(task => task.completed_at).length
-  const next = useMemo(() => tasks.find(task => !task.completed_at) ?? null, [tasks])
+  const planned = useMemo(() => tasks.filter(task => !task.is_extra), [tasks])
+  const extras = useMemo(() => tasks.filter(task => task.is_extra), [tasks])
+  const done = planned.filter(task => task.completed_at).length
+  const next = useMemo(() => planned.find(task => !task.completed_at) ?? null, [planned])
 
   const start = (task: AdhdTask) => {
     if (running) return
@@ -94,9 +108,61 @@ export default function AdhdToday({ userId, onLogout }: { userId: string; onLogo
     void save(state)
   }
 
+  const openTopicChoices = async () => {
+    if (!askTopic) return
+    setTopicSaving(true); setTopicError('')
+    try {
+      const catalog = await readTopicCatalog(userId, [{ id: askTopic.subject_id, name: subjectName(askTopic), ags: true }])
+      const list = (catalog.get(askTopic.subject_id) || []).filter(topic => !topic.completed && topic.id !== askTopic.topic_id)
+      if (!list.length) setTopicError('Bu derste seçilebilecek başka konu yok.')
+      else setTopicChoices(list)
+    } catch (error) { setTopicError(adhdError(error)) }
+    finally { setTopicSaving(false) }
+  }
+
+  const chooseTopic = async (topic: CatalogTopic) => {
+    if (!askTopic) return
+    setTopicSaving(true); setTopicError('')
+    try {
+      const saved = await changeAdhdTaskTopic(askTopic.id, topic.id)
+      const merged = { ...askTopic, ...saved, subjects: askTopic.subjects }
+      setTasks(previous => previous.map(task => task.id === saved.id ? merged : task))
+      setTopicChoices(null)
+      // Yeni konu için soru tekrar sorulur.
+      setAskTopic(saved.topic_completed_at ? null : merged)
+      if (saved.topic_completed_at) setTopicDone(saved.topic_title || '')
+    } catch (error) { setTopicError(adhdError(error)) }
+    finally { setTopicSaving(false) }
+  }
+
+  const openExtra = async () => {
+    setExtraError(''); setCelebrate(null)
+    setExtraSubjects([])
+    try {
+      const rows = await readAdhdSubjects(userId)
+      const ags = rows.filter(row => isAgsExam(row.exams || undefined))
+      const list = (ags.length ? ags : rows).map(row => ({ id: row.id, name: row.name }))
+      if (!list.length) setExtraError('Ders bulunamadı.')
+      setExtraSubjects(list)
+    } catch (error) { setExtraError(adhdError(error)) }
+  }
+
+  const startExtra = async (subject: { id: string; name: string }) => {
+    if (extraBusy || running) return
+    setExtraBusy(true); setExtraError('')
+    try {
+      const saved = await addAdhdExtra(subject.id, today)
+      const task = { ...saved, subjects: { name: subject.name } }
+      setTasks(previous => [...previous, task])
+      setExtraSubjects(null)
+      start(task)
+    } catch (error) { setExtraError(adhdError(error)) }
+    finally { setExtraBusy(false) }
+  }
+
   const answerTopic = async (finished: boolean) => {
     if (!askTopic) return
-    if (!finished) { setAskTopic(null); return }
+    if (!finished) { setAskTopic(null); setTopicChoices(null); return }
     setTopicSaving(true); setTopicError('')
     try {
       const saved = await setAdhdTopicDone(askTopic.id, true)
@@ -163,30 +229,40 @@ export default function AdhdToday({ userId, onLogout }: { userId: string; onLogo
 
       {loading ? <p className="adhd-muted" role="status">Yükleniyor…</p>
         : loadError ? <div className="adhd-card adhd-center" role="alert"><p>{loadError}</p><button type="button" className="adhd-btn adhd-btn-primary" onClick={() => void load()}><RotateCw size={20} aria-hidden="true" /> Tekrar dene</button></div>
-        : !tasks.length ? <div className="adhd-card adhd-center"><p className="adhd-big">Bugün için ders eklenmemiş.</p><p className="adhd-muted">Planın hazır olunca burada görünecek.</p></div>
         : <>
-          <section className="adhd-progress" aria-label={`${tasks.length} dersten ${done} tanesi yapıldı`}>
-            <div className="adhd-progress-bar">{tasks.map(task => <span key={task.id} className={task.completed_at ? 'is-done' : ''} />)}</div>
-            <p><strong>{done}</strong> / {tasks.length} ders yapıldı</p>
-          </section>
+          {planned.length > 0 && <section className="adhd-progress" aria-label={`${planned.length} dersten ${done} tanesi yapıldı`}>
+            <div className="adhd-progress-bar">{planned.map(task => <span key={task.id} className={task.completed_at ? 'is-done' : ''} />)}</div>
+            <p><strong>{done}</strong> / {planned.length} ders yapıldı</p>
+          </section>}
 
           {celebrate && <div className="adhd-celebrate" role="status"><Sparkles size={24} aria-hidden="true" /><p><strong>Harika!</strong> {subjectName(celebrate.task)} yapıldı. <span className="adhd-celebrate-time">{studyTime(celebrate.seconds)} çalıştın.</span></p></div>}
 
           {askTopic && (
             <section className="adhd-card adhd-topic-ask" aria-labelledby="adhd-topic-ask-title">
-              <p className="adhd-kicker">Konu</p>
-              <h2 id="adhd-topic-ask-title" className="adhd-topic-ask-title">{askTopic.topic_title}</h2>
-              <p className="adhd-topic-ask-question">Bu konuyu bitirdin mi?</p>
-              <div className="adhd-row">
-                <button type="button" className="adhd-btn adhd-btn-done" onClick={() => void answerTopic(true)} disabled={topicSaving} autoFocus><Check size={22} aria-hidden="true" /> {topicSaving ? 'Kaydediliyor…' : 'Evet, bitti'}</button>
-                <button type="button" className="adhd-btn adhd-btn-ghost" onClick={() => void answerTopic(false)} disabled={topicSaving}>Henüz bitmedi</button>
-              </div>
+              {topicChoices ? <>
+                <p className="adhd-kicker">{subjectName(askTopic)}</p>
+                <h2 id="adhd-topic-ask-title" className="adhd-topic-ask-title">Hangi konuyu çalıştın?</h2>
+                <ul className="adhd-topic-choices" aria-label="Konular">
+                  {topicChoices.map(topic => <li key={topic.id}><button type="button" className="adhd-btn adhd-btn-choice" onClick={() => void chooseTopic(topic)} disabled={topicSaving}>{topic.title}</button></li>)}
+                </ul>
+                <button type="button" className="adhd-btn adhd-btn-ghost" onClick={() => setTopicChoices(null)} disabled={topicSaving}><ArrowLeft size={20} aria-hidden="true" /> Geri</button>
+              </> : <>
+                <p className="adhd-kicker">Konu</p>
+                <h2 id="adhd-topic-ask-title" className="adhd-topic-ask-title">{askTopic.topic_title}</h2>
+                <p className="adhd-topic-ask-question">Bu konuyu bitirdin mi?</p>
+                <div className="adhd-row">
+                  <button type="button" className="adhd-btn adhd-btn-done" onClick={() => void answerTopic(true)} disabled={topicSaving} autoFocus><Check size={22} aria-hidden="true" /> {topicSaving ? 'Kaydediliyor…' : 'Evet, bitti'}</button>
+                  <button type="button" className="adhd-btn adhd-btn-ghost" onClick={() => void answerTopic(false)} disabled={topicSaving}>Henüz bitmedi</button>
+                </div>
+                <button type="button" className="adhd-link" onClick={() => void openTopicChoices()} disabled={topicSaving}>Başka bir konu çalıştım</button>
+              </>}
               {topicError && <p className="adhd-topic-error" role="alert">{topicError}</p>}
             </section>
           )}
           {topicDone && !askTopic && <div className="adhd-celebrate" role="status"><Check size={24} aria-hidden="true" /><p><strong>Konu bitti:</strong> {topicDone}</p></div>}
 
-          {next ? (
+          {!planned.length ? <div className="adhd-card adhd-center"><p className="adhd-big">Bugün için ders eklenmemiş.</p><p className="adhd-muted">İstersen aşağıdan ekstra çalışabilirsin.</p></div>
+            : next ? (
             <section className="adhd-card adhd-next" aria-labelledby="adhd-next-title">
               <p className="adhd-kicker">Sıradaki</p>
               <h2 id="adhd-next-title" className="adhd-next-subject">{subjectName(next)}</h2>
@@ -199,24 +275,52 @@ export default function AdhdToday({ userId, onLogout }: { userId: string; onLogo
             <section className="adhd-card adhd-center adhd-all-done"><Sparkles size={34} aria-hidden="true" /><p className="adhd-big">Bugünün hepsi bitti!</p><p className="adhd-muted">Kendinle gurur duy. Dinlenmeyi hak ettin.</p></section>
           )}
 
-          <ol className="adhd-list" aria-label="Bugünün dersleri">
-            {tasks.map(task => {
-              const isNext = task.id === next?.id
-              return (
-                <li key={task.id} className={`adhd-item ${task.completed_at ? 'is-done' : ''} ${isNext ? 'is-next' : ''}`}>
-                  <span className="adhd-check" aria-hidden="true">{task.completed_at && <Check size={20} />}</span>
-                  <span className="adhd-item-text">
-                    <strong>{subjectName(task)}</strong>
-                    {task.topic_title && <small className={`adhd-item-topic ${task.topic_completed_at ? 'is-done' : ''}`}>{task.topic_title}{task.topic_completed_at ? ' · konu bitti ✓' : ''}</small>}
-                    <small>{task.completed_at ? `Yapıldı · ${minutesLabel(task.studied_seconds)}` : task.note || (task.studied_seconds ? minutesLabel(task.studied_seconds) : 'Bekliyor')}</small>
-                  </span>
-                  {task.completed_at && task.topic_id && !task.topic_completed_at && askTopic?.id !== task.id && <button type="button" className="adhd-btn adhd-btn-small" onClick={() => { setTopicDone(''); setTopicError(''); setAskTopic(task) }}>Konu bitti mi?</button>}
-                  {!isNext && <button type="button" className="adhd-btn adhd-btn-small" onClick={() => start(task)} aria-label={`${subjectName(task)} için kronometreyi başlat`}><Play size={18} aria-hidden="true" />{task.completed_at ? 'Yine çalış' : 'Başla'}</button>}
-                </li>
-              )
-            })}
-          </ol>
+          {planned.length > 0 && <TaskList label="Bugünün dersleri" tasks={planned} next={next} askTopic={askTopic} onStart={start} onAskTopic={task => { setTopicDone(''); setTopicError(''); setTopicChoices(null); setAskTopic(task) }} />}
+
+          {extras.length > 0 && <>
+            <h2 className="adhd-section-title">Ekstra çalışmaların</h2>
+            <TaskList label="Ekstra çalışmalar" tasks={extras} next={null} askTopic={askTopic} onStart={start} onAskTopic={task => { setTopicDone(''); setTopicError(''); setTopicChoices(null); setAskTopic(task) }} />
+          </>}
+
+          {extraSubjects ? (
+            <section ref={extraPanel} className="adhd-card adhd-extra" aria-labelledby="adhd-extra-title">
+              <h2 id="adhd-extra-title" className="adhd-topic-ask-title">Hangi derse ekstra çalışmak istersin?</h2>
+              <div className="adhd-extra-grid">
+                {extraSubjects.map(subject => <button key={subject.id} type="button" className="adhd-btn adhd-btn-choice" onClick={() => void startExtra(subject)} disabled={extraBusy}>{subject.name}</button>)}
+              </div>
+              {extraError && <p className="adhd-topic-error" role="alert">{extraError}</p>}
+              <button type="button" className="adhd-btn adhd-btn-ghost" onClick={() => setExtraSubjects(null)} disabled={extraBusy}>Vazgeç</button>
+            </section>
+          ) : (
+            <button type="button" className="adhd-btn adhd-btn-extra" onClick={() => void openExtra()}><Plus size={22} aria-hidden="true" /> Ekstra çalışma</button>
+          )}
+          {!extraSubjects && extraError && <p className="adhd-topic-error" role="alert">{extraError}</p>}
         </>}
     </div>
+  )
+}
+
+function TaskList({ label, tasks, next, askTopic, onStart, onAskTopic }: {
+  label: string; tasks: AdhdTask[]; next: AdhdTask | null; askTopic: AdhdTask | null
+  onStart: (task: AdhdTask) => void; onAskTopic: (task: AdhdTask) => void
+}) {
+  return (
+    <ol className="adhd-list" aria-label={label}>
+      {tasks.map(task => {
+        const isNext = task.id === next?.id
+        return (
+          <li key={task.id} className={`adhd-item ${task.completed_at ? 'is-done' : ''} ${isNext ? 'is-next' : ''}`}>
+            <span className="adhd-check" aria-hidden="true">{task.completed_at && <Check size={20} />}</span>
+            <span className="adhd-item-text">
+              <strong>{subjectName(task)}</strong>
+              {task.topic_title && <small className={`adhd-item-topic ${task.topic_completed_at ? 'is-done' : ''}`}>{task.topic_title}{task.topic_completed_at ? ' · konu bitti ✓' : ''}</small>}
+              <small>{task.completed_at ? `Yapıldı · ${minutesLabel(task.studied_seconds)}` : task.note || (task.studied_seconds ? minutesLabel(task.studied_seconds) : 'Bekliyor')}</small>
+            </span>
+            {task.completed_at && task.topic_id && !task.topic_completed_at && askTopic?.id !== task.id && <button type="button" className="adhd-btn adhd-btn-small" onClick={() => onAskTopic(task)}>Konu bitti mi?</button>}
+            {!isNext && <button type="button" className="adhd-btn adhd-btn-small" onClick={() => onStart(task)} aria-label={`${subjectName(task)} için kronometreyi başlat`}><Play size={18} aria-hidden="true" />{task.completed_at ? 'Yine çalış' : 'Başla'}</button>}
+          </li>
+        )
+      })}
+    </ol>
   )
 }

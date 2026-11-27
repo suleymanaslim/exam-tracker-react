@@ -22,6 +22,8 @@ test('DEHB modu: yalnızca admin plan yazar, 1 dakika çalışılan ders yapıld
       CREATE TABLE public.profiles(id uuid PRIMARY KEY, role text);
       CREATE TABLE public.subjects(id uuid PRIMARY KEY, user_id uuid, name text);
       CREATE TABLE public.topics(id uuid PRIMARY KEY, user_id uuid, subject_id uuid, title text, is_completed boolean NOT NULL DEFAULT false);
+      CREATE TABLE public.ags_shared_subjects(id uuid PRIMARY KEY, name text, sort_order int NOT NULL DEFAULT 0);
+      CREATE TABLE public.ags_shared_topics(id uuid PRIMARY KEY, subject_id uuid, title text, sort_order int NOT NULL DEFAULT 0, archived_at timestamptz);
       CREATE TABLE public.ags_topic_progress(user_id uuid, topic_id uuid, is_completed boolean NOT NULL DEFAULT false, updated_at timestamptz, PRIMARY KEY (user_id, topic_id));
       CREATE TABLE public.study_sessions(id uuid PRIMARY KEY, user_id uuid, subject_id uuid NOT NULL, resource_id uuid, session_type text, started_at timestamptz, ended_at timestamptz, duration_minutes numeric(12,6));
       GRANT SELECT ON public.profiles, public.subjects, public.study_sessions TO authenticated;
@@ -35,6 +37,8 @@ test('DEHB modu: yalnızca admin plan yazar, 1 dakika çalışılan ders yapıld
     await db.exec(sets); await db.exec(sets)
     const topicsSql = await readFile(new URL('../supabase/migrations/adhd_topics.sql', import.meta.url), 'utf8')
     await db.exec(topicsSql); await db.exec(topicsSql)
+    const extrasSql = await readFile(new URL('../supabase/migrations/adhd_extras.sql', import.meta.url), 'utf8')
+    await db.exec(extrasSql); await db.exec(extrasSql)
 
     await as(alice)
     await assert.rejects(db.query(`INSERT INTO public.adhd_mode_settings VALUES ('${alice}', true)`), /row-level security/)
@@ -97,7 +101,39 @@ test('DEHB modu: yalnızca admin plan yazar, 1 dakika çalışılan ders yapıld
     assert.equal((await db.query(`SELECT is_completed FROM public.topics WHERE id='${id(30)}'`)).rows[0].is_completed, false)
     assert.equal((await db.query(`SELECT count(*)::int AS n FROM public.adhd_daily_tasks WHERE topic_completed_at IS NOT NULL AND topic_kind='personal'`)).rows[0].n, 0)
 
+    // Ekstra çalışma: kişi kendi dersine ekler, sıradaki ortak konu atanır.
+    await db.exec(`RESET ROLE;
+      INSERT INTO public.subjects VALUES ('${id(6)}','${bob}','Tarih');
+      INSERT INTO public.ags_shared_subjects VALUES ('${id(40)}','Tarih',0), ('${id(44)}','Sözel Yetenek',1);
+      INSERT INTO public.ags_shared_topics VALUES ('${id(41)}','${id(40)}','Kuruluş',0,NULL), ('${id(42)}','${id(40)}','Yükselme',1,NULL),
+        ('${id(43)}','${id(40)}','Arşivlenmiş',2,now()), ('${id(45)}','${id(44)}','Paragraf',0,NULL);
+      INSERT INTO public.ags_topic_progress VALUES ('${alice}','${id(41)}',true,now());`)
+    const localToday = (await db.query("SELECT ((now() AT TIME ZONE 'Europe/Istanbul')::date)::text AS d")).rows[0].d
+    const extra = (subjectId, day = localToday) => db.query('SELECT * FROM public.add_adhd_extra_task($1,$2::date)', [subjectId, day]).then(r => r.rows[0])
+    await as(alice)
+    const e1 = await extra(subject)
+    assert.equal(e1.is_extra, true); assert.equal(e1.topic_id, id(42)); assert.equal(e1.topic_title, 'Yükselme')
+    const e2 = await extra(subject)
+    assert.equal(e2.topic_id, null, 'planned topics are not handed out twice; archived topics are skipped')
+    await assert.rejects(extra(subject, '2020-01-01'), /Invalid day/)
+    await assert.rejects(extra(id(6)), /Subject not found/)
+    await assert.rejects(db.query(`UPDATE public.adhd_daily_tasks SET is_extra = false WHERE id = '${e1.id}'`).then(r => { if (!r.affectedRows) throw new Error('row-level security') }), /row-level security/)
+    await as(bob)
+    await assert.rejects(extra(id(6)), /ADHD mode is off/)
+
+    // "Başka bir konu çalıştım": yalnızca aynı dersin, arşivlenmemiş ortak konusu seçilebilir.
+    const change = (taskId, topicId) => db.query('SELECT * FROM public.change_adhd_task_topic($1,$2)', [taskId, topicId]).then(r => r.rows[0])
+    await assert.rejects(change(e1.id, id(41)), /Task not found/)
+    await as(alice)
+    const changed = await change(e1.id, id(41))
+    assert.equal(changed.topic_title, 'Kuruluş'); assert.notEqual(changed.topic_completed_at, null, 'already finished topic shows as done')
+    await assert.rejects(change(e1.id, id(43)), /Topic not found/)
+    await assert.rejects(change(e1.id, id(45)), /another subject/)
+    const back = await change(e1.id, id(42))
+    assert.equal(back.topic_completed_at, null)
+
     await as(null)
+    await assert.rejects(extra(subject), /permission denied/)
     await assert.rejects(record(task.id, id(24), '2026-11-24T10:00:00Z', '2026-11-24T10:05:00Z'), /permission denied/)
   } finally { await db.close() }
 })

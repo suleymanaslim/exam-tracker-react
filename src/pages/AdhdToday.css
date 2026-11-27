@@ -131,3 +131,16 @@
 .adhd-focus-subject-small { margin: 0; font-size: 20px; font-weight: 600; color: var(--adhd-accent-strong); overflow-wrap: anywhere; }
 .adhd-focus-topic-big { margin: 4px 0 0; font-size: clamp(42px, 12vw, 72px); font-weight: 600; line-height: 1.1; letter-spacing: -.01em; overflow-wrap: anywhere; hyphens: auto; }
 .adhd-next-topic { font-size: 22px; }
+
+/* Ekstra çalışma ve konu seçimi */
+.adhd-btn-extra { width: 100%; background: var(--adhd-card); color: var(--adhd-accent-strong); border: 2px dashed var(--adhd-accent); }
+.adhd-btn-extra:hover { background: var(--adhd-accent-soft); }
+.adhd-extra { display: flex; flex-direction: column; gap: 14px; }
+.adhd-extra-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.adhd-btn-choice { width: 100%; justify-content: flex-start; text-align: left; background: var(--adhd-accent-soft); color: var(--adhd-text); overflow-wrap: anywhere; }
+.adhd-btn-choice:hover { background: var(--adhd-line); }
+.adhd-topic-choices { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; max-height: 50dvh; overflow-y: auto; }
+.adhd-link { align-self: flex-start; min-height: 44px; padding: 8px 2px; border: 0; background: none; color: var(--adhd-accent-strong); font: inherit; font-size: 17px; font-weight: 600; text-decoration: underline; text-underline-offset: 4px; cursor: pointer; }
+.adhd-link:disabled { opacity: .6; cursor: wait; }
+.adhd-link:focus-visible { outline: 3px solid var(--adhd-accent); outline-offset: 3px; border-radius: 6px; }
+.adhd-section-title { margin: 6px 0 -6px; font-size: 18px; font-weight: 600; color: var(--adhd-muted); }

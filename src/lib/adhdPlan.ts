@@ -97,3 +97,59 @@ export function templateToRows(items: TemplateItem[], options: {
   }
   return { rows, missing: [...missing] }
 }
+
+// ── Hazır ideal set ────────────────────────────────────────────────────────
+export const IDEAL_NOTE = 'Konuyu çalış + 10 soru çöz'
+const DEFAULT_WEEKS = 12
+
+export interface IdealWeek {
+  items: TemplateItem[]
+  /** Konuların bitmesi için gereken haftalık ders sayısı (tavan uygulanmadan önce) */
+  needed: number
+  perWeek: number
+  studyWeeks: number
+  weeksLeft: number
+  remaining: number
+  fits: boolean
+  examKnown: boolean
+}
+
+/**
+ * Sınava kalan haftaya göre ideal haftayı kurar:
+ * - Son hafta tekrar haftası olarak boş bırakılır (4+ hafta kaldıysa).
+ * - Her ders, kalan konusu bitecek kadar (haftalık) ders alır; konusu kalan her derse en az 1 ders.
+ * - Pzt–Cmt'ye dağıtılır, Pazar dinlenme. DEHB'ye uygun olarak günde 3, gerekirse en fazla 4 ders.
+ * - Aynı gün aynı ders tekrarlanmasın diye dersler sırayla karıştırılır.
+ */
+export function buildIdealWeek(subjects: { name: string; remaining: number }[], monday: string, examDate?: string | null, options: { days?: number; maxPerDay?: number } = {}): IdealWeek {
+  const days = options.days ?? 6, maxPerDay = options.maxPerDay ?? 4
+  const examKnown = Boolean(examDate) && examDate! > monday
+  const weeksLeft = examKnown ? Math.floor((Date.parse(`${examDate}T12:00:00`) - Date.parse(`${monday}T12:00:00`)) / (7 * 864e5)) : DEFAULT_WEEKS
+  const studyWeeks = Math.max(1, weeksLeft >= 4 ? weeksLeft - 1 : weeksLeft)
+  const active = subjects.filter(subject => subject.remaining > 0)
+  const quotas = active.map(subject => ({ name: subject.name, count: Math.max(1, Math.ceil(subject.remaining / studyWeeks)) }))
+  const needed = quotas.reduce((sum, quota) => sum + quota.count, 0)
+  // Önce günde 3'e sığdırmayı dene; konular yetişmiyorsa günde 4'e kadar çık.
+  const cap = Math.min(needed, days * (needed <= days * 3 ? 3 : maxPerDay))
+  // Fazlası varsa en çok konusu kalan derslerden başlayarak kırp.
+  let excess = needed - cap
+  while (excess > 0) {
+    const biggest = [...quotas].sort((a, b) => b.count - a.count)[0]
+    biggest.count--; excess--
+  }
+  // Günlere yerleştir: her ders en az yüklü ve birbirinden uzak günlere gider (aynı gün tekrar etmez).
+  const load = Array.from({ length: days }, () => 0)
+  const byDay: string[][] = Array.from({ length: days }, () => [])
+  for (const quota of [...quotas].sort((a, b) => b.count - a.count)) {
+    const chosen: number[] = []
+    for (let n = 0; n < quota.count; n++) {
+      const distance = (day: number) => chosen.length ? Math.min(...chosen.map(other => Math.abs(other - day))) : days
+      const day = Array.from({ length: days }, (_, i) => i).sort((a, b) =>
+        Number(chosen.includes(a)) - Number(chosen.includes(b)) || load[a] - load[b] || distance(b) - distance(a) || a - b)[0]
+      chosen.push(day); load[day]++; byDay[day].push(quota.name)
+    }
+  }
+  const items: TemplateItem[] = byDay.flatMap((names, i) => names.map(name => ({ day: i + 1, subject_name: name, note: IDEAL_NOTE })))
+  const sequence = items
+  return { items, needed, perWeek: sequence.length, studyWeeks, weeksLeft, remaining: active.reduce((sum, subject) => sum + subject.remaining, 0), fits: needed <= cap, examKnown }
+}

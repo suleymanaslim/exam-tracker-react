@@ -76,7 +76,7 @@ const AdhdPlanDialog = forwardRef<AdhdPlanDialogHandle, { onEnabledChange: (user
               <span className="adhd-admin-index">{task.completed_at ? <Check size={14} /> : index + 1}</span>
               <span className="adhd-admin-text">
                 <strong>{task.subjects?.name || 'Ders'}{task.topic_title ? ` · ${task.topic_title}` : ''}</strong>
-                <small>{[task.topic_completed_at ? 'Konu bitti' : '', task.note, task.completed_at ? `Yapıldı · ${minutesLabel(task.studied_seconds, 'çalışıldı')}` : 'Bekliyor'].filter(Boolean).join(' · ')}</small>
+                <small>{[task.is_extra ? 'Ekstra' : '', task.topic_completed_at ? 'Konu bitti' : '', task.note, task.completed_at ? `Yapıldı · ${minutesLabel(task.studied_seconds, 'çalışıldı')}` : 'Bekliyor'].filter(Boolean).join(' · ')}</small>
               </span>
             </li>
           ))}</ol>}

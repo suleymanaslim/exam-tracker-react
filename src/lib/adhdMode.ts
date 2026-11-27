@@ -16,6 +16,8 @@ export interface AdhdTask {
   topic_id: string | null
   topic_title: string | null
   topic_completed_at: string | null
+  /** Kişinin kendi seçtiği ekstra çalışma (plan dışı) */
+  is_extra?: boolean
   subjects?: { name: string } | null
 }
 
@@ -24,13 +26,13 @@ export interface RunningAdhdTimer { taskId: string; sessionId: string; startedAt
 export const ADHD_CHANGED_EVENT = 'adhd-mode-changed'
 /** Bir dersin "yapıldı" sayılması için gereken süre. */
 export const ADHD_DONE_SECONDS = 60
-const TASK_FIELDS = 'id,user_id,task_date,subject_id,note,sort_order,studied_seconds,completed_at,topic_kind,topic_id,topic_title,topic_completed_at,subjects(name)'
+const TASK_FIELDS = 'id,user_id,task_date,subject_id,note,sort_order,studied_seconds,completed_at,topic_kind,topic_id,topic_title,topic_completed_at,is_extra,subjects(name)'
 
 export function adhdError(error: unknown) {
   const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
-  if (code === '42703' || code === 'PGRST204') return 'Konular için Supabase’de adhd_topics.sql dosyasını çalıştırın.'
+  if (code === '42703' || code === 'PGRST204') return 'Supabase’de adhd_topics.sql ve adhd_extras.sql dosyalarını çalıştırın.'
   if (code === 'AGS_SHARED_SETUP') return 'Ortak AGS konuları bulunamadı. Supabase’de shared_ags_topics_monthly.sql dosyasını çalıştırın.'
-  if (['42P01', '42883', 'PGRST202', 'PGRST205'].includes(code)) return 'DEHB modu için Supabase’de adhd_mode.sql ve adhd_topics.sql dosyalarını çalıştırın.'
+  if (['42P01', '42883', 'PGRST202', 'PGRST205'].includes(code)) return 'DEHB modu için Supabase’de adhd_mode.sql, adhd_topics.sql ve adhd_extras.sql dosyalarını çalıştırın.'
   if (code === '42501') return 'Bu işlem için iznin yok.'
   return 'Bağlantı kurulamadı. Tekrar dener misin?'
 }
@@ -201,4 +203,26 @@ export async function readTopicCatalog(userId: string, subjects: { id: string; n
       .map((topic): CatalogTopic => ({ kind: 'shared', id: topic.id, title: topic.title, completed: done.has(topic.id) })))
   }
   return catalog
+}
+
+// ── Ekstra çalışma ve konu değiştirme (kişinin kendisi) ────────────────────
+export async function addAdhdExtra(subjectId: string, day: string) {
+  const { data, error } = await supabase.rpc('add_adhd_extra_task', { p_subject_id: subjectId, p_day: day })
+  if (error) throw error
+  notifyAdhdChanged()
+  return data as AdhdTask
+}
+
+export async function changeAdhdTaskTopic(taskId: string, topicId: string) {
+  const { data, error } = await supabase.rpc('change_adhd_task_topic', { p_task_id: taskId, p_topic_id: topicId })
+  if (error) throw error
+  notifyAdhdChanged()
+  return data as AdhdTask
+}
+
+/** Kişinin ortak AGS listesinde eşleşen dersleri (ekstra çalışma seçimi için). */
+export async function readAdhdSubjects(userId: string) {
+  const { data, error } = await supabase.from('subjects').select('id,name,exams(name,base_template_key,exam_date)').eq('user_id', userId).order('name')
+  if (error) throw error
+  return (data || []) as unknown as { id: string; name: string; exams?: { name?: string; base_template_key?: string | null; exam_date?: string | null } | null }[]
 }

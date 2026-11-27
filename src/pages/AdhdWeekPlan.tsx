@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import Swal from 'sweetalert2'
 import {
   ArrowDown, ArrowUp, Check, CheckCircle2, ChevronLeft, ChevronRight, ClipboardCopy, ClipboardPaste, Copy, Eraser,
-  Layers, ListChecks, Plus, Save, Trash2, UserRound,
+  Layers, ListChecks, Plus, Save, Sparkles, Trash2, UserRound,
 } from 'lucide-react'
 import { supabase, getCurrentUser } from '../lib/supabase'
 import { useAdminStore } from '../lib/adminStore'
@@ -16,7 +16,7 @@ import {
   readAdhdSets, readAdhdSettings, readAdhdWeek, readTakenTopics, readTopicCatalog, saveAdhdSet, setAdhdEnabled, setAdhdTopicDone, setsError,
 } from '../lib/adhdMode'
 import type { AdhdPlanSet, AdhdTask } from '../lib/adhdMode'
-import { nextTopic, planItemsToTemplate, subjectIndex, tasksToTemplate, templateToRows, topicKey, weekDayKeys } from '../lib/adhdPlan'
+import { buildIdealWeek, nextTopic, planItemsToTemplate, subjectIndex, tasksToTemplate, templateToRows, topicKey, weekDayKeys } from '../lib/adhdPlan'
 import type { NamedSubject, TemplateItem, TopicCatalog } from '../lib/adhdPlan'
 import './Plan.css'
 import './Admin.css'
@@ -32,6 +32,7 @@ const shiftWeek = (monday: string, weeks: number) => {
   const [y, m, d] = monday.split('-').map(Number)
   return localDayKey(new Date(y, m - 1, d + weeks * 7, 12))
 }
+const plannedOnly = (list: AdhdTask[]) => list.filter(task => !task.is_extra)
 const todayDay = () => { const day = new Date().getDay(); return day === 0 ? 7 : day }
 const CLIPBOARD_KEY = 'adhd-plan-clipboard'
 
@@ -64,6 +65,7 @@ export default function AdhdWeekPlan() {
   const [clipboard, setClipboard] = useState<Clipboard | null>(() => { try { return JSON.parse(sessionStorage.getItem(CLIPBOARD_KEY) || 'null') } catch { return null } })
   const [subjectId, setSubjectId] = useState('')
   const [catalog, setCatalog] = useState<TopicCatalog>(new Map())
+  const [examDate, setExamDate] = useState<string | null>(null)
   const [catalogProblem, setCatalogProblem] = useState('')
   const [taken, setTaken] = useState<Set<string>>(new Set())
   /** 'auto' = sıradaki konu; 'none' = konusuz; diğer = kind:id */
@@ -108,10 +110,11 @@ export default function AdhdWeekPlan() {
     if (!userId) return
     let active = true
     setSubjects([]); setSubjectId(''); setCatalog(new Map()); setCatalogProblem(''); setTopicChoice('auto')
-    void supabase.from('subjects').select('id,name,exams(name,base_template_key)').eq('user_id', userId).order('name').then(({ data }) => {
+    void supabase.from('subjects').select('id,name,exams(name,base_template_key,exam_date)').eq('user_id', userId).order('name').then(({ data }) => {
       if (!active) return
-      const rows = ((data || []) as unknown as { id: string; name: string; exams?: { name?: string; base_template_key?: string | null } | null }[])
-        .map(row => ({ id: row.id, name: row.name, ags: isAgsExam(row.exams || undefined) }))
+      const raw = (data || []) as unknown as { id: string; name: string; exams?: { name?: string; base_template_key?: string | null; exam_date?: string | null } | null }[]
+      const rows = raw.map(row => ({ id: row.id, name: row.name, ags: isAgsExam(row.exams || undefined) }))
+      setExamDate(raw.find(row => isAgsExam(row.exams || undefined) && row.exams?.exam_date)?.exams?.exam_date ?? null)
       setSubjects(rows)
       const preferred = rows.filter(row => row.ags)
       setSubjectId((preferred.length ? preferred : rows)[0]?.id || '')
@@ -186,13 +189,13 @@ export default function AdhdWeekPlan() {
   }
 
   const copyDay = () => {
-    const items = tasksToTemplate(dayTasks, dayKeys)
+    const items = tasksToTemplate(plannedOnly(dayTasks), dayKeys)
     if (!items.length) { setMessage({ tone: 'error', text: 'Bu gün boş, kopyalanacak ders yok.' }); return }
     setClipboard({ scope: 'day', items, label: `${profileNameLabel(selectedProfile?.display_name, selectedProfile?.email)} · ${dayNames[selectedDay - 1]} (${items.length} ders)` })
     setMessage({ tone: 'ok', text: 'Gün kopyalandı. İstediğin güne veya kişiye yapıştırabilirsin.' })
   }
   const copyWeek = () => {
-    const items = tasksToTemplate(tasks, dayKeys)
+    const items = tasksToTemplate(plannedOnly(tasks), dayKeys)
     if (!items.length) { setMessage({ tone: 'error', text: 'Bu hafta boş, kopyalanacak ders yok.' }); return }
     setClipboard({ scope: 'week', items, label: `${profileNameLabel(selectedProfile?.display_name, selectedProfile?.email)} · ${formatTR(dayKeys[0])} haftası (${items.length} ders)` })
     setMessage({ tone: 'ok', text: 'Hafta kopyalandı. İstediğin haftaya veya kişiye yapıştırabilirsin.' })
@@ -229,7 +232,7 @@ export default function AdhdWeekPlan() {
   const copyPreviousWeek = async () => {
     const previous = weekDayKeys(shiftWeek(monday, -1))
     let items: TemplateItem[]
-    try { items = tasksToTemplate(await readAdhdWeek(userId, previous[0], previous[6]), previous) }
+    try { items = tasksToTemplate(plannedOnly(await readAdhdWeek(userId, previous[0], previous[6])), previous) }
     catch (error) { setMessage({ tone: 'error', text: adhdError(error) }); return }
     if (!items.length) { setMessage({ tone: 'error', text: 'Geçen hafta bu kişi için plan yok.' }); return }
     await applyTemplate(items, 'Geçen hafta kopyalandı')
@@ -244,7 +247,7 @@ export default function AdhdWeekPlan() {
   const saveSet = (event: FormEvent) => {
     event.preventDefault()
     // Setler konu tutmaz: her uygulandığında dersler sıradaki konuyla ilerler.
-    const items = tasksToTemplate(tasks, dayKeys, false)
+    const items = tasksToTemplate(plannedOnly(tasks), dayKeys, false)
     if (!setName.trim()) return
     if (!items.length) { setMessage({ tone: 'error', text: 'Set kaydetmek için önce bu haftaya ders ekle.' }); return }
     void run(async () => {
@@ -274,6 +277,8 @@ export default function AdhdWeekPlan() {
 
   if (!isAdmin) return null
   // Ortak AGS konularında kişinin ilerlemesi (tamamlananlar tik ile).
+  // Hazır ideal set: sınava kalan haftaya ve bitmemiş ortak konulara göre her seferinde yeniden hesaplanır.
+  const ideal = buildIdealWeek([...catalog.entries()].map(([id, list]) => ({ name: subjects.find(subject => subject.id === id)?.name || '', remaining: list.filter(topic => !topic.completed).length })).filter(row => row.name), dayKeys[0], examDate)
   const progress = [...catalog.entries()].map(([id, list]) => ({ id, name: subjects.find(subject => subject.id === id)?.name || 'Ders', topics: list }))
   const totalTopics = progress.reduce((sum, row) => sum + row.topics.length, 0)
   const doneTopics = progress.reduce((sum, row) => sum + row.topics.filter(topic => topic.completed).length, 0)
@@ -341,7 +346,7 @@ export default function AdhdWeekPlan() {
               : dayTasks.map((task, i) => (
                 <div key={task.id} className={`plan-row ${task.completed_at ? 'adhd-plan-done' : ''}`}>
                   <span className="plan-row-index">{task.completed_at ? <Check size={14} /> : String(i + 1).padStart(2, '0')}</span>
-                  <div className="plan-row-copy"><strong>{task.subjects?.name || 'Ders'}</strong>{task.topic_title && <span className={`adhd-plan-topic ${task.topic_completed_at ? 'is-done' : ''}`}>Konu: {task.topic_title}{task.topic_completed_at ? ' · bitti ✓' : ''}</span>}<span>{[task.note, task.completed_at ? `Yapıldı · ${minutesLabel(task.studied_seconds, 'çalışıldı')}` : task.studied_seconds ? minutesLabel(task.studied_seconds, 'çalışıldı') : ''].filter(Boolean).join(' · ') || 'Bekliyor'}</span></div>
+                  <div className="plan-row-copy"><strong>{task.subjects?.name || 'Ders'}{task.is_extra && <em className="adhd-plan-extra">Ekstra</em>}</strong>{task.topic_title && <span className={`adhd-plan-topic ${task.topic_completed_at ? 'is-done' : ''}`}>Konu: {task.topic_title}{task.topic_completed_at ? ' · bitti ✓' : ''}</span>}<span>{[task.note, task.completed_at ? `Yapıldı · ${minutesLabel(task.studied_seconds, 'çalışıldı')}` : task.studied_seconds ? minutesLabel(task.studied_seconds, 'çalışıldı') : ''].filter(Boolean).join(' · ') || 'Bekliyor'}</span></div>
                   <span className="adhd-admin-actions">
                     {task.topic_id && <button type="button" onClick={() => void toggleTopic(task)} disabled={busy} className={`adhd-plan-topic-toggle ${task.topic_completed_at ? 'is-done' : ''}`} aria-label={task.topic_completed_at ? `${task.topic_title} konusunu tekrar aç` : `${task.topic_title} konusunu bitti işaretle`} title={task.topic_completed_at ? 'Konuyu tekrar aç' : 'Konu bitti'}><Check size={15} /></button>}
                     <button type="button" onClick={() => void run(() => moveAdhdTask(dayTasks, i, -1))} disabled={busy || i === 0} aria-label="Yukarı taşı"><ArrowUp size={15} /></button>
@@ -380,6 +385,22 @@ export default function AdhdWeekPlan() {
           <section className="plan-card adhd-plan-sets" aria-labelledby="adhd-sets-title">
             <div className="plan-card-head"><div><p className="plan-eyebrow">TEKRAR KULLAN</p><h2 id="adhd-sets-title">Setlerim</h2></div><Layers size={20} /></div>
             <div className="adhd-plan-sets-body">
+              {catalog.size > 0 && (
+                <div className="adhd-ideal" aria-labelledby="adhd-ideal-title">
+                  <div className="adhd-ideal-head">
+                    <span><Sparkles size={16} aria-hidden="true" /> <strong id="adhd-ideal-title">Hazır set · İdeal hafta</strong></span>
+                    <button type="button" className="is-primary" aria-label="İdeal haftayı bu haftaya uygula" onClick={() => void applyTemplate(ideal.items, '“İdeal hafta” uygulandı')} disabled={busy || !userId || !ideal.items.length}>Bu haftaya uygula</button>
+                  </div>
+                  {ideal.items.length ? <>
+                    <p className="adhd-ideal-summary">
+                      {ideal.examKnown ? `Sınava ${ideal.weeksLeft} hafta var${ideal.weeksLeft >= 4 ? '; son hafta tekrar için boş bırakıldı' : ''}.` : 'Sınav tarihi girilmemiş; 12 haftada bitecek şekilde hesaplandı.'}
+                      {' '}{ideal.remaining} konu kaldı → haftada <b>{ideal.perWeek} ders</b>, günde en fazla {Math.ceil(ideal.perWeek / 6)} ders (Pzt–Cmt), Pazar dinlenme.
+                    </p>
+                    {!ideal.fits && <p className="adhd-plan-message is-error">Konuların yetişmesi için haftada {ideal.needed} ders gerekiyor; DEHB'ye uygun en fazla {ideal.perWeek} ders önerildi. Ekstra çalışmalar açığı kapatır.</p>}
+                    <ol className="adhd-ideal-days">{dayShort.slice(0, 6).map((short, i) => <li key={short}><b>{short}</b>{ideal.items.filter(item => item.day === i + 1).map(item => item.subject_name).join(' · ') || '—'}</li>)}</ol>
+                  </> : <p className="adhd-plan-hint">Tüm ortak konular bitmiş görünüyor. 🎉</p>}
+                </div>
+              )}
               {setsProblem ? <p className="adhd-plan-message is-error" role="alert">{setsProblem}</p> : <>
                 <form onSubmit={saveSet} className="adhd-plan-set-form">
                   <input value={setName} onChange={event => setSetName(event.target.value)} maxLength={60} placeholder="Set adı · ör. Normal hafta" aria-label="Set adı" disabled={busy} />
@@ -390,7 +411,7 @@ export default function AdhdWeekPlan() {
                     const days = new Set(set.items.map(item => item.day)).size
                     return <li key={set.id}>
                       <span><strong>{set.name}</strong><small>{set.items.length} ders · {days} gün</small></span>
-                      <button type="button" onClick={() => void applyTemplate(set.items, `“${set.name}” uygulandı`)} disabled={busy || !userId} className="is-primary">Bu haftaya uygula</button>
+                      <button type="button" onClick={() => void applyTemplate(set.items, `“${set.name}” uygulandı`)} disabled={busy || !userId} className="is-primary" aria-label={`${set.name} setini bu haftaya uygula`}>Bu haftaya uygula</button>
                       <button type="button" onClick={() => void removeSet(set)} disabled={busy} className="is-danger" aria-label={`${set.name} setini sil`}><Trash2 size={15} /></button>
                     </li>
                   })}</ul>}
