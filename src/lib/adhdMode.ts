@@ -143,9 +143,19 @@ export async function readAdhdWeek(userId: string, monday: string, sunday: strin
   return (data || []) as unknown as AdhdTask[]
 }
 
+export function normalizeTaskRow(row: TaskRow) {
+  return {
+    user_id: row.user_id, task_date: row.task_date, subject_id: row.subject_id ?? null, note: row.note ?? null, sort_order: row.sort_order,
+    topic_kind: row.topic_kind ?? null, topic_id: row.topic_id ?? null, topic_title: row.topic_title ?? null,
+    title: row.title ?? null, is_questions: row.is_questions === true,
+  }
+}
+
 export async function insertAdhdTasks(rows: TaskRow[]) {
   if (!rows.length) return
-  const { error } = await supabase.from('adhd_daily_tasks').insert(rows)
+  // Toplu eklemede bir satırda olmayan alan diğerlerinde NULL gider (varsayılan değer kullanılmaz);
+  // bu yüzden her satır aynı alanları açıkça gönderir.
+  const { error } = await supabase.from('adhd_daily_tasks').insert(rows.map(normalizeTaskRow))
   if (error) throw error
   notifyAdhdChanged()
 }

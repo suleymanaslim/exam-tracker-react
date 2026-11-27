@@ -263,6 +263,10 @@ try {
   // Her gün en az 2 ders (6 gün × 2) + 2 soru çözümü.
   await plan.getByText('“İdeal hafta” uygulandı: 14 ders eklendi.').waitFor()
   const lessons = inserts.filter(row => !row.is_questions), questionRows = inserts.filter(row => row.is_questions)
+  // Toplu eklemede her satır aynı alanları taşımalı; yoksa PostgREST eksik alanı NULL yapar (is_questions NOT NULL hatası).
+  const keySets = new Set(inserts.map(row => Object.keys(row).sort().join(',')))
+  assert.equal(keySets.size, 1, 'every row in a bulk insert sends the same columns')
+  assert.ok(inserts.every(row => typeof row.is_questions === 'boolean'))
   assert.equal(lessons.length, 12)
   for (const date of ['2026-12-07', '2026-12-08', '2026-12-09', '2026-12-10', '2026-12-11', '2026-12-12']) {
     const day = lessons.filter(row => row.task_date === date)
